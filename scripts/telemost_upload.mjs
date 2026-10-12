@@ -82,6 +82,9 @@ class Bot {
     await this.c.send('Page.reload', { ignoreCache: true });
     await sleep(2000);
     await this.ensureChat();
+    // data-* markers disappear on reload. Mark everything already rendered as
+    // old before retrying, otherwise an old "Стикер готов" is a false reply.
+    await this.markSeen();
   }
 
   markSeen() {
@@ -147,6 +150,7 @@ class Bot {
 const READY = /Стикер готов/;
 const ASK_EMOJI = /Отправьте эмодзи/;
 const NOT_EMOJI = /Это не эмодзи/;
+const IMAGE_REJECT = /Не удалось обработать картинку\. Попробуйте отправить другую/;
 const ASK_TITLE = /Напишите название/;
 const CREATED = /Создан набор/;
 
@@ -171,6 +175,84 @@ async function withRetry(label, fn, tries = 4) {
   throw err;
 }
 
+async function sendImageOnce(bot, img, file) {
+  const r = await bot.sendImage(file);
+  if (IMAGE_REJECT.test(r.text)) return { accepted: false, rejected: true, reply: 'Не удалось обработать картинку. Попробуйте отправить другую.' };
+  if (READY.test(r.text)) return { accepted: true };
+  // Still waiting for the emoji of this same image from an earlier attempt:
+  // finish it, do not resend the image.
+  if (NOT_EMOJI.test(r.text)) {
+    const e = await bot.say('🙂');
+    if (!READY.test(e.text)) throw new Error(`emoji fallback: ${e.text.slice(0, 200)}`);
+    return { accepted: true };
+  }
+  if (!ASK_EMOJI.test(r.text)) throw new Error(`unexpected image reply: ${r.text.slice(0, 200)}`);
+  let e = await bot.say(img.emoji || '🙂');
+  if (!READY.test(e.text) && (ASK_EMOJI.test(e.text) || NOT_EMOJI.test(e.text))) e = await bot.say('🙂');
+  if (!READY.test(e.text)) throw new Error(`emoji: ${e.text.slice(0, 200)}`);
+  if (r.seconds + e.seconds > 60) return { accepted: true, slow: r.seconds + e.seconds };
+  return { accepted: true };
+}
+
+// An explicit image refusal is not a stall: resend the same file, without a
+// reload, up to five times. Timeouts and other failures retain the existing
+// three-attempt recovery path.
+async function sendImageWithPolicy(bot, m, img, file, number, phase) {
+  let refusalCount = 0;
+  let transientAttempt = 0;
+  while (refusalCount < 5) {
+    try {
+      const result = await sendImageOnce(bot, img, file);
+      if (result.accepted) {
+        if (result.slow) log(m.title, img.file, 'медленно', `${result.slow.toFixed(0)} с`);
+        return { accepted: true, refusals: refusalCount };
+      }
+      refusalCount++;
+      log(m.title, img.file, `картинка отклонена ${refusalCount}/5`, result.reply);
+      // Do not reload: the bot gave an actual, meaningful reply.
+      if (refusalCount < 5) await sleep(1500);
+    } catch (err) {
+      transientAttempt++;
+      log(m.title, img.file, `ошибка, попытка ${transientAttempt}/3`, err.message);
+      if (transientAttempt >= 3) throw err;
+      await sleep(10000 * transientAttempt);
+      if (/no bot reply/.test(err.message)) await bot.reload();
+    }
+  }
+  return {
+    accepted: false,
+    refusals: refusalCount,
+    reply: 'Не удалось обработать картинку. Попробуйте отправить другую.',
+    phase,
+    number,
+  };
+}
+
+async function recordSkipped(p, m, img, number, result, phase) {
+  const tm = m.telemost;
+  tm.skippedStickers ||= [];
+  let item = tm.skippedStickers.find((x) => x.file === img.file);
+  if (!item) {
+    item = { file: img.file, stickerNumber: number, reply: result.reply, firstPassFailures: 0, retryFailures: 0, retried: false, resolved: false };
+    tm.skippedStickers.push(item);
+  }
+  if (phase === 'first') item.firstPassFailures = result.refusals;
+  else {
+    item.retryFailures = result.refusals;
+    item.retried = true;
+  }
+  const detail = `${result.reply} (${phase === 'first' ? 'первый проход' : 'повтор перед /done'}, 5/5)`;
+  log(m.title, `${number}/${m.images.length} ${img.file}`, 'стикер отложен', detail);
+  // An error snapshot makes @tg2tmbot notify subscribers, then the uploading
+  // snapshot makes clear that the pack continues.
+  tm.status = 'error';
+  tm.error = `стикер ${number} (${img.file}): ${detail}`;
+  await savePack(p);
+  tm.status = 'uploading';
+  tm.error = null;
+  await savePack(p);
+}
+
 async function uploadPack(bot, dir) {
   const p = loadPack(dir);
   const m = p.meta;
@@ -189,43 +271,39 @@ async function uploadPack(bot, dir) {
     log(m.title, '', 'набор создан');
   }
 
-  for (let i = tm.uploaded; i < m.images.length; i++) {
+  tm.nextImage ??= tm.uploaded;
+  tm.skippedStickers ||= [];
+  for (let i = tm.nextImage; i < m.images.length; i++) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
-    let ok = false;
-    for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
-      try {
-        const r = await bot.sendImage(file);
-        if (READY.test(r.text)) { ok = true; break; }
-        // Still waiting for the emoji of this same image from an earlier attempt: finish it, do not resend.
-        if (NOT_EMOJI.test(r.text)) {
-          const e = await bot.say('🙂');
-          if (!READY.test(e.text)) throw new Error(`emoji fallback: ${e.text.slice(0, 200)}`);
-          ok = true;
-          break;
-        }
-        if (!ASK_EMOJI.test(r.text)) throw new Error(`image rejected: ${r.text.slice(0, 200)}`);
-        let e = await bot.say(img.emoji || '🙂');
-        if (!READY.test(e.text) && (ASK_EMOJI.test(e.text) || NOT_EMOJI.test(e.text))) e = await bot.say('🙂');
-        if (!READY.test(e.text)) throw new Error(`emoji: ${e.text.slice(0, 200)}`);
-        ok = true;
-        if (r.seconds + e.seconds > 60) log(m.title, img.file, 'медленно', `${(r.seconds + e.seconds).toFixed(0)} с`);
-      } catch (err) {
-        log(m.title, img.file, `ошибка, попытка ${attempt}`, err.message);
-        await sleep(10000 * attempt);
-        if (/no bot reply/.test(err.message)) await bot.reload();
-      }
+    const result = await sendImageWithPolicy(bot, m, img, file, i + 1, 'first');
+    tm.nextImage = i + 1;
+    if (result.accepted) {
+      tm.uploaded++;
+    } else {
+      await recordSkipped(p, m, img, i + 1, result, 'first');
     }
-    if (!ok) {
-      tm.status = 'error';
-      tm.error = `stopped at ${img.file}`;
+    if (tm.nextImage % 10 === 0 || tm.nextImage === m.images.length || !result.accepted) {
       await savePack(p);
-      throw new Error(`${dir}: ${img.file} failed 3 times`);
+      console.log(dir, `${tm.uploaded} accepted, ${tm.nextImage}/${m.images.length} processed`);
     }
-    tm.uploaded = i + 1;
-    if (tm.uploaded % 10 === 0 || tm.uploaded === m.images.length) {
+  }
+
+  // Retry all explicitly refused files once more, five attempts each, before
+  // /done. They are appended, which preserves every non-refused sticker's
+  // relative order and keeps the result as close to source order as possible.
+  for (const skipped of tm.skippedStickers.filter((x) => !x.resolved && !x.retried)) {
+    const img = m.images.find((x) => x.file === skipped.file);
+    if (!img) continue;
+    const result = await sendImageWithPolicy(bot, m, img, join(PACKS, dir, img.file), skipped.stickerNumber, 'retry');
+    skipped.retried = true;
+    if (result.accepted) {
+      skipped.resolved = true;
+      tm.uploaded++;
+      log(m.title, `${skipped.stickerNumber}/${m.images.length} ${img.file}`, 'отложенный стикер добавлен', '');
       await savePack(p);
-      console.log(dir, tm.uploaded, '/', m.images.length);
+    } else {
+      await recordSkipped(p, m, img, skipped.stickerNumber, result, 'retry');
     }
   }
 
@@ -236,7 +314,8 @@ async function uploadPack(bot, dir) {
   tm.error = null;
   tm.botReply = done.text.replace(/^Стикеры\s*/, '').slice(0, 300);
   await savePack(p);
-  log(m.title, '', `готово, ${m.images.length} стикеров`, url || '');
+  const unresolved = tm.skippedStickers.filter((x) => !x.resolved).length;
+  log(m.title, '', `готово, ${tm.uploaded} стикеров${unresolved ? `; пропущено ${unresolved}` : ''}`, url || '');
 }
 
 const wanted = process.argv.slice(2);
