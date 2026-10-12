@@ -1106,8 +1106,10 @@
     }
   ],
   "telemost": {
-    "status": "pending",
+    "status": "uploading",
+    "uploaded": 80,
     "packUrl": null,
-    "error": null
+    "error": null,
+    "created": true
   }
 }

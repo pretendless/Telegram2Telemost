@@ -1125,6 +1125,7 @@
     "packUrl": "https://messenger.360.yandex.ru/#/stickers/8378",
     "error": null,
     "created": true,
-    "botReply": "Набор «Гера и Коготок» сохранён и доступен по ссылке.\n\n/start — показать команды\n/newpack — создать набор\n/addsticker — добавить стикер в существующий набор\n/delsticker — удалить стикер\n/deletepack — удалить набор\n/done — завершить действие\n\n13:13\n13:13"
+    "botReply": "Набор «Гера и Коготок» сохранён и доступен по ссылке.\n\n/start — показать команды\n/newpack — создать набор\n/addsticker — добавить стикер в существующий набор\n/delsticker — удалить стикер\n/deletepack — удалить набор\n/done — завершить действие\n\n13:13\n13:13",
+    "sourceDeleted": "2026-10-12 13:55"
   }
 }
