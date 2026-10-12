@@ -4,6 +4,7 @@
 import { readFileSync, writeFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { reportProgress } from './report_progress.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKS = join(ROOT, 'packs');
@@ -54,6 +55,7 @@ for (const dir of readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort()) {
     meta.telemost = tm;
     writeFileSync(path, JSON.stringify(meta, null, 2) + '\n');
     console.log(dir, link);
+    await reportProgress(meta);
   }
 }
 console.log('links seen:', Object.fromEntries(found));

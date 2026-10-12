@@ -15,6 +15,7 @@ config/bot.token
 *.token
 config/tg2tmbot-subscribers.json
 .env
+config/uploader.env
 .env.*
 *.pem
 

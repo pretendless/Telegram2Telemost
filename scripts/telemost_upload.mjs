@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, readdirSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { reportProgress } from './report_progress.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKS = join(ROOT, 'packs');
@@ -146,10 +147,12 @@ function loadPack(dir) {
   return { path, meta: JSON.parse(readFileSync(path, 'utf8')) };
 }
 // Only the telemost block is ours; re-read so concurrent edits to other fields survive.
-function savePack(p) {
+// After the write, tell @tg2tmbot. A missing progress URL does not stop the upload.
+async function savePack(p) {
   const onDisk = JSON.parse(readFileSync(p.path, 'utf8'));
   onDisk.telemost = p.meta.telemost;
   writeFileSync(p.path, JSON.stringify(onDisk, null, 2) + '\n');
+  await reportProgress(onDisk);
 }
 
 async function withRetry(label, fn, tries = 4) {
@@ -164,7 +167,7 @@ async function uploadPack(bot, dir) {
   const p = loadPack(dir);
   const m = p.meta;
   const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
-  if (tm.status === 'done') { console.log(dir, 'already done'); return; }
+  if (tm.status === 'done') { console.log(dir, 'already done'); await reportProgress(m); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
 
   if (!tm.created) {
@@ -174,7 +177,7 @@ async function uploadPack(bot, dir) {
     if (!CREATED.test(r2.text)) throw new Error(`title: unexpected reply: ${r2.text.slice(0, 200)}`);
     tm.created = true;
     tm.status = 'uploading';
-    savePack(p);
+    await savePack(p);
     log(m.title, '', 'набор создан');
   }
 
@@ -200,12 +203,12 @@ async function uploadPack(bot, dir) {
     if (!ok) {
       tm.status = 'error';
       tm.error = `stopped at ${img.file}`;
-      savePack(p);
+      await savePack(p);
       throw new Error(`${dir}: ${img.file} failed 3 times`);
     }
     tm.uploaded = i + 1;
     if (tm.uploaded % 10 === 0 || tm.uploaded === m.images.length) {
-      savePack(p);
+      await savePack(p);
       console.log(dir, tm.uploaded, '/', m.images.length);
     }
   }
@@ -216,7 +219,7 @@ async function uploadPack(bot, dir) {
   tm.packUrl = url;
   tm.error = null;
   tm.botReply = done.text.replace(/^Стикеры\s*/, '').slice(0, 300);
-  savePack(p);
+  await savePack(p);
   log(m.title, '', `готово, ${m.images.length} стикеров`, url || '');
 }
 
