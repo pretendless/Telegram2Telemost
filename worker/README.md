@@ -2,6 +2,8 @@
 
 Отображаемое имя бота — Telegram2Telemost, имя пользователя — @tg2tmbot. Тексты команд и постов совпадают с `docs/bot.md`.
 
+Адрес воркера: `https://tg2tmbot.prtndz.workers.dev`. Ход загрузки: `POST https://tg2tmbot.prtndz.workers.dev/progress`.
+
 ## Архитектура
 
 Воркер не открывает Телемост и не гоняет браузер. Загрузка стикеров остаётся в Chrome на машине переноса.

@@ -8,4 +8,4 @@ workers_dev = true
 
 [[kv_namespaces]]
 binding = "BOT_KV"
-id = "00000000000000000000000000000000"
+id = "69c9d9f3572a48469a312e5914e8a233"
