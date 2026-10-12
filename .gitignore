@@ -1,0 +1,50 @@
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Secrets and local env
+config/bot.token
+*.token
+config/tg2tmbot-subscribers.json
+.env
+.env.*
+*.pem
+
+# Encrypted Telemost sessions and a QR saved when Telegram delivery is off
+sessions/
+*.tg2tm-session
+last-qr.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Sticker images are rebuilt with scripts/fetch_and_convert.py; only pack.json is tracked
+packs/**/*.png
+packs/**/*.jpg
+packs/**/*.jpeg
+packs/**/*.webp
+packs/**/*.webm
+packs/**/*.tgs
+packs/**/*.gif
+packs/**/*.lottie
+packs/**/*.zip
+
+# Scratch downloads and bot state
+/tmp/
+/.cache/
+*.tmp
+~$*

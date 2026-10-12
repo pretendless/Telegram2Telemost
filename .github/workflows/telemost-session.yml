@@ -1,0 +1,125 @@
+# Start the Telemost browser from a phone or from @tg2tmbot.
+# The Run workflow button appears only after this file is on the repository default branch.
+# Secrets used here: TELEMOST_SESSION_KEY, TG2TMBOT_TOKEN. GITHUB_TOKEN is automatic.
+name: Telemost session
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: login opens Yandex ID; upload uses the saved session
+        type: choice
+        options:
+          - login
+          - upload
+        default: login
+      account:
+        description: Account label, for example default or work
+        required: true
+        default: default
+        type: string
+      chat_id:
+        description: Telegram chat id that receives the QR code and the browser link
+        required: true
+        type: string
+      packs:
+        description: Pack numbers for upload mode, space-separated, for example 03 04
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+# One browser at a time. A second login waits instead of opening another Yandex session.
+concurrency:
+  group: telemost-session
+  cancel-in-progress: false
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check inputs
+        id: in
+        env:
+          MODE: ${{ inputs.mode }}
+          ACCOUNT: ${{ inputs.account }}
+          CHAT_ID: ${{ inputs.chat_id }}
+          PACKS: ${{ inputs.packs }}
+          REQUIRE_CHAT: "1"
+        run: node vm/inputs.mjs --github-output >> "$GITHUB_OUTPUT"
+
+      - name: Check session key
+        env:
+          TELEMOST_SESSION_KEY: ${{ secrets.TELEMOST_SESSION_KEY }}
+        run: node --input-type=module -e "import { assertPassphrase } from './vm/session.mjs'; if (!assertPassphrase(process.env.TELEMOST_SESSION_KEY || '')) { console.error('Set secret TELEMOST_SESSION_KEY to a long random string.'); process.exit(1); }"
+
+      - name: Restore encrypted session
+        id: session
+        if: steps.in.outputs.mode == 'upload'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ACCOUNT: ${{ steps.in.outputs.account }}
+          SESSION_DIR: ${{ github.workspace }}/sessions
+          MODE: upload
+        run: |
+          mkdir -p sessions
+          node vm/restore_artifact.mjs
+          if [ -f "sessions/${ACCOUNT}.tg2tm-session" ]; then
+            echo "present=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tell Telegram there is no session
+        if: steps.in.outputs.mode == 'upload' && steps.session.outputs.present != 'yes'
+        env:
+          MODE: upload
+          ACCOUNT: ${{ steps.in.outputs.account }}
+          PACKS: ${{ steps.in.outputs.packs }}
+          TELEGRAM_CHAT_ID: ${{ steps.in.outputs.chat_id }}
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+        run: node vm/login.mjs notify no-session
+
+      - name: Build browser image
+        if: steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes'
+        run: docker build -f vm/Dockerfile -t tg2tm-browser .
+
+      - name: Run browser
+        if: steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes'
+        env:
+          MODE: ${{ steps.in.outputs.mode }}
+          ACCOUNT: ${{ steps.in.outputs.account }}
+          PACKS: ${{ steps.in.outputs.packs }}
+          CHAT_ID: ${{ steps.in.outputs.chat_id }}
+          TELEMOST_SESSION_KEY: ${{ secrets.TELEMOST_SESSION_KEY }}
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          ENABLE_TUNNEL: "1"
+        run: |
+          mkdir -p sessions
+          docker run --rm --shm-size=1g \
+            --user "$(id -u):$(id -g)" \
+            -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL \
+            -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
+            -e TELEGRAM_CHAT_ID="$CHAT_ID" \
+            -e HOME=/tmp \
+            -e SESSION_DIR=/var/lib/tg2tm/sessions \
+            -v "$PWD/sessions:/var/lib/tg2tm/sessions" \
+            -v "$PWD/packs:/opt/tg2tm/packs" \
+            -v "$PWD/logs:/opt/tg2tm/logs" \
+            tg2tm-browser
+
+      - name: Store encrypted session
+        if: success() && (steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes')
+        uses: actions/upload-artifact@v4
+        with:
+          name: telemost-session-${{ steps.in.outputs.account }}
+          path: sessions/${{ steps.in.outputs.account }}.tg2tm-session
+          if-no-files-found: error
+          retention-days: 90
