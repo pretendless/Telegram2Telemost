@@ -1,8 +1,8 @@
 // Tells the Cloudflare bot about one pack. Upload itself stays in Chrome.
-// Skips quietly when TG2TM_PROGRESS_URL or UPLOADER_SECRET is unset, so a local
-// upload still works. Run directly to push every packs/*/pack.json:
+// Without UPLOADER_SECRET the same updates are appended to logs/progress-local.md.
+// Run directly to push every packs/*/pack.json:
 //   TG2TM_PROGRESS_URL=https://<worker>/progress UPLOADER_SECRET=... node scripts/report_progress.mjs
-import { readdirSync, readFileSync } from "fs";
+import { appendFileSync, readdirSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
@@ -27,11 +27,41 @@ function loadUploaderEnv() {
 loadUploaderEnv();
 
 const PACKS = join(ROOT, "packs");
+const LOCAL_LOG = join(ROOT, "logs", "progress-local.md");
+const lastSent = new Map();
+
+// Routine counts wait 5 minutes. A finished pack URL, or an error, is sent at once.
+function shouldReport(meta) {
+  const telemost = meta.telemost || {};
+  const snapshot = JSON.stringify({
+    status: telemost.status || "pending",
+    uploaded: telemost.uploaded || 0,
+    packUrl: telemost.packUrl || null,
+    error: telemost.error || null,
+  });
+  const prev = lastSent.get(meta.slug);
+  if (prev && prev.snapshot === snapshot) return false;
+  const immediate = (telemost.status === "done" && telemost.packUrl) || telemost.status === "error";
+  if (prev && !immediate && Date.now() - prev.at < 5 * 60 * 1000) return false;
+  lastSent.set(meta.slug, { snapshot, at: Date.now() });
+  return true;
+}
+
+function logLocal(meta, note) {
+  const telemost = meta.telemost || {};
+  const total = Array.isArray(meta.images) && meta.images.length ? meta.images.length : meta.stickerCount || 0;
+  const line = `| ${new Date().toISOString().slice(0, 16).replace("T", " ")} | ${meta.slug} | ${telemost.status || "pending"} | ${telemost.uploaded || 0}/${total} | ${telemost.packUrl || ""} | ${(telemost.error || note || "").replace(/\|/g, "/").replace(/\n/g, " ")} |\n`;
+  try { appendFileSync(LOCAL_LOG, line); } catch { /* local log is best-effort */ }
+}
 
 export async function reportProgress(meta) {
-  const url = process.env.TG2TM_PROGRESS_URL;
+  if (!shouldReport(meta)) return { skipped: true, reason: "unchanged or throttled" };
+  const url = process.env.TG2TM_PROGRESS_URL || "https://tg2tmbot.prtndz.workers.dev/progress";
   const secret = process.env.UPLOADER_SECRET;
-  if (!url || !secret) return { skipped: true };
+  if (!secret) {
+    logLocal(meta, "UPLOADER_SECRET missing");
+    return { skipped: true, reason: "UPLOADER_SECRET missing" };
+  }
   const telemost = meta.telemost || {};
   const total = Array.isArray(meta.images) && meta.images.length ? meta.images.length : meta.stickerCount || 0;
   try {

@@ -11,6 +11,8 @@ const LOG = join(ROOT, 'logs', 'transfer-log.md');
 const BOT_URL = process.env.TELEMOST_BOT_URL || 'https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d';
 const DEVTOOLS = process.env.DEVTOOLS || 'http://127.0.0.1:9222';
 const REPLY_TIMEOUT_S = Number(process.env.REPLY_TIMEOUT_S || 240);
+const EVAL_TIMEOUT_MS = 20000;
+const SPINNER_STALL_S = 90;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -35,13 +37,28 @@ async function connect() {
     }
   });
   await new Promise(r => ws.addEventListener('open', r, { once: true }));
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
+  const send = (method, params = {}, timeoutMs = 0) => new Promise((resolve, reject) => {
     const msgId = ++id;
-    pending.set(msgId, { resolve, reject });
+    let timer;
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      pending.delete(msgId);
+      fn(value);
+    };
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => finish(reject, new Error('devtools evaluate hung past 20s')), timeoutMs);
+    }
+    pending.set(msgId, {
+      resolve: (value) => finish(resolve, value),
+      reject: (err) => finish(reject, err),
+    });
     ws.send(JSON.stringify({ id: msgId, method, params }));
   });
   const ev = async (expression) => {
-    const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+    const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, EVAL_TIMEOUT_MS);
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'eval failed');
     return r.result.value;
   };
@@ -91,41 +108,70 @@ class Bot {
     return this.c.ev(`document.querySelectorAll('article.message').forEach(a => a.dataset.tg2tmSeen = '1')`);
   }
 
+  // Count of accepted stickers already in the chat. Compared before a resend
+  // so a late «Стикер готов» is never followed by a second copy.
+  readyCount() {
+    return this.c.ev(`([...document.querySelectorAll('article.message')].filter(a => !a.querySelector('.yamb-message-row_own') && /Стикер готов/.test(a.innerText || '')).length)`);
+  }
+
   // Wait for a new incoming (bot) message that appeared after markSeen().
-  async waitReply() {
+  // stall.used means this image already reloaded once: a second spinner or a
+  // hung evaluate must not reload again.
+  async waitReply(stall = { used: false }) {
     const t0 = Date.now();
     let transferRetries = 0;
-    while ((Date.now() - t0) / 1000 < REPLY_TIMEOUT_S) {
+    let spinnerSince = null;
+    let evalHangs = 0;
+    const limitS = () => stall.used ? Math.max(REPLY_TIMEOUT_S, 15 * 60) : REPLY_TIMEOUT_S;
+    while ((Date.now() - t0) / 1000 < limitS()) {
       await sleep(1000);
-      const failedTransfer = await this.c.ev(`(() => {
-        const failed = [...document.querySelectorAll('article.message')]
-          .filter(a => !a.dataset.tg2tmSeen && a.querySelector('.yamb-message-row_own .yamb-transfer-status_status_failed'))
-          .at(-1);
-        const retry = failed && failed.querySelector('[aria-label="Повторить попытку"]');
-        if (!retry) return false;
-        const b = retry.getBoundingClientRect();
-        const o = {bubbles: true, cancelable: true, composed: true, clientX: b.x + b.width / 2, clientY: b.y + b.height / 2, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true};
-        retry.dispatchEvent(new PointerEvent('pointerdown', {...o, buttons: 1}));
-        retry.dispatchEvent(new MouseEvent('mousedown', {...o, buttons: 1}));
-        retry.dispatchEvent(new PointerEvent('pointerup', {...o, buttons: 0}));
-        retry.dispatchEvent(new MouseEvent('mouseup', {...o, buttons: 0}));
-        retry.dispatchEvent(new MouseEvent('click', {...o, buttons: 0}));
-        return true;
-      })()`);
-      if (failedTransfer) {
+      let snap;
+      try {
+        snap = await this.c.ev(`(() => {
+          const freshArticles = [...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen);
+          const spinning = freshArticles.some(a => a.querySelector('.yamb-transfer-status_status_progress'));
+          const failed = freshArticles.filter(a => a.querySelector('.yamb-message-row_own .yamb-transfer-status_status_failed')).at(-1);
+          const retry = failed && failed.querySelector('[aria-label="Повторить попытку"]');
+          if (retry) {
+            const b = retry.getBoundingClientRect();
+            const o = {bubbles: true, cancelable: true, composed: true, clientX: b.x + b.width / 2, clientY: b.y + b.height / 2, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true};
+            retry.dispatchEvent(new PointerEvent('pointerdown', {...o, buttons: 1}));
+            retry.dispatchEvent(new MouseEvent('mousedown', {...o, buttons: 1}));
+            retry.dispatchEvent(new PointerEvent('pointerup', {...o, buttons: 0}));
+            retry.dispatchEvent(new MouseEvent('mouseup', {...o, buttons: 0}));
+            retry.dispatchEvent(new MouseEvent('click', {...o, buttons: 0}));
+          }
+          const fresh = freshArticles.filter(a => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
+          const text = fresh.length ? fresh.map(a => (a.innerText || '').trim()).join('\\n') : null;
+          const links = freshArticles.flatMap(a => [...a.querySelectorAll('a[href]')].map(x => x.href));
+          return { spinning, clicked: !!retry, text, links };
+        })()`);
+        evalHangs = 0;
+      } catch (err) {
+        if (!/devtools evaluate hung past 20s/.test(err.message)) throw err;
+        if (!stall.used) throw new Error('stall: evaluate');
+        evalHangs++;
+        if (evalHangs >= 3) throw new Error('devtools evaluate hung past 20s');
+        continue;
+      }
+      if (snap.spinning) {
+        if (!spinnerSince) spinnerSince = Date.now();
+      } else {
+        spinnerSince = null;
+      }
+      if (snap.clicked) {
         transferRetries++;
         if (transferRetries >= 5) throw new Error('file transfer error mark after 5 retries');
-        // This is a transport error, not the bot's image-refusal reply.
         await sleep(2000);
         continue;
       }
-      const txt = await this.c.ev(`(() => {
-        const fresh = [...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen && a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
-        return fresh.length ? fresh.map(a => (a.innerText || '').trim()).join('\\n') : null;
-      })()`);
-      if (txt) {
-        const links = await this.c.ev(`[...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen).flatMap(a => [...a.querySelectorAll('a[href]')].map(x => x.href))`);
-        return { text: txt, links, seconds: (Date.now() - t0) / 1000 };
+      if (snap.text) {
+        return { text: snap.text, links: snap.links, seconds: (Date.now() - t0) / 1000 };
+      }
+      if (spinnerSince && (Date.now() - spinnerSince) / 1000 >= SPINNER_STALL_S) {
+        if (!stall.used) throw new Error('stall: spinner');
+        // Second spin: leave the tab alone and keep waiting for a real reply.
+        if ((Date.now() - t0) / 1000 > 15 * 60) throw new Error('still spinning after reload');
       }
     }
     throw new Error(`no bot reply in ${REPLY_TIMEOUT_S}s`);
@@ -152,7 +198,7 @@ class Bot {
     return this.waitReply();
   }
 
-  async sendImage(path) {
+  async sendImage(path, stall = { used: false }) {
     await this.ensureChat();
     await this.markSeen();
     const doc = await this.c.send('DOM.getDocument', { depth: -1, pierce: true });
@@ -166,7 +212,7 @@ class Bot {
     }
     await sleep(400);
     await this.clickSend(true);
-    return this.waitReply();
+    return this.waitReply(stall);
   }
 }
 
@@ -198,8 +244,15 @@ async function withRetry(label, fn, tries = 4) {
   throw err;
 }
 
-async function sendImageOnce(bot, img, file) {
-  const r = await bot.sendImage(file);
+async function sendImageOnce(bot, img, file, ctx) {
+  if (ctx.sent) {
+    const now = await bot.readyCount();
+    if (now > ctx.readyBefore) return { accepted: true, already: true };
+  } else {
+    ctx.readyBefore = await bot.readyCount();
+  }
+  ctx.sent = true;
+  const r = await bot.sendImage(file, { used: ctx.stallUsed });
   if (IMAGE_REJECT.test(r.text)) return { accepted: false, rejected: true, reply: 'Не удалось обработать картинку. Попробуйте отправить другую.' };
   if (READY.test(r.text)) return { accepted: true };
   // Still waiting for the emoji of this same image from an earlier attempt:
@@ -223,11 +276,13 @@ async function sendImageOnce(bot, img, file) {
 async function sendImageWithPolicy(bot, m, img, file, number, phase) {
   let refusalCount = 0;
   let transientAttempt = 0;
+  const ctx = { sent: false, readyBefore: 0, stallUsed: false };
   while (refusalCount < 5) {
     try {
-      const result = await sendImageOnce(bot, img, file);
+      const result = await sendImageOnce(bot, img, file, ctx);
       if (result.accepted) {
-        if (result.slow) log(m.title, img.file, 'медленно', `${result.slow.toFixed(0)} с`);
+        if (result.already) log(m.title, img.file, 'уже принят', 'Стикер готов');
+        else if (result.slow) log(m.title, img.file, 'медленно', `${result.slow.toFixed(0)} с`);
         return { accepted: true, refusals: refusalCount };
       }
       refusalCount++;
@@ -235,11 +290,23 @@ async function sendImageWithPolicy(bot, m, img, file, number, phase) {
       // Do not reload: the bot gave an actual, meaningful reply.
       if (refusalCount < 5) await sleep(1500);
     } catch (err) {
+      if (/stall: (spinner|evaluate)|devtools evaluate hung past 20s/.test(err.message) && !ctx.stallUsed) {
+        ctx.stallUsed = true;
+        log(m.title, img.file, 'зависание, перезагрузка вкладки', err.message);
+        await bot.reload();
+        continue;
+      }
+      // The one reload for this image was already used. A second spin or a
+      // second hung evaluate must not reload again, and must not send a copy.
+      if (ctx.stallUsed && /stall:|still spinning|devtools evaluate hung/.test(err.message)) throw err;
       transientAttempt++;
       log(m.title, img.file, `ошибка, попытка ${transientAttempt}/3`, err.message);
       if (transientAttempt >= 3) throw err;
       await sleep(10000 * transientAttempt);
-      if (/no bot reply|file transfer error mark/.test(err.message)) await bot.reload();
+      if (/file transfer error mark/.test(err.message) && !ctx.stallUsed) {
+        ctx.stallUsed = true;
+        await bot.reload();
+      }
     }
   }
   return {

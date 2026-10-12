@@ -1107,9 +1107,11 @@
   ],
   "telemost": {
     "status": "uploading",
-    "uploaded": 100,
+    "uploaded": 110,
     "packUrl": null,
     "error": null,
-    "created": true
+    "created": true,
+    "nextImage": 110,
+    "skippedStickers": []
   }
 }
