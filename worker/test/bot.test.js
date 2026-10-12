@@ -11,6 +11,10 @@ import {
   doneNotice,
   normalizeProgress,
   planNotifications,
+  claimNext,
+  emptyQueue,
+  enqueueRequest,
+  queueStatusText,
   realPackUrl,
 } from "../src/logic.js";
 
@@ -216,6 +220,161 @@ test("an unchanged progress report does not write, and a real change writes the 
   const stored = JSON.parse(await env.BOT_KV.get(`pack:${body.slug}`));
   assert.equal(stored.uploaded, 41);
   assert.equal(stored.status, "uploading");
+});
+
+function packMessage(chatId, text) {
+  return new Request("https://tg2tmbot.example/telegram", {
+    method: "POST",
+    headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret", "content-type": "application/json" },
+    body: JSON.stringify({ message: { chat: { id: chatId }, text } }),
+  });
+}
+
+test("a priority chat is queued ahead of an older normal request, behind an active upload", () => {
+  let queue = { ...emptyQueue(), priority: ["111"] };
+  const normal = enqueueRequest(queue, {
+    chatId: 222,
+    title: "Обычный",
+    links: ["https://t.me/addstickers/normal_pack"],
+    priority: false,
+    createdAt: "2026-10-12T14:00:00.000Z",
+    stickers: 10,
+  });
+  queue = normal.queue;
+  const first = enqueueRequest(queue, {
+    chatId: 111,
+    title: "Первый",
+    links: ["https://t.me/addstickers/first_pack"],
+    priority: true,
+    createdAt: "2026-10-12T14:01:00.000Z",
+    stickers: 12,
+  });
+  queue = first.queue;
+  const second = enqueueRequest(queue, {
+    chatId: 111,
+    title: "Второй",
+    links: ["https://t.me/addstickers/second_pack"],
+    priority: true,
+    createdAt: "2026-10-12T14:02:00.000Z",
+    stickers: 8,
+  });
+  queue = second.queue;
+  const claimed = claimNext(queue);
+  assert.equal(claimed.claimed.title, "Первый");
+  assert.equal(claimed.busy, false);
+  const again = claimNext(claimed.queue);
+  assert.equal(again.busy, true);
+  assert.equal(again.changed, false);
+  assert.equal(again.claimed.title, "Первый");
+  assert.equal(queueStatusText(claimed.queue, 111).includes("Второй"), true);
+  assert.match(queueStatusText(claimed.queue, 111), /перед ним 1/);
+  assert.doesNotMatch(queueStatusText(claimed.queue, 222), /111/);
+});
+
+test("an accepted priority request is one KV write and /status does not list", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  env.BOT_KV.store.set("queue", JSON.stringify({ priority: ["111"], items: [] }));
+  const sent = [];
+  const text = "Лисёнок\n\nhttps://t.me/addstickers/fox_one\nhttps://t.me/addstickers/fox_two";
+  env.BOT_KV.ops.get = 0;
+  env.BOT_KV.ops.put = 0;
+  env.BOT_KV.ops.list = 0;
+  const res = await handle(packMessage(111, text), env, {
+    sendMessage: async (_env, chatId, reply) => sent.push({ chatId, reply }),
+    stickerCount: async () => 10,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(sent[0].chatId, 111);
+  assert.match(sent[0].reply, /Запрос принят с приоритетом/);
+  assert.match(sent[0].reply, /«Лисёнок»/);
+  assert.match(sent[0].reply, /Всего 20 стикеров/);
+  assert.doesNotMatch(sent[0].reply, /8502935020|владел/);
+  assert.equal(env.BOT_KV.ops.put, 1);
+  assert.equal(env.BOT_KV.ops.list, 0);
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items.length, 1);
+  assert.equal(stored.items[0].priority, true);
+  assert.deepEqual(stored.items[0].links, [
+    "https://t.me/addstickers/fox_one",
+    "https://t.me/addstickers/fox_two",
+  ]);
+  assert.equal(stored.items[0].chatId, "111");
+  assert.equal(stored.items[0].stickers, 20);
+
+  env.BOT_KV.ops.get = 0;
+  env.BOT_KV.ops.put = 0;
+  env.BOT_KV.ops.list = 0;
+  sent.length = 0;
+  await handle(packMessage(111, "/status"), env, {
+    sendMessage: async (_env, _chatId, reply) => sent.push(reply),
+  });
+  assert.match(sent[0], /«Лисёнок» с приоритетом: в очереди, перед ним 0/);
+  assert.equal(env.BOT_KV.ops.list, 0);
+  assert.equal(env.BOT_KV.ops.put, 0);
+
+  env.BOT_KV.ops.put = 0;
+  await handle(packMessage(111, text), env, {
+    sendMessage: async () => {},
+    stickerCount: async () => 10,
+  });
+  assert.equal(env.BOT_KV.ops.put, 0);
+});
+
+test("claim takes the priority request and does not replace an active one", async () => {
+  const env = envWith();
+  let queue = { ...emptyQueue(), priority: ["111"] };
+  queue = enqueueRequest(queue, {
+    chatId: 222,
+    title: "Обычный",
+    links: ["https://t.me/addstickers/normal_pack"],
+    priority: false,
+    createdAt: "2026-10-12T14:00:00.000Z",
+    stickers: 4,
+  }).queue;
+  queue = enqueueRequest(queue, {
+    chatId: 111,
+    title: "Первый",
+    links: ["https://t.me/addstickers/first_pack"],
+    priority: true,
+    createdAt: "2026-10-12T14:05:00.000Z",
+    stickers: 6,
+  }).queue;
+  env.BOT_KV.store.set("queue", JSON.stringify(queue));
+  const claim = async (body) =>
+    handle(
+      new Request("https://tg2tmbot.example/queue/claim", {
+        method: "POST",
+        headers: { authorization: "Bearer uploader-secret", "content-type": "application/json" },
+        body: body ? JSON.stringify(body) : "",
+      }),
+      env,
+    );
+  const denied = await handle(
+    new Request("https://tg2tmbot.example/queue/claim", { method: "POST", body: "{}" }),
+    env,
+  );
+  assert.equal(denied.status, 401);
+  env.BOT_KV.ops.put = 0;
+  const first = await claim();
+  assert.equal(first.status, 200);
+  const firstJson = await first.json();
+  assert.equal(firstJson.claimed.title, "Первый");
+  assert.equal(firstJson.claimed.priority, true);
+  assert.equal(firstJson.active, false);
+  assert.equal(env.BOT_KV.ops.put, 1);
+  env.BOT_KV.ops.put = 0;
+  const busy = await claim();
+  const busyJson = await busy.json();
+  assert.equal(busyJson.active, true);
+  assert.equal(busyJson.claimed.title, "Первый");
+  assert.equal(env.BOT_KV.ops.put, 0);
+  const released = await claim({ release: { id: firstJson.claimed.id, status: "done" } });
+  const releasedJson = await released.json();
+  assert.equal(releasedJson.claimed, null);
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items.find((item) => item.title === "Первый").status, "done");
+  assert.equal(stored.items.find((item) => item.title === "Обычный").status, "queued");
 });
 
 test("health and the root path do not read or list KV", async () => {

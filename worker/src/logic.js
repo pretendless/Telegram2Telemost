@@ -256,6 +256,142 @@ export function renderPackCheck(title, rows, total) {
   return `Пак «${title}»\n\n${rows.join("\n")}\n\n${verdict}`;
 }
 
+export const QUEUE_KEY = "queue";
+
+export function emptyQueue() {
+  return { priority: [], items: [] };
+}
+
+function sameLinks(left, right) {
+  return left.length === right.length && left.every((link, index) => link === right[index]);
+}
+
+export function normalizeQueue(raw) {
+  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const priority = [];
+  for (const id of Array.isArray(source.priority) ? source.priority : []) {
+    const text = String(id);
+    if (/^[0-9]{1,16}$/.test(text) && !priority.includes(text)) priority.push(text);
+  }
+  const items = [];
+  for (const item of Array.isArray(source.items) ? source.items : []) {
+    if (!item || typeof item !== "object") continue;
+    const id = String(item.id || "");
+    const chatId = String(item.chatId ?? "");
+    const title = String(item.title || "").trim();
+    const links = Array.isArray(item.links) ? item.links.map((link) => String(link)) : [];
+    const status = ["queued", "uploading", "done", "error"].includes(item.status) ? item.status : "";
+    const createdAt = String(item.createdAt || "");
+    if (!id || !/^[0-9]{1,16}$/.test(chatId) || !title || !links.length || !status || !createdAt) continue;
+    items.push({
+      id,
+      chatId,
+      title,
+      links,
+      priority: Boolean(item.priority),
+      createdAt,
+      status,
+      stickers: Number.isFinite(Number(item.stickers)) ? Number(item.stickers) : links.length,
+    });
+  }
+  return { priority, items };
+}
+
+export function isPriorityChat(queue, chatId) {
+  return queue.priority.includes(String(chatId));
+}
+
+// One document, so accepting a request is one KV write. Identical open requests are not written again.
+export function enqueueRequest(queue, request) {
+  const open = queue.items.find(
+    (item) =>
+      item.chatId === String(request.chatId) &&
+      item.title === request.title &&
+      (item.status === "queued" || item.status === "uploading") &&
+      sameLinks(item.links, request.links),
+  );
+  if (open) return { queue, item: open, created: false };
+  const createdAt = request.createdAt;
+  const item = {
+    id: `${createdAt}-${queue.items.length}`,
+    chatId: String(request.chatId),
+    title: request.title,
+    links: request.links.slice(),
+    priority: Boolean(request.priority),
+    createdAt,
+    status: "queued",
+    stickers: request.stickers,
+  };
+  return { queue: { priority: queue.priority.slice(), items: queue.items.concat(item) }, item, created: true };
+}
+
+function byTime(left, right) {
+  return left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : left.id < right.id ? -1 : 1;
+}
+
+// Priority requests pass normal ones. An item already uploading stays in front and is not replaced.
+export function claimNext(queue) {
+  const active = queue.items.find((item) => item.status === "uploading");
+  if (active) return { queue, claimed: active, changed: false, busy: true };
+  const waiting = queue.items.filter((item) => item.status === "queued").sort(byTime);
+  const priority = waiting.filter((item) => item.priority);
+  const next = (priority.length ? priority : waiting)[0] || null;
+  if (!next) return { queue, claimed: null, changed: false, busy: false };
+  const items = queue.items.map((item) => (item.id === next.id ? { ...item, status: "uploading" } : item));
+  return {
+    queue: { priority: queue.priority.slice(), items },
+    claimed: { ...next, status: "uploading" },
+    changed: true,
+    busy: false,
+  };
+}
+
+export function releaseRequest(queue, id, status) {
+  if (status !== "done" && status !== "error") return { queue, changed: false };
+  let changed = false;
+  const items = queue.items.map((item) => {
+    if (item.id !== id || item.status === status) return item;
+    changed = true;
+    return { ...item, status };
+  });
+  return { queue: changed ? { priority: queue.priority.slice(), items } : queue, changed };
+}
+
+function aheadCount(queue, item) {
+  if (item.status !== "queued") return 0;
+  let ahead = queue.items.some((other) => other.status === "uploading") ? 1 : 0;
+  for (const other of queue.items) {
+    if (other.id === item.id || other.status !== "queued") continue;
+    if (item.priority) {
+      if (other.priority && byTime(other, item) < 0) ahead++;
+    } else if (other.priority || byTime(other, item) < 0) {
+      ahead++;
+    }
+  }
+  return ahead;
+}
+
+export function queueStatusText(queue, chatId) {
+  const mine = queue.items.filter((item) => item.chatId === String(chatId));
+  if (!mine.length) return null;
+  const lines = mine.map((item) => {
+    const priority = item.priority ? " с приоритетом" : "";
+    if (item.status === "uploading") return `«${item.title}»${priority}: загружается`;
+    if (item.status === "done") return `«${item.title}»${priority}: готов`;
+    if (item.status === "error") return `«${item.title}»${priority}: ошибка, можно прислать набор ещё раз`;
+    const ahead = aheadCount(queue, item);
+    return `«${item.title}»${priority}: в очереди, перед ним ${ahead}`;
+  });
+  return `Ваши запросы:\n\n${lines.join("\n")}`;
+}
+
+export function acceptReply({ title, rows, total, priority }) {
+  const head = priority
+    ? `Запрос принят с приоритетом. «${title}» встанет в очередь сразу после набора, который уже загружается.`
+    : `Запрос принят. «${title}» в очереди.`;
+  return `${head}\n\n${rows.join("\n")}\n\nВсего ${total} стикеров.`;
+}
+
 export function statusText(packs) {
   const sorted = [...packs].sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
   if (!sorted.length) return "Перенос в Телемост: паков пока нет.";

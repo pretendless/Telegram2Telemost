@@ -3,11 +3,20 @@ import { handleVmCommand } from "../../vm/worker_login.js";
 import {
   CHANNEL_CHAT,
   INITIAL_SUBSCRIBER,
+  MAX_STICKERS,
   NOT_A_PACK,
   commandOf,
   normalizeProgress,
   notificationSteps,
+  QUEUE_KEY,
+  acceptReply,
+  claimNext,
+  enqueueRequest,
+  isPriorityChat,
+  normalizeQueue,
   parsePackMessage,
+  queueStatusText,
+  releaseRequest,
   renderPackCheck,
   staticReply,
   statusText,
@@ -198,6 +207,66 @@ async function applyProgress(env, pack, send) {
   return { ok: true, status: 200, notified, posted, waitingForUrl };
 }
 
+async function readQueue(kv) {
+  return normalizeQueue(parseStored(await kv.get(QUEUE_KEY)));
+}
+
+async function writeQueue(kv, queue) {
+  await kv.put(QUEUE_KEY, JSON.stringify(queue));
+}
+
+function stickerLinks(names) {
+  return names.map((name) => `https://t.me/addstickers/${name}`);
+}
+
+async function handleClaim(request, env) {
+  const secret = env.UPLOADER_SECRET || "";
+  if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
+  const raw = await request.text();
+  let body = {};
+  if (raw) {
+    if (raw.length > 4096) return new Response("too big", { status: 413 });
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ ok: false, error: "bad json" }, 400);
+    }
+  }
+  let queue = await readQueue(env.BOT_KV);
+  let changed = false;
+  const release = body && body.release;
+  if (release && release.id) {
+    const released = releaseRequest(queue, String(release.id), release.status);
+    queue = released.queue;
+    changed = released.changed;
+  }
+  // Releasing does not start the next pack. The uploader claims only when it is free.
+  const claimed = release ? { queue, claimed: null, changed: false, busy: false } : claimNext(queue);
+  if (!release && claimed.changed) {
+    queue = claimed.queue;
+    changed = true;
+  }
+  if (changed) await writeQueue(env.BOT_KV, queue);
+  const item = claimed.claimed;
+  return json({
+    ok: true,
+    claimed: item
+      ? {
+          id: item.id,
+          chatId: item.chatId,
+          title: item.title,
+          links: item.links,
+          priority: item.priority,
+          createdAt: item.createdAt,
+          status: item.status,
+          stickers: item.stickers,
+        }
+      : null,
+    active: Boolean(claimed.busy),
+    queued: queue.items.filter((entry) => entry.status === "queued").length,
+  });
+}
+
 async function handleProgress(request, env, send) {
   const secret = env.UPLOADER_SECRET || "";
   if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
@@ -244,7 +313,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     if (known.subscribe === false) await env.BOT_KV.delete(`sub:${chatId}`);
     out = known.text;
   } else if (cmd === "/status") {
-    out = statusText(await listPacks(env.BOT_KV));
+    const queue = await readQueue(env.BOT_KV);
+    out = queueStatusText(queue, chatId) || statusText(await listPacks(env.BOT_KV));
   } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
     await handleVmCommand(env, message, { send, fetch: deps.fetch });
     return;
@@ -266,7 +336,23 @@ async function answer(env, update, send, stickerCount, deps = {}) {
           rows.push(`• ${name} — набор не найден`);
         }
       }
-      out = renderPackCheck(parsed.title, rows, total);
+      const missing = rows.some((row) => row.includes("не найден"));
+      if (missing || total > MAX_STICKERS || total === 0) {
+        out = renderPackCheck(parsed.title, rows, total);
+      } else {
+        const queue = await readQueue(env.BOT_KV);
+        const priority = isPriorityChat(queue, chatId);
+        const stored = enqueueRequest(queue, {
+          chatId,
+          title: parsed.title,
+          links: stickerLinks(parsed.names),
+          priority,
+          createdAt: new Date().toISOString(),
+          stickers: total,
+        });
+        if (stored.created) await writeQueue(env.BOT_KV, stored.queue);
+        out = acceptReply({ title: parsed.title, rows, total, priority });
+      }
     }
   }
   await send(env, chatId, out);
@@ -297,6 +383,7 @@ export async function handle(request, env, deps = {}) {
   // Probes must not read or list KV. The free daily quota is mostly spent by /progress.
   if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) return json({ ok: true });
   if (request.method === "POST" && url.pathname === "/progress") return handleProgress(request, env, send);
+  if (request.method === "POST" && url.pathname === "/queue/claim") return handleClaim(request, env);
   if (request.method === "POST" && url.pathname === "/telegram") return handleTelegram(request, env, send, stickerCount, deps);
   return new Response("not found", { status: 404 });
 }

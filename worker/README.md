@@ -17,7 +17,9 @@ uploader  --Bearer-->   POST /progress   Worker  --KV-->           подпис�
 - `POST /progress` — ход загрузки. Заголовок `Authorization: Bearer <UPLOADER_SECRET>`. Тело: `slug`, `title`, `source`, `status` (`pending` / `uploading` / `done` / `error`), `uploaded`, `total`, `packUrl`, `error`. Можно прислать и блок `telemost` из `pack.json`.
 - «Готово» подписчику и пост в канал уходят только когда `packUrl` — настоящая ссылка `http(s)`. Пока её нет, воркер лишь помнит статус. Если «готово» уже уходило без ссылки, следующее сообщение со ссылкой досылает её и тогда же публикует пост.
 - Пост в канале — название и ссылка Телемоста, без `t.me/addstickers`.
-- KV `BOT_KV`: `sub:<chat id>`, `state:<slug>`, `pack:<slug>`, `meta:seeded`.
+- KV `BOT_KV`: `sub:<chat id>`, `state:<slug>`, `pack:<slug>`, `meta:seeded`, один ключ `queue` (приоритетные chat id и очередь запросов).
+- Принятый набор пишется в `queue` одним разом. Повтор того же набора не пишет KV снова. `GET /health` KV не трогает. `/status` человека с запросом читает только `queue`, без list.
+- `POST /queue/claim` с `Authorization: Bearer <UPLOADER_SECRET>` забирает следующий запрос. Уже загружаемый набор не вытесняется. Приоритетные запросы идут раньше обычных, в порядке поступления. Тело `{ "release": { "id": "<id>", "status": "done" } }` только закрывает запрос и само следующий не начинает. Пока идёт текущая загрузка восьми наборов, этот метод не вызывать.
 
 `scripts/telemost_upload.mjs` и `scripts/telemost_links.mjs` после записи `pack.json` вызывают `scripts/report_progress.mjs`. Без `TG2TM_PROGRESS_URL` и `UPLOADER_SECRET` загрузка в Телемост продолжается, просто бот о ней не узнает.
 
