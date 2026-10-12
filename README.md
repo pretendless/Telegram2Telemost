@@ -20,6 +20,8 @@
 | `scripts/telemost_links.mjs` | Дописывает `telemost.packUrl` по сообщениям бота «Набор … сохранён». |
 | `scripts/cleanup_uploaded.py` | Удаляет локальные картинки и кэш паков, уже загруженных в Телемост и получивших ссылку. |
 | `scripts/tg2tmbot.py` | Бот @tg2tmbot: `/start`, `/status`, `/format`, `/example`, проверка пака и уведомления. |
+| `scripts/chrome_cdp.mjs` | Клиент Chrome DevTools, общий для скриптов браузера. |
+| `scripts/telegram_web.mjs` | Открыть чат Telegram Web и отправить текст. Разовые шаги вроде @BotFather собираются из этих вызовов. |
 | `scripts/validate_packs.py` | Проверяет, что папки, картинки и `pack.json` сходятся. |
 
 Имена каталогов и файлов только ASCII, чтобы их нормально открывал Windows.
