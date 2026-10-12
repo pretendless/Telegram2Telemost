@@ -1,8 +1,9 @@
 {
-  "sourceChannel": "https://t.me/tg2tm",
-  "sourceChannelPreview": "https://t.me/s/tg2tm",
-  "localCheckoutHint": "D:\\\\Telemost2Telegram",
+  "sourceChannel": "https://t.me/tg2tm_samples",
+  "sourceChannelPreview": "https://t.me/s/tg2tm_samples",
+  "localCheckoutHint": "D:\\Telemost2Telegram",
   "imageNamePattern": "{index:03d}.png",
+  "botTokenFile": "config/bot.token",
   "telemost": {
     "site": "https://telemost.yandex.ru",
     "botName": "Стикеры",
@@ -21,7 +22,6 @@
       "/start",
       "/newpack",
       "/addsticker",
-      "/seticon",
       "/delsticker",
       "/deletepack",
       "/done"

@@ -11,6 +11,8 @@ $RECYCLE.BIN/
 *.swp
 
 # Secrets and local env
+config/bot.token
+*.token
 .env
 .env.*
 *.pem
@@ -26,5 +28,6 @@ node_modules/
 
 # Scratch downloads, not the pack PNGs under packs/
 /tmp/
+/.cache/
 *.tmp
 ~$*
