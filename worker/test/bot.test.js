@@ -18,18 +18,24 @@ const PACK_URL = "https://messenger.360.yandex.ru/#/stickers/8377";
 
 function memoryKv() {
   const store = new Map();
+  const ops = { get: 0, put: 0, list: 0, delete: 0 };
   return {
     store,
+    ops,
     async get(key) {
+      ops.get++;
       return store.has(key) ? store.get(key) : null;
     },
     async put(key, value) {
+      ops.put++;
       store.set(key, value);
     },
     async delete(key) {
+      ops.delete++;
       store.delete(key);
     },
     async list({ prefix }) {
+      ops.list++;
       const keys = [...store.keys()].filter((key) => key.startsWith(prefix || "")).sort();
       return { keys: keys.map((name) => ({ name })), list_complete: true };
     },
@@ -169,8 +175,62 @@ test("progress endpoint waits for packUrl, then notifies and does not repeat", a
   assert.match(sent[1].text, /8377/);
 
   sent.length = 0;
+  env.BOT_KV.ops.get = 0;
+  env.BOT_KV.ops.put = 0;
+  env.BOT_KV.ops.list = 0;
+  env.BOT_KV.ops.delete = 0;
   await handle(progressRequest({ ...body, packUrl: PACK_URL }), env, { sendMessage });
   assert.equal(sent.length, 0);
+  assert.equal(env.BOT_KV.ops.put, 0);
+  assert.equal(env.BOT_KV.ops.list, 0);
+  assert.equal(env.BOT_KV.ops.delete, 0);
+  assert.equal(env.BOT_KV.ops.get, 1);
+});
+
+test("an unchanged progress report does not write, and a real change writes the pack once", async () => {
+  const env = envWith();
+  const body = {
+    slug: "02-dzhek-i-bevka",
+    title: "Джек и Бевка",
+    status: "uploading",
+    uploaded: 40,
+    total: 100,
+  };
+  const sendMessage = async () => {};
+  await handle(progressRequest(body), env, { sendMessage });
+  env.BOT_KV.ops.get = 0;
+  env.BOT_KV.ops.put = 0;
+  env.BOT_KV.ops.list = 0;
+  const repeat = await handle(progressRequest(body), env, { sendMessage });
+  assert.equal(repeat.status, 200);
+  assert.equal(env.BOT_KV.ops.get, 1);
+  assert.equal(env.BOT_KV.ops.put, 0);
+  assert.equal(env.BOT_KV.ops.list, 0);
+
+  env.BOT_KV.ops.put = 0;
+  env.BOT_KV.ops.list = 0;
+  const moved = await handle(progressRequest({ ...body, uploaded: 41 }), env, { sendMessage });
+  assert.equal(moved.status, 200);
+  assert.equal(env.BOT_KV.ops.put, 1);
+  assert.equal(env.BOT_KV.ops.list, 0);
+  const stored = JSON.parse(await env.BOT_KV.get(`pack:${body.slug}`));
+  assert.equal(stored.uploaded, 41);
+  assert.equal(stored.status, "uploading");
+});
+
+test("health and the root path do not read or list KV", async () => {
+  const kv = memoryKv();
+  const env = envWith(kv);
+  for (const path of ["/health", "/"]) {
+    kv.ops.get = 0;
+    kv.ops.put = 0;
+    kv.ops.list = 0;
+    kv.ops.delete = 0;
+    const res = await handle(new Request(`https://tg2tmbot.example${path}`), env);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true });
+    assert.equal(kv.ops.get + kv.ops.put + kv.ops.list + kv.ops.delete, 0);
+  }
 });
 
 test("progress endpoint rejects a missing secret", async () => {

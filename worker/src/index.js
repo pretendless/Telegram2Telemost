@@ -125,26 +125,55 @@ async function fanout(send, env, chatIds, text) {
   return ok > 0 ? "ok" : "fail";
 }
 
-async function applyProgress(env, pack, send) {
-  const subs = await listSubscribers(env.BOT_KV);
-  const prevRaw = await env.BOT_KV.get(`state:${pack.slug}`);
-  let prev = null;
-  if (prevRaw) {
-    try {
-      prev = JSON.parse(prevRaw);
-    } catch {
-      prev = null;
-    }
+function parseStored(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-  const steps = notificationSteps(prev, pack);
+}
+
+// Same slug is the key. A repeat with the same status and uploaded count is not a new write.
+// A new link or error still counts: those are what the done notice waits for.
+function sameVisibleProgress(prev, pack) {
+  if (!prev) return false;
+  return (
+    prev.status === pack.status &&
+    prev.uploaded === pack.uploaded &&
+    prev.total === pack.total &&
+    prev.title === pack.title &&
+    prev.url === pack.url &&
+    (prev.error || null) === (pack.error || null)
+  );
+}
+
+async function applyProgress(env, pack, send) {
+  const kv = env.BOT_KV;
+  const packKey = `pack:${pack.slug}`;
+  const prev = parseStored(await kv.get(packKey));
+  // Older rows kept the notification cursor in state:<slug>. Read that once, then fold it into the pack.
+  let notice = prev && prev.notice ? prev.notice : null;
+  if (prev && !prev.notice) notice = parseStored(await kv.get(`state:${pack.slug}`));
+  const steps = notificationSteps(notice, pack);
+  const waitingForUrl = pack.status === "done" && !pack.url;
+  if (sameVisibleProgress(prev, pack) && steps.length === 0) {
+    return { ok: true, status: 200, notified: 0, posted: false, waitingForUrl };
+  }
+
   const needsToken = steps.length > 0 && !botToken(env);
+  const writePack = (cursor) => kv.put(packKey, JSON.stringify({ ...pack, notice: cursor }));
   if (needsToken) {
-    await env.BOT_KV.put(`pack:${pack.slug}`, JSON.stringify(pack));
+    await writePack(notice);
     return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false };
   }
 
+  let subs = [];
+  if (steps.some((step) => step.kind !== "channel")) subs = await listSubscribers(kv);
+
   let notified = 0;
   let posted = false;
+  let cursor = notice;
   for (const step of steps) {
     if (step.kind === "channel") {
       try {
@@ -152,21 +181,21 @@ async function applyProgress(env, pack, send) {
         posted = true;
       } catch (err) {
         console.error("channel post failed", pack.slug, err && err.message);
-        await env.BOT_KV.put(`pack:${pack.slug}`, JSON.stringify(pack));
+        await writePack(cursor);
         return { ok: false, status: 502, error: "channel post failed", notified, posted: false };
       }
     } else {
       const result = await fanout(send, env, subs, step.text);
       if (result === "fail") {
-        await env.BOT_KV.put(`pack:${pack.slug}`, JSON.stringify(pack));
+        await writePack(cursor);
         return { ok: false, status: 502, error: "notify failed", notified, posted: false };
       }
       notified++;
     }
-    await env.BOT_KV.put(`state:${pack.slug}`, JSON.stringify(step.state));
+    cursor = step.state;
   }
-  await env.BOT_KV.put(`pack:${pack.slug}`, JSON.stringify(pack));
-  return { ok: true, status: 200, notified, posted, waitingForUrl: pack.status === "done" && !pack.url };
+  await writePack(cursor);
+  return { ok: true, status: 200, notified, posted, waitingForUrl };
 }
 
 async function handleProgress(request, env, send) {
@@ -265,6 +294,7 @@ export async function handle(request, env, deps = {}) {
   const send = deps.sendMessage || defaultSend;
   const stickerCount = deps.stickerCount || defaultStickerCount;
   const url = new URL(request.url);
+  // Probes must not read or list KV. The free daily quota is mostly spent by /progress.
   if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) return json({ ok: true });
   if (request.method === "POST" && url.pathname === "/progress") return handleProgress(request, env, send);
   if (request.method === "POST" && url.pathname === "/telegram") return handleTelegram(request, env, send, stickerCount, deps);
