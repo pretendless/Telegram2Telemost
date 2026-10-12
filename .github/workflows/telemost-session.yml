@@ -116,10 +116,12 @@ jobs:
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
           ENABLE_TUNNEL: "1"
         run: |
-          mkdir -p sessions
+          mkdir -p sessions logs
+          chmod a+rwx logs
           docker run --rm --shm-size=1g \
             --user "$(id -u):$(id -g)" \
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL \
+            -e GITHUB_ACTIONS \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
             -e HOME=/tmp \

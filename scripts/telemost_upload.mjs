@@ -17,8 +17,13 @@ const REPLY_TIMEOUT_S = Number(process.env.REPLY_TIMEOUT_S || 600);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
 const log = (pack, item, status, err = '') => {
-  appendFileSync(LOG, `| ${stamp()} | ${pack}${item ? ' / ' + item : ''} | ${status} | ${err.replace(/\|/g, '/').replace(/\n/g, ' ')} |\n`);
-  console.log(stamp(), pack, item, status, err);
+  const line = `| ${stamp()} | ${pack}${item ? ' / ' + item : ''} | ${status} | ${String(err).replace(/\|/g, '/').replace(/\n/g, ' ')} |`;
+  console.log(line);
+  try {
+    appendFileSync(LOG, line + '\n');
+  } catch (e) {
+    console.log('log file skipped', e && e.code ? e.code : '');
+  }
 };
 
 async function connect() {
