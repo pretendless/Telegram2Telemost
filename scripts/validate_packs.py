@@ -15,7 +15,7 @@ MAX_PER_PACK = 150
 
 def main() -> int:
     errors: list[str] = []
-    folders = sorted(p for p in PACKS.iterdir() if p.is_dir())
+    folders = sorted(p for p in PACKS.iterdir() if p.is_dir() and p.name[:3].rstrip("-").isdigit() and len(p.name) > 3 and p.name[2] == "-")
     if not folders:
         print("no packs/", file=sys.stderr)
         return 1

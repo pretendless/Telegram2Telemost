@@ -173,9 +173,12 @@ def process_pack(folder: Path) -> None:
 
 
 def main(argv: list[str]) -> int:
-    folders = sorted(p for p in PACKS.iterdir() if p.is_dir())
-    if argv:
-        folders = [f for f in folders if f.name in argv or f.name[:2] in argv]
+    if argv[:1] == ["--dir"]:
+        folders = [Path(argv[1])]
+    else:
+        folders = sorted(p for p in PACKS.iterdir() if p.is_dir() and p.name[2:3] == "-")
+        if argv:
+            folders = [f for f in folders if f.name in argv or f.name[:2] in argv]
     for folder in folders:
         process_pack(folder)
     return 0

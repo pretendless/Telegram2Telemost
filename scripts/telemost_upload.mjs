@@ -240,7 +240,10 @@ async function uploadPack(bot, dir) {
 }
 
 const wanted = process.argv.slice(2);
-const dirs = readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort().filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
+const dirs = readdirSync(PACKS)
+  .filter(d => /^\d\d-/.test(d) || d.startsWith("q-"))
+  .sort()
+  .filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
 const c = await connect();
 const bot = new Bot(c);
 for (const d of dirs) {
