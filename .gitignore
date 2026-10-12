@@ -13,6 +13,7 @@ $RECYCLE.BIN/
 # Secrets and local env
 config/bot.token
 *.token
+config/tg2tmbot-subscribers.json
 .env
 .env.*
 *.pem
