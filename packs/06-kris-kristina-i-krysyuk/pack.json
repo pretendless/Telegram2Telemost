@@ -2,7 +2,7 @@
   "title": "Крис, Кристина и Крысюк",
   "slug": "06-kris-kristina-i-krysyuk",
   "order": 6,
-  "sourceMessage": "https://t.me/tg2tm/8",
+  "sourceMessage": "https://t.me/tg2tm_samples/8",
   "stickerLinks": [
     "https://t.me/addstickers/chris_vk",
     "https://t.me/addstickers/krisandkristina",
@@ -13,23 +13,1218 @@
       "url": "https://t.me/addstickers/chris_vk",
       "name": "chris_vk",
       "telegramTitle": "Крис (@TgSticker)",
-      "stickerCount": null
+      "stickerCount": 49,
+      "kinds": {
+        "static": 49,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
     },
     {
       "url": "https://t.me/addstickers/krisandkristina",
       "name": "krisandkristina",
-      "telegramTitle": "Крис и Кристина @TgSticker",
-      "stickerCount": null
+      "telegramTitle": "Крис и Кристина  @TgSticker",
+      "stickerCount": 48,
+      "kinds": {
+        "static": 48,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
     },
     {
       "url": "https://t.me/addstickers/chrissy_vk",
       "name": "chrissy_vk",
       "telegramTitle": "Крис, Кристина и Крысюк @TgSticker",
-      "stickerCount": null
+      "stickerCount": 50,
+      "kinds": {
+        "static": 50,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
     }
   ],
-  "stickerCount": null,
-  "images": [],
+  "stickerCount": 147,
+  "images": [
+    {
+      "file": "001.png",
+      "emoji": "🧳",
+      "set": "chris_vk",
+      "position": 1,
+      "kind": "static",
+      "bytes": 95973
+    },
+    {
+      "file": "002.png",
+      "emoji": "🫠",
+      "set": "chris_vk",
+      "position": 2,
+      "kind": "static",
+      "bytes": 156878
+    },
+    {
+      "file": "003.png",
+      "emoji": "😳",
+      "set": "chris_vk",
+      "position": 3,
+      "kind": "static",
+      "bytes": 159568
+    },
+    {
+      "file": "004.png",
+      "emoji": "🖕",
+      "set": "chris_vk",
+      "position": 4,
+      "kind": "static",
+      "bytes": 94030
+    },
+    {
+      "file": "005.png",
+      "emoji": "🚶‍♀️",
+      "set": "chris_vk",
+      "position": 5,
+      "kind": "static",
+      "bytes": 78267
+    },
+    {
+      "file": "006.png",
+      "emoji": "👋",
+      "set": "chris_vk",
+      "position": 6,
+      "kind": "static",
+      "bytes": 131023
+    },
+    {
+      "file": "007.png",
+      "emoji": "🐀",
+      "set": "chris_vk",
+      "position": 7,
+      "kind": "static",
+      "bytes": 121323
+    },
+    {
+      "file": "008.png",
+      "emoji": "😁",
+      "set": "chris_vk",
+      "position": 8,
+      "kind": "static",
+      "bytes": 112644
+    },
+    {
+      "file": "009.png",
+      "emoji": "👃",
+      "set": "chris_vk",
+      "position": 9,
+      "kind": "static",
+      "bytes": 98400
+    },
+    {
+      "file": "010.png",
+      "emoji": "🤪",
+      "set": "chris_vk",
+      "position": 10,
+      "kind": "static",
+      "bytes": 113482
+    },
+    {
+      "file": "011.png",
+      "emoji": "😵",
+      "set": "chris_vk",
+      "position": 11,
+      "kind": "static",
+      "bytes": 85331
+    },
+    {
+      "file": "012.png",
+      "emoji": "🤨",
+      "set": "chris_vk",
+      "position": 12,
+      "kind": "static",
+      "bytes": 121345
+    },
+    {
+      "file": "013.png",
+      "emoji": "👍",
+      "set": "chris_vk",
+      "position": 13,
+      "kind": "static",
+      "bytes": 95368
+    },
+    {
+      "file": "014.png",
+      "emoji": "🤨",
+      "set": "chris_vk",
+      "position": 14,
+      "kind": "static",
+      "bytes": 117567
+    },
+    {
+      "file": "015.png",
+      "emoji": "😐",
+      "set": "chris_vk",
+      "position": 15,
+      "kind": "static",
+      "bytes": 139813
+    },
+    {
+      "file": "016.png",
+      "emoji": "🤨",
+      "set": "chris_vk",
+      "position": 16,
+      "kind": "static",
+      "bytes": 108994
+    },
+    {
+      "file": "017.png",
+      "emoji": "👊",
+      "set": "chris_vk",
+      "position": 17,
+      "kind": "static",
+      "bytes": 122767
+    },
+    {
+      "file": "018.png",
+      "emoji": "🤫",
+      "set": "chris_vk",
+      "position": 18,
+      "kind": "static",
+      "bytes": 140625
+    },
+    {
+      "file": "019.png",
+      "emoji": "❓",
+      "set": "chris_vk",
+      "position": 19,
+      "kind": "static",
+      "bytes": 113427
+    },
+    {
+      "file": "020.png",
+      "emoji": "🥺",
+      "set": "chris_vk",
+      "position": 20,
+      "kind": "static",
+      "bytes": 89368
+    },
+    {
+      "file": "021.png",
+      "emoji": "😳",
+      "set": "chris_vk",
+      "position": 21,
+      "kind": "static",
+      "bytes": 98960
+    },
+    {
+      "file": "022.png",
+      "emoji": "😑",
+      "set": "chris_vk",
+      "position": 22,
+      "kind": "static",
+      "bytes": 109281
+    },
+    {
+      "file": "023.png",
+      "emoji": "☕️",
+      "set": "chris_vk",
+      "position": 23,
+      "kind": "static",
+      "bytes": 139473
+    },
+    {
+      "file": "024.png",
+      "emoji": "😭",
+      "set": "chris_vk",
+      "position": 24,
+      "kind": "static",
+      "bytes": 141454
+    },
+    {
+      "file": "025.png",
+      "emoji": "😏",
+      "set": "chris_vk",
+      "position": 25,
+      "kind": "static",
+      "bytes": 119396
+    },
+    {
+      "file": "026.png",
+      "emoji": "😔",
+      "set": "chris_vk",
+      "position": 26,
+      "kind": "static",
+      "bytes": 87758
+    },
+    {
+      "file": "027.png",
+      "emoji": "😒",
+      "set": "chris_vk",
+      "position": 27,
+      "kind": "static",
+      "bytes": 131855
+    },
+    {
+      "file": "028.png",
+      "emoji": "🤪",
+      "set": "chris_vk",
+      "position": 28,
+      "kind": "static",
+      "bytes": 119244
+    },
+    {
+      "file": "029.png",
+      "emoji": "👨‍👦‍👦",
+      "set": "chris_vk",
+      "position": 29,
+      "kind": "static",
+      "bytes": 130133
+    },
+    {
+      "file": "030.png",
+      "emoji": "👨‍🏫",
+      "set": "chris_vk",
+      "position": 30,
+      "kind": "static",
+      "bytes": 119975
+    },
+    {
+      "file": "031.png",
+      "emoji": "🫠",
+      "set": "chris_vk",
+      "position": 31,
+      "kind": "static",
+      "bytes": 68950
+    },
+    {
+      "file": "032.png",
+      "emoji": "😮",
+      "set": "chris_vk",
+      "position": 32,
+      "kind": "static",
+      "bytes": 141531
+    },
+    {
+      "file": "033.png",
+      "emoji": "😬",
+      "set": "chris_vk",
+      "position": 33,
+      "kind": "static",
+      "bytes": 135869
+    },
+    {
+      "file": "034.png",
+      "emoji": "😈",
+      "set": "chris_vk",
+      "position": 34,
+      "kind": "static",
+      "bytes": 90822
+    },
+    {
+      "file": "035.png",
+      "emoji": "😐",
+      "set": "chris_vk",
+      "position": 35,
+      "kind": "static",
+      "bytes": 104398
+    },
+    {
+      "file": "036.png",
+      "emoji": "🙏",
+      "set": "chris_vk",
+      "position": 36,
+      "kind": "static",
+      "bytes": 101998
+    },
+    {
+      "file": "037.png",
+      "emoji": "👀",
+      "set": "chris_vk",
+      "position": 37,
+      "kind": "static",
+      "bytes": 177715
+    },
+    {
+      "file": "038.png",
+      "emoji": "🧠",
+      "set": "chris_vk",
+      "position": 38,
+      "kind": "static",
+      "bytes": 114663
+    },
+    {
+      "file": "039.png",
+      "emoji": "😐",
+      "set": "chris_vk",
+      "position": 39,
+      "kind": "static",
+      "bytes": 192672
+    },
+    {
+      "file": "040.png",
+      "emoji": "🥶",
+      "set": "chris_vk",
+      "position": 40,
+      "kind": "static",
+      "bytes": 129071
+    },
+    {
+      "file": "041.png",
+      "emoji": "😐",
+      "set": "chris_vk",
+      "position": 41,
+      "kind": "static",
+      "bytes": 77395
+    },
+    {
+      "file": "042.png",
+      "emoji": "🥺",
+      "set": "chris_vk",
+      "position": 42,
+      "kind": "static",
+      "bytes": 139376
+    },
+    {
+      "file": "043.png",
+      "emoji": "🥺",
+      "set": "chris_vk",
+      "position": 43,
+      "kind": "static",
+      "bytes": 101764
+    },
+    {
+      "file": "044.png",
+      "emoji": "🐭",
+      "set": "chris_vk",
+      "position": 44,
+      "kind": "static",
+      "bytes": 166399
+    },
+    {
+      "file": "045.png",
+      "emoji": "☺️",
+      "set": "chris_vk",
+      "position": 45,
+      "kind": "static",
+      "bytes": 160275
+    },
+    {
+      "file": "046.png",
+      "emoji": "🍔",
+      "set": "chris_vk",
+      "position": 46,
+      "kind": "static",
+      "bytes": 114262
+    },
+    {
+      "file": "047.png",
+      "emoji": "😣",
+      "set": "chris_vk",
+      "position": 47,
+      "kind": "static",
+      "bytes": 104167
+    },
+    {
+      "file": "048.png",
+      "emoji": "❌",
+      "set": "chris_vk",
+      "position": 48,
+      "kind": "static",
+      "bytes": 89397
+    },
+    {
+      "file": "049.png",
+      "emoji": "👍",
+      "set": "chris_vk",
+      "position": 49,
+      "kind": "static",
+      "bytes": 157854
+    },
+    {
+      "file": "050.png",
+      "emoji": "🥨",
+      "set": "krisandkristina",
+      "position": 1,
+      "kind": "static",
+      "bytes": 112697
+    },
+    {
+      "file": "051.png",
+      "emoji": "☺",
+      "set": "krisandkristina",
+      "position": 2,
+      "kind": "static",
+      "bytes": 123994
+    },
+    {
+      "file": "052.png",
+      "emoji": "😠",
+      "set": "krisandkristina",
+      "position": 3,
+      "kind": "static",
+      "bytes": 174643
+    },
+    {
+      "file": "053.png",
+      "emoji": "😡",
+      "set": "krisandkristina",
+      "position": 4,
+      "kind": "static",
+      "bytes": 110378
+    },
+    {
+      "file": "054.png",
+      "emoji": "😕",
+      "set": "krisandkristina",
+      "position": 5,
+      "kind": "static",
+      "bytes": 99461
+    },
+    {
+      "file": "055.png",
+      "emoji": "😏",
+      "set": "krisandkristina",
+      "position": 6,
+      "kind": "static",
+      "bytes": 141993
+    },
+    {
+      "file": "056.png",
+      "emoji": "🤬",
+      "set": "krisandkristina",
+      "position": 7,
+      "kind": "static",
+      "bytes": 104182
+    },
+    {
+      "file": "057.png",
+      "emoji": "👋",
+      "set": "krisandkristina",
+      "position": 8,
+      "kind": "static",
+      "bytes": 138124
+    },
+    {
+      "file": "058.png",
+      "emoji": "❤",
+      "set": "krisandkristina",
+      "position": 9,
+      "kind": "static",
+      "bytes": 181808
+    },
+    {
+      "file": "059.png",
+      "emoji": "😲",
+      "set": "krisandkristina",
+      "position": 10,
+      "kind": "static",
+      "bytes": 166505
+    },
+    {
+      "file": "060.png",
+      "emoji": "😍",
+      "set": "krisandkristina",
+      "position": 11,
+      "kind": "static",
+      "bytes": 186409
+    },
+    {
+      "file": "061.png",
+      "emoji": "❓",
+      "set": "krisandkristina",
+      "position": 12,
+      "kind": "static",
+      "bytes": 105158
+    },
+    {
+      "file": "062.png",
+      "emoji": "😐",
+      "set": "krisandkristina",
+      "position": 13,
+      "kind": "static",
+      "bytes": 147209
+    },
+    {
+      "file": "063.png",
+      "emoji": "😡",
+      "set": "krisandkristina",
+      "position": 14,
+      "kind": "static",
+      "bytes": 145470
+    },
+    {
+      "file": "064.png",
+      "emoji": "☺",
+      "set": "krisandkristina",
+      "position": 15,
+      "kind": "static",
+      "bytes": 130128
+    },
+    {
+      "file": "065.png",
+      "emoji": "🤗",
+      "set": "krisandkristina",
+      "position": 16,
+      "kind": "static",
+      "bytes": 164589
+    },
+    {
+      "file": "066.png",
+      "emoji": "🌹",
+      "set": "krisandkristina",
+      "position": 17,
+      "kind": "static",
+      "bytes": 180438
+    },
+    {
+      "file": "067.png",
+      "emoji": "☺",
+      "set": "krisandkristina",
+      "position": 18,
+      "kind": "static",
+      "bytes": 145544
+    },
+    {
+      "file": "068.png",
+      "emoji": "😡",
+      "set": "krisandkristina",
+      "position": 19,
+      "kind": "static",
+      "bytes": 110975
+    },
+    {
+      "file": "069.png",
+      "emoji": "❤",
+      "set": "krisandkristina",
+      "position": 20,
+      "kind": "static",
+      "bytes": 143460
+    },
+    {
+      "file": "070.png",
+      "emoji": "❓",
+      "set": "krisandkristina",
+      "position": 21,
+      "kind": "static",
+      "bytes": 165005
+    },
+    {
+      "file": "071.png",
+      "emoji": "☺",
+      "set": "krisandkristina",
+      "position": 22,
+      "kind": "static",
+      "bytes": 139768
+    },
+    {
+      "file": "072.png",
+      "emoji": "😈",
+      "set": "krisandkristina",
+      "position": 23,
+      "kind": "static",
+      "bytes": 172558
+    },
+    {
+      "file": "073.png",
+      "emoji": "😡",
+      "set": "krisandkristina",
+      "position": 24,
+      "kind": "static",
+      "bytes": 141174
+    },
+    {
+      "file": "074.png",
+      "emoji": "😘",
+      "set": "krisandkristina",
+      "position": 25,
+      "kind": "static",
+      "bytes": 152205
+    },
+    {
+      "file": "075.png",
+      "emoji": "❤",
+      "set": "krisandkristina",
+      "position": 26,
+      "kind": "static",
+      "bytes": 126733
+    },
+    {
+      "file": "076.png",
+      "emoji": "😐",
+      "set": "krisandkristina",
+      "position": 27,
+      "kind": "static",
+      "bytes": 144113
+    },
+    {
+      "file": "077.png",
+      "emoji": "🍣",
+      "set": "krisandkristina",
+      "position": 28,
+      "kind": "static",
+      "bytes": 185199
+    },
+    {
+      "file": "078.png",
+      "emoji": "☹",
+      "set": "krisandkristina",
+      "position": 29,
+      "kind": "static",
+      "bytes": 148630
+    },
+    {
+      "file": "079.png",
+      "emoji": "☺",
+      "set": "krisandkristina",
+      "position": 30,
+      "kind": "static",
+      "bytes": 179561
+    },
+    {
+      "file": "080.png",
+      "emoji": "👰",
+      "set": "krisandkristina",
+      "position": 31,
+      "kind": "static",
+      "bytes": 193888
+    },
+    {
+      "file": "081.png",
+      "emoji": "💍",
+      "set": "krisandkristina",
+      "position": 32,
+      "kind": "static",
+      "bytes": 153670
+    },
+    {
+      "file": "082.png",
+      "emoji": "😏",
+      "set": "krisandkristina",
+      "position": 33,
+      "kind": "static",
+      "bytes": 116346
+    },
+    {
+      "file": "083.png",
+      "emoji": "😂",
+      "set": "krisandkristina",
+      "position": 34,
+      "kind": "static",
+      "bytes": 145904
+    },
+    {
+      "file": "084.png",
+      "emoji": "😘",
+      "set": "krisandkristina",
+      "position": 35,
+      "kind": "static",
+      "bytes": 115726
+    },
+    {
+      "file": "085.png",
+      "emoji": "😀",
+      "set": "krisandkristina",
+      "position": 36,
+      "kind": "static",
+      "bytes": 132165
+    },
+    {
+      "file": "086.png",
+      "emoji": "☀",
+      "set": "krisandkristina",
+      "position": 37,
+      "kind": "static",
+      "bytes": 155858
+    },
+    {
+      "file": "087.png",
+      "emoji": "😐",
+      "set": "krisandkristina",
+      "position": 38,
+      "kind": "static",
+      "bytes": 144901
+    },
+    {
+      "file": "088.png",
+      "emoji": "😘",
+      "set": "krisandkristina",
+      "position": 39,
+      "kind": "static",
+      "bytes": 113005
+    },
+    {
+      "file": "089.png",
+      "emoji": "❤",
+      "set": "krisandkristina",
+      "position": 40,
+      "kind": "static",
+      "bytes": 99385
+    },
+    {
+      "file": "090.png",
+      "emoji": "❓",
+      "set": "krisandkristina",
+      "position": 41,
+      "kind": "static",
+      "bytes": 151243
+    },
+    {
+      "file": "091.png",
+      "emoji": "😴",
+      "set": "krisandkristina",
+      "position": 42,
+      "kind": "static",
+      "bytes": 126574
+    },
+    {
+      "file": "092.png",
+      "emoji": "😏",
+      "set": "krisandkristina",
+      "position": 43,
+      "kind": "static",
+      "bytes": 92739
+    },
+    {
+      "file": "093.png",
+      "emoji": "😅",
+      "set": "krisandkristina",
+      "position": 44,
+      "kind": "static",
+      "bytes": 180205
+    },
+    {
+      "file": "094.png",
+      "emoji": "🥴",
+      "set": "krisandkristina",
+      "position": 45,
+      "kind": "static",
+      "bytes": 146980
+    },
+    {
+      "file": "095.png",
+      "emoji": "😳",
+      "set": "krisandkristina",
+      "position": 46,
+      "kind": "static",
+      "bytes": 149217
+    },
+    {
+      "file": "096.png",
+      "emoji": "❤",
+      "set": "krisandkristina",
+      "position": 47,
+      "kind": "static",
+      "bytes": 165341
+    },
+    {
+      "file": "097.png",
+      "emoji": "😏",
+      "set": "krisandkristina",
+      "position": 48,
+      "kind": "static",
+      "bytes": 244877
+    },
+    {
+      "file": "098.png",
+      "emoji": "😭",
+      "set": "chrissy_vk",
+      "position": 1,
+      "kind": "static",
+      "bytes": 101227
+    },
+    {
+      "file": "099.png",
+      "emoji": "🥰",
+      "set": "chrissy_vk",
+      "position": 2,
+      "kind": "static",
+      "bytes": 179749
+    },
+    {
+      "file": "100.png",
+      "emoji": "😤",
+      "set": "chrissy_vk",
+      "position": 3,
+      "kind": "static",
+      "bytes": 116847
+    },
+    {
+      "file": "101.png",
+      "emoji": "🥺",
+      "set": "chrissy_vk",
+      "position": 4,
+      "kind": "static",
+      "bytes": 150231
+    },
+    {
+      "file": "102.png",
+      "emoji": "⌨",
+      "set": "chrissy_vk",
+      "position": 5,
+      "kind": "static",
+      "bytes": 119745
+    },
+    {
+      "file": "103.png",
+      "emoji": "💋",
+      "set": "chrissy_vk",
+      "position": 6,
+      "kind": "static",
+      "bytes": 93458
+    },
+    {
+      "file": "104.png",
+      "emoji": "😮",
+      "set": "chrissy_vk",
+      "position": 7,
+      "kind": "static",
+      "bytes": 142036
+    },
+    {
+      "file": "105.png",
+      "emoji": "🫠",
+      "set": "chrissy_vk",
+      "position": 8,
+      "kind": "static",
+      "bytes": 78781
+    },
+    {
+      "file": "106.png",
+      "emoji": "🙏",
+      "set": "chrissy_vk",
+      "position": 9,
+      "kind": "static",
+      "bytes": 104516
+    },
+    {
+      "file": "107.png",
+      "emoji": "🫣",
+      "set": "chrissy_vk",
+      "position": 10,
+      "kind": "static",
+      "bytes": 157643
+    },
+    {
+      "file": "108.png",
+      "emoji": "🥺",
+      "set": "chrissy_vk",
+      "position": 11,
+      "kind": "static",
+      "bytes": 161660
+    },
+    {
+      "file": "109.png",
+      "emoji": "😡",
+      "set": "chrissy_vk",
+      "position": 12,
+      "kind": "static",
+      "bytes": 150628
+    },
+    {
+      "file": "110.png",
+      "emoji": "🤲",
+      "set": "chrissy_vk",
+      "position": 13,
+      "kind": "static",
+      "bytes": 131653
+    },
+    {
+      "file": "111.png",
+      "emoji": "😏",
+      "set": "chrissy_vk",
+      "position": 14,
+      "kind": "static",
+      "bytes": 148998
+    },
+    {
+      "file": "112.png",
+      "emoji": "🥹",
+      "set": "chrissy_vk",
+      "position": 15,
+      "kind": "static",
+      "bytes": 141329
+    },
+    {
+      "file": "113.png",
+      "emoji": "🥺",
+      "set": "chrissy_vk",
+      "position": 16,
+      "kind": "static",
+      "bytes": 147923
+    },
+    {
+      "file": "114.png",
+      "emoji": "😌",
+      "set": "chrissy_vk",
+      "position": 17,
+      "kind": "static",
+      "bytes": 115921
+    },
+    {
+      "file": "115.png",
+      "emoji": "🫤",
+      "set": "chrissy_vk",
+      "position": 18,
+      "kind": "static",
+      "bytes": 98099
+    },
+    {
+      "file": "116.png",
+      "emoji": "🤔",
+      "set": "chrissy_vk",
+      "position": 19,
+      "kind": "static",
+      "bytes": 128791
+    },
+    {
+      "file": "117.png",
+      "emoji": "👴",
+      "set": "chrissy_vk",
+      "position": 20,
+      "kind": "static",
+      "bytes": 144105
+    },
+    {
+      "file": "118.png",
+      "emoji": "❤️",
+      "set": "chrissy_vk",
+      "position": 21,
+      "kind": "static",
+      "bytes": 181236
+    },
+    {
+      "file": "119.png",
+      "emoji": "😍",
+      "set": "chrissy_vk",
+      "position": 22,
+      "kind": "static",
+      "bytes": 149687
+    },
+    {
+      "file": "120.png",
+      "emoji": "👩‍🏫",
+      "set": "chrissy_vk",
+      "position": 23,
+      "kind": "static",
+      "bytes": 109921
+    },
+    {
+      "file": "121.png",
+      "emoji": "😅",
+      "set": "chrissy_vk",
+      "position": 24,
+      "kind": "static",
+      "bytes": 147055
+    },
+    {
+      "file": "122.png",
+      "emoji": "🙂",
+      "set": "chrissy_vk",
+      "position": 25,
+      "kind": "static",
+      "bytes": 137747
+    },
+    {
+      "file": "123.png",
+      "emoji": "🫣",
+      "set": "chrissy_vk",
+      "position": 26,
+      "kind": "static",
+      "bytes": 133970
+    },
+    {
+      "file": "124.png",
+      "emoji": "😓",
+      "set": "chrissy_vk",
+      "position": 27,
+      "kind": "static",
+      "bytes": 136532
+    },
+    {
+      "file": "125.png",
+      "emoji": "🚽",
+      "set": "chrissy_vk",
+      "position": 28,
+      "kind": "static",
+      "bytes": 123315
+    },
+    {
+      "file": "126.png",
+      "emoji": "😡",
+      "set": "chrissy_vk",
+      "position": 29,
+      "kind": "static",
+      "bytes": 172879
+    },
+    {
+      "file": "127.png",
+      "emoji": "😡",
+      "set": "chrissy_vk",
+      "position": 30,
+      "kind": "static",
+      "bytes": 159664
+    },
+    {
+      "file": "128.png",
+      "emoji": "☝️",
+      "set": "chrissy_vk",
+      "position": 31,
+      "kind": "static",
+      "bytes": 139725
+    },
+    {
+      "file": "129.png",
+      "emoji": "🧐",
+      "set": "chrissy_vk",
+      "position": 32,
+      "kind": "static",
+      "bytes": 148672
+    },
+    {
+      "file": "130.png",
+      "emoji": "🫤",
+      "set": "chrissy_vk",
+      "position": 33,
+      "kind": "static",
+      "bytes": 123048
+    },
+    {
+      "file": "131.png",
+      "emoji": "😑",
+      "set": "chrissy_vk",
+      "position": 34,
+      "kind": "static",
+      "bytes": 121824
+    },
+    {
+      "file": "132.png",
+      "emoji": "😬",
+      "set": "chrissy_vk",
+      "position": 35,
+      "kind": "static",
+      "bytes": 106277
+    },
+    {
+      "file": "133.png",
+      "emoji": "🤯",
+      "set": "chrissy_vk",
+      "position": 36,
+      "kind": "static",
+      "bytes": 141317
+    },
+    {
+      "file": "134.png",
+      "emoji": "😠",
+      "set": "chrissy_vk",
+      "position": 37,
+      "kind": "static",
+      "bytes": 132974
+    },
+    {
+      "file": "135.png",
+      "emoji": "😐",
+      "set": "chrissy_vk",
+      "position": 38,
+      "kind": "static",
+      "bytes": 106150
+    },
+    {
+      "file": "136.png",
+      "emoji": "🫂",
+      "set": "chrissy_vk",
+      "position": 39,
+      "kind": "static",
+      "bytes": 130716
+    },
+    {
+      "file": "137.png",
+      "emoji": "😍",
+      "set": "chrissy_vk",
+      "position": 40,
+      "kind": "static",
+      "bytes": 138436
+    },
+    {
+      "file": "138.png",
+      "emoji": "😡",
+      "set": "chrissy_vk",
+      "position": 41,
+      "kind": "static",
+      "bytes": 154007
+    },
+    {
+      "file": "139.png",
+      "emoji": "💄",
+      "set": "chrissy_vk",
+      "position": 42,
+      "kind": "static",
+      "bytes": 183595
+    },
+    {
+      "file": "140.png",
+      "emoji": "🥳",
+      "set": "chrissy_vk",
+      "position": 43,
+      "kind": "static",
+      "bytes": 192597
+    },
+    {
+      "file": "141.png",
+      "emoji": "😡",
+      "set": "chrissy_vk",
+      "position": 44,
+      "kind": "static",
+      "bytes": 200487
+    },
+    {
+      "file": "142.png",
+      "emoji": "🥵",
+      "set": "chrissy_vk",
+      "position": 45,
+      "kind": "static",
+      "bytes": 84628
+    },
+    {
+      "file": "143.png",
+      "emoji": "👗",
+      "set": "chrissy_vk",
+      "position": 46,
+      "kind": "static",
+      "bytes": 170593
+    },
+    {
+      "file": "144.png",
+      "emoji": "😠",
+      "set": "chrissy_vk",
+      "position": 47,
+      "kind": "static",
+      "bytes": 176343
+    },
+    {
+      "file": "145.png",
+      "emoji": "🚶‍♂",
+      "set": "chrissy_vk",
+      "position": 48,
+      "kind": "static",
+      "bytes": 133267
+    },
+    {
+      "file": "146.png",
+      "emoji": "😅",
+      "set": "chrissy_vk",
+      "position": 49,
+      "kind": "static",
+      "bytes": 114614
+    },
+    {
+      "file": "147.png",
+      "emoji": "👍",
+      "set": "chrissy_vk",
+      "position": 50,
+      "kind": "static",
+      "bytes": 158010
+    }
+  ],
   "telemost": {
     "status": "pending",
     "packUrl": null,

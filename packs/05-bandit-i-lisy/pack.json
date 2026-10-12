@@ -2,7 +2,7 @@
   "title": "Бандит и Лисы",
   "slug": "05-bandit-i-lisy",
   "order": 5,
-  "sourceMessage": "https://t.me/tg2tm/7",
+  "sourceMessage": "https://t.me/tg2tm_samples/7",
   "stickerLinks": [
     "https://t.me/addstickers/bandit_vk",
     "https://t.me/addstickers/slyfox_vk",
@@ -13,23 +13,1098 @@
       "url": "https://t.me/addstickers/bandit_vk",
       "name": "bandit_vk",
       "telegramTitle": "Бандит (@TgSticker)",
-      "stickerCount": 48
+      "stickerCount": 48,
+      "kinds": {
+        "static": 48,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
     },
     {
       "url": "https://t.me/addstickers/slyfox_vk",
       "name": "slyfox_vk",
       "telegramTitle": "Хищный Лис от @TgSticker",
-      "stickerCount": null
+      "stickerCount": 36,
+      "kinds": {
+        "static": 36,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
     },
     {
       "url": "https://t.me/addstickers/redvk",
       "name": "redvk",
-      "telegramTitle": "Рэд (@TgSticker)",
-      "stickerCount": null
+      "telegramTitle": "Рэд  (@TgSticker)",
+      "stickerCount": 48,
+      "kinds": {
+        "static": 48,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
     }
   ],
-  "stickerCount": null,
-  "images": [],
+  "stickerCount": 132,
+  "images": [
+    {
+      "file": "001.png",
+      "emoji": "❤️",
+      "set": "bandit_vk",
+      "position": 1,
+      "kind": "static",
+      "bytes": 127014
+    },
+    {
+      "file": "002.png",
+      "emoji": "😬",
+      "set": "bandit_vk",
+      "position": 2,
+      "kind": "static",
+      "bytes": 202357
+    },
+    {
+      "file": "003.png",
+      "emoji": "😈",
+      "set": "bandit_vk",
+      "position": 3,
+      "kind": "static",
+      "bytes": 202735
+    },
+    {
+      "file": "004.png",
+      "emoji": "☝️",
+      "set": "bandit_vk",
+      "position": 4,
+      "kind": "static",
+      "bytes": 204412
+    },
+    {
+      "file": "005.png",
+      "emoji": "🤔",
+      "set": "bandit_vk",
+      "position": 5,
+      "kind": "static",
+      "bytes": 184750
+    },
+    {
+      "file": "006.png",
+      "emoji": "🥳",
+      "set": "bandit_vk",
+      "position": 6,
+      "kind": "static",
+      "bytes": 207859
+    },
+    {
+      "file": "007.png",
+      "emoji": "👹",
+      "set": "bandit_vk",
+      "position": 7,
+      "kind": "static",
+      "bytes": 191377
+    },
+    {
+      "file": "008.png",
+      "emoji": "🧼",
+      "set": "bandit_vk",
+      "position": 8,
+      "kind": "static",
+      "bytes": 204936
+    },
+    {
+      "file": "009.png",
+      "emoji": "🫥",
+      "set": "bandit_vk",
+      "position": 9,
+      "kind": "static",
+      "bytes": 206307
+    },
+    {
+      "file": "010.png",
+      "emoji": "🥳",
+      "set": "bandit_vk",
+      "position": 10,
+      "kind": "static",
+      "bytes": 197119
+    },
+    {
+      "file": "011.png",
+      "emoji": "👍",
+      "set": "bandit_vk",
+      "position": 11,
+      "kind": "static",
+      "bytes": 221461
+    },
+    {
+      "file": "012.png",
+      "emoji": "🥺",
+      "set": "bandit_vk",
+      "position": 12,
+      "kind": "static",
+      "bytes": 170579
+    },
+    {
+      "file": "013.png",
+      "emoji": "🥹",
+      "set": "bandit_vk",
+      "position": 13,
+      "kind": "static",
+      "bytes": 186820
+    },
+    {
+      "file": "014.png",
+      "emoji": "😒",
+      "set": "bandit_vk",
+      "position": 14,
+      "kind": "static",
+      "bytes": 189496
+    },
+    {
+      "file": "015.png",
+      "emoji": "😵",
+      "set": "bandit_vk",
+      "position": 15,
+      "kind": "static",
+      "bytes": 176258
+    },
+    {
+      "file": "016.png",
+      "emoji": "🥺",
+      "set": "bandit_vk",
+      "position": 16,
+      "kind": "static",
+      "bytes": 203651
+    },
+    {
+      "file": "017.png",
+      "emoji": "🥺",
+      "set": "bandit_vk",
+      "position": 17,
+      "kind": "static",
+      "bytes": 155624
+    },
+    {
+      "file": "018.png",
+      "emoji": "😬",
+      "set": "bandit_vk",
+      "position": 18,
+      "kind": "static",
+      "bytes": 217459
+    },
+    {
+      "file": "019.png",
+      "emoji": "🫡",
+      "set": "bandit_vk",
+      "position": 19,
+      "kind": "static",
+      "bytes": 153287
+    },
+    {
+      "file": "020.png",
+      "emoji": "🎧",
+      "set": "bandit_vk",
+      "position": 20,
+      "kind": "static",
+      "bytes": 198221
+    },
+    {
+      "file": "021.png",
+      "emoji": "👌",
+      "set": "bandit_vk",
+      "position": 21,
+      "kind": "static",
+      "bytes": 159992
+    },
+    {
+      "file": "022.png",
+      "emoji": "🏴",
+      "set": "bandit_vk",
+      "position": 22,
+      "kind": "static",
+      "bytes": 208095
+    },
+    {
+      "file": "023.png",
+      "emoji": "☺️",
+      "set": "bandit_vk",
+      "position": 23,
+      "kind": "static",
+      "bytes": 172132
+    },
+    {
+      "file": "024.png",
+      "emoji": "😬",
+      "set": "bandit_vk",
+      "position": 24,
+      "kind": "static",
+      "bytes": 181100
+    },
+    {
+      "file": "025.png",
+      "emoji": "🏃‍♀",
+      "set": "bandit_vk",
+      "position": 25,
+      "kind": "static",
+      "bytes": 184002
+    },
+    {
+      "file": "026.png",
+      "emoji": "🤩",
+      "set": "bandit_vk",
+      "position": 26,
+      "kind": "static",
+      "bytes": 198264
+    },
+    {
+      "file": "027.png",
+      "emoji": "😠",
+      "set": "bandit_vk",
+      "position": 27,
+      "kind": "static",
+      "bytes": 155495
+    },
+    {
+      "file": "028.png",
+      "emoji": "❤️",
+      "set": "bandit_vk",
+      "position": 28,
+      "kind": "static",
+      "bytes": 200302
+    },
+    {
+      "file": "029.png",
+      "emoji": "☺️",
+      "set": "bandit_vk",
+      "position": 29,
+      "kind": "static",
+      "bytes": 168117
+    },
+    {
+      "file": "030.png",
+      "emoji": "😈",
+      "set": "bandit_vk",
+      "position": 30,
+      "kind": "static",
+      "bytes": 228297
+    },
+    {
+      "file": "031.png",
+      "emoji": "🥹",
+      "set": "bandit_vk",
+      "position": 31,
+      "kind": "static",
+      "bytes": 204586
+    },
+    {
+      "file": "032.png",
+      "emoji": "😤",
+      "set": "bandit_vk",
+      "position": 32,
+      "kind": "static",
+      "bytes": 206746
+    },
+    {
+      "file": "033.png",
+      "emoji": "😭",
+      "set": "bandit_vk",
+      "position": 33,
+      "kind": "static",
+      "bytes": 165202
+    },
+    {
+      "file": "034.png",
+      "emoji": "😋",
+      "set": "bandit_vk",
+      "position": 34,
+      "kind": "static",
+      "bytes": 194548
+    },
+    {
+      "file": "035.png",
+      "emoji": "😼",
+      "set": "bandit_vk",
+      "position": 35,
+      "kind": "static",
+      "bytes": 129751
+    },
+    {
+      "file": "036.png",
+      "emoji": "🤢",
+      "set": "bandit_vk",
+      "position": 36,
+      "kind": "static",
+      "bytes": 153516
+    },
+    {
+      "file": "037.png",
+      "emoji": "🤪",
+      "set": "bandit_vk",
+      "position": 37,
+      "kind": "static",
+      "bytes": 174679
+    },
+    {
+      "file": "038.png",
+      "emoji": "🤢",
+      "set": "bandit_vk",
+      "position": 38,
+      "kind": "static",
+      "bytes": 204125
+    },
+    {
+      "file": "039.png",
+      "emoji": "🏴",
+      "set": "bandit_vk",
+      "position": 39,
+      "kind": "static",
+      "bytes": 216180
+    },
+    {
+      "file": "040.png",
+      "emoji": "🧐",
+      "set": "bandit_vk",
+      "position": 40,
+      "kind": "static",
+      "bytes": 183656
+    },
+    {
+      "file": "041.png",
+      "emoji": "🐾",
+      "set": "bandit_vk",
+      "position": 41,
+      "kind": "static",
+      "bytes": 184188
+    },
+    {
+      "file": "042.png",
+      "emoji": "👍",
+      "set": "bandit_vk",
+      "position": 42,
+      "kind": "static",
+      "bytes": 202684
+    },
+    {
+      "file": "043.png",
+      "emoji": "😐",
+      "set": "bandit_vk",
+      "position": 43,
+      "kind": "static",
+      "bytes": 227047
+    },
+    {
+      "file": "044.png",
+      "emoji": "🙄",
+      "set": "bandit_vk",
+      "position": 44,
+      "kind": "static",
+      "bytes": 160341
+    },
+    {
+      "file": "045.png",
+      "emoji": "😨",
+      "set": "bandit_vk",
+      "position": 45,
+      "kind": "static",
+      "bytes": 206566
+    },
+    {
+      "file": "046.png",
+      "emoji": "🤵",
+      "set": "bandit_vk",
+      "position": 46,
+      "kind": "static",
+      "bytes": 188210
+    },
+    {
+      "file": "047.png",
+      "emoji": "🥺",
+      "set": "bandit_vk",
+      "position": 47,
+      "kind": "static",
+      "bytes": 209949
+    },
+    {
+      "file": "048.png",
+      "emoji": "😅",
+      "set": "bandit_vk",
+      "position": 48,
+      "kind": "static",
+      "bytes": 179243
+    },
+    {
+      "file": "049.png",
+      "emoji": "😆",
+      "set": "slyfox_vk",
+      "position": 1,
+      "kind": "static",
+      "bytes": 117832
+    },
+    {
+      "file": "050.png",
+      "emoji": "💐",
+      "set": "slyfox_vk",
+      "position": 2,
+      "kind": "static",
+      "bytes": 337642
+    },
+    {
+      "file": "051.png",
+      "emoji": "🤫",
+      "set": "slyfox_vk",
+      "position": 3,
+      "kind": "static",
+      "bytes": 113278
+    },
+    {
+      "file": "052.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 4,
+      "kind": "static",
+      "bytes": 152184
+    },
+    {
+      "file": "053.png",
+      "emoji": "😢",
+      "set": "slyfox_vk",
+      "position": 5,
+      "kind": "static",
+      "bytes": 124835
+    },
+    {
+      "file": "054.png",
+      "emoji": "🙂",
+      "set": "slyfox_vk",
+      "position": 6,
+      "kind": "static",
+      "bytes": 123243
+    },
+    {
+      "file": "055.png",
+      "emoji": "😐",
+      "set": "slyfox_vk",
+      "position": 7,
+      "kind": "static",
+      "bytes": 133137
+    },
+    {
+      "file": "056.png",
+      "emoji": "👿",
+      "set": "slyfox_vk",
+      "position": 8,
+      "kind": "static",
+      "bytes": 184078
+    },
+    {
+      "file": "057.png",
+      "emoji": "😛",
+      "set": "slyfox_vk",
+      "position": 9,
+      "kind": "static",
+      "bytes": 129736
+    },
+    {
+      "file": "058.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 10,
+      "kind": "static",
+      "bytes": 103848
+    },
+    {
+      "file": "059.png",
+      "emoji": "🥳",
+      "set": "slyfox_vk",
+      "position": 11,
+      "kind": "static",
+      "bytes": 182176
+    },
+    {
+      "file": "060.png",
+      "emoji": "🤡",
+      "set": "slyfox_vk",
+      "position": 12,
+      "kind": "static",
+      "bytes": 129296
+    },
+    {
+      "file": "061.png",
+      "emoji": "😤",
+      "set": "slyfox_vk",
+      "position": 13,
+      "kind": "static",
+      "bytes": 133463
+    },
+    {
+      "file": "062.png",
+      "emoji": "😈",
+      "set": "slyfox_vk",
+      "position": 14,
+      "kind": "static",
+      "bytes": 72133
+    },
+    {
+      "file": "063.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 15,
+      "kind": "static",
+      "bytes": 134162
+    },
+    {
+      "file": "064.png",
+      "emoji": "😏",
+      "set": "slyfox_vk",
+      "position": 16,
+      "kind": "static",
+      "bytes": 165818
+    },
+    {
+      "file": "065.png",
+      "emoji": "🤴",
+      "set": "slyfox_vk",
+      "position": 17,
+      "kind": "static",
+      "bytes": 197990
+    },
+    {
+      "file": "066.png",
+      "emoji": "❌",
+      "set": "slyfox_vk",
+      "position": 18,
+      "kind": "static",
+      "bytes": 146904
+    },
+    {
+      "file": "067.png",
+      "emoji": "🤔",
+      "set": "slyfox_vk",
+      "position": 19,
+      "kind": "static",
+      "bytes": 111570
+    },
+    {
+      "file": "068.png",
+      "emoji": "😳",
+      "set": "slyfox_vk",
+      "position": 20,
+      "kind": "static",
+      "bytes": 190206
+    },
+    {
+      "file": "069.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 21,
+      "kind": "static",
+      "bytes": 196395
+    },
+    {
+      "file": "070.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 22,
+      "kind": "static",
+      "bytes": 103582
+    },
+    {
+      "file": "071.png",
+      "emoji": "😑",
+      "set": "slyfox_vk",
+      "position": 23,
+      "kind": "static",
+      "bytes": 100073
+    },
+    {
+      "file": "072.png",
+      "emoji": "🥵",
+      "set": "slyfox_vk",
+      "position": 24,
+      "kind": "static",
+      "bytes": 118106
+    },
+    {
+      "file": "073.png",
+      "emoji": "🤒",
+      "set": "slyfox_vk",
+      "position": 25,
+      "kind": "static",
+      "bytes": 155396
+    },
+    {
+      "file": "074.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 26,
+      "kind": "static",
+      "bytes": 144953
+    },
+    {
+      "file": "075.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 27,
+      "kind": "static",
+      "bytes": 108300
+    },
+    {
+      "file": "076.png",
+      "emoji": "🙈",
+      "set": "slyfox_vk",
+      "position": 28,
+      "kind": "static",
+      "bytes": 109486
+    },
+    {
+      "file": "077.png",
+      "emoji": "😲",
+      "set": "slyfox_vk",
+      "position": 29,
+      "kind": "static",
+      "bytes": 129797
+    },
+    {
+      "file": "078.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 30,
+      "kind": "static",
+      "bytes": 94167
+    },
+    {
+      "file": "079.png",
+      "emoji": "😒",
+      "set": "slyfox_vk",
+      "position": 31,
+      "kind": "static",
+      "bytes": 187639
+    },
+    {
+      "file": "080.png",
+      "emoji": "😔",
+      "set": "slyfox_vk",
+      "position": 32,
+      "kind": "static",
+      "bytes": 170276
+    },
+    {
+      "file": "081.png",
+      "emoji": "💰",
+      "set": "slyfox_vk",
+      "position": 33,
+      "kind": "static",
+      "bytes": 190030
+    },
+    {
+      "file": "082.png",
+      "emoji": "⭐",
+      "set": "slyfox_vk",
+      "position": 34,
+      "kind": "static",
+      "bytes": 213264
+    },
+    {
+      "file": "083.png",
+      "emoji": "💡",
+      "set": "slyfox_vk",
+      "position": 35,
+      "kind": "static",
+      "bytes": 129725
+    },
+    {
+      "file": "084.png",
+      "emoji": "🙆",
+      "set": "slyfox_vk",
+      "position": 36,
+      "kind": "static",
+      "bytes": 211489
+    },
+    {
+      "file": "085.png",
+      "emoji": "👋",
+      "set": "redvk",
+      "position": 1,
+      "kind": "static",
+      "bytes": 228700
+    },
+    {
+      "file": "086.png",
+      "emoji": "👀",
+      "set": "redvk",
+      "position": 2,
+      "kind": "static",
+      "bytes": 229810
+    },
+    {
+      "file": "087.png",
+      "emoji": "😈",
+      "set": "redvk",
+      "position": 3,
+      "kind": "static",
+      "bytes": 203997
+    },
+    {
+      "file": "088.png",
+      "emoji": "☝️",
+      "set": "redvk",
+      "position": 4,
+      "kind": "static",
+      "bytes": 223134
+    },
+    {
+      "file": "089.png",
+      "emoji": "⛸",
+      "set": "redvk",
+      "position": 5,
+      "kind": "static",
+      "bytes": 208270
+    },
+    {
+      "file": "090.png",
+      "emoji": "🤷‍♂️",
+      "set": "redvk",
+      "position": 6,
+      "kind": "static",
+      "bytes": 234063
+    },
+    {
+      "file": "091.png",
+      "emoji": "😡",
+      "set": "redvk",
+      "position": 7,
+      "kind": "static",
+      "bytes": 206285
+    },
+    {
+      "file": "092.png",
+      "emoji": "🤟",
+      "set": "redvk",
+      "position": 8,
+      "kind": "static",
+      "bytes": 197328
+    },
+    {
+      "file": "093.png",
+      "emoji": "❄️",
+      "set": "redvk",
+      "position": 9,
+      "kind": "static",
+      "bytes": 196937
+    },
+    {
+      "file": "094.png",
+      "emoji": "👍",
+      "set": "redvk",
+      "position": 10,
+      "kind": "static",
+      "bytes": 174208
+    },
+    {
+      "file": "095.png",
+      "emoji": "😈",
+      "set": "redvk",
+      "position": 11,
+      "kind": "static",
+      "bytes": 217222
+    },
+    {
+      "file": "096.png",
+      "emoji": "😐",
+      "set": "redvk",
+      "position": 12,
+      "kind": "static",
+      "bytes": 178944
+    },
+    {
+      "file": "097.png",
+      "emoji": "😒",
+      "set": "redvk",
+      "position": 13,
+      "kind": "static",
+      "bytes": 199360
+    },
+    {
+      "file": "098.png",
+      "emoji": "🏂",
+      "set": "redvk",
+      "position": 14,
+      "kind": "static",
+      "bytes": 210701
+    },
+    {
+      "file": "099.png",
+      "emoji": "😬",
+      "set": "redvk",
+      "position": 15,
+      "kind": "static",
+      "bytes": 239122
+    },
+    {
+      "file": "100.png",
+      "emoji": "😃",
+      "set": "redvk",
+      "position": 16,
+      "kind": "static",
+      "bytes": 182476
+    },
+    {
+      "file": "101.png",
+      "emoji": "😀",
+      "set": "redvk",
+      "position": 17,
+      "kind": "static",
+      "bytes": 194769
+    },
+    {
+      "file": "102.png",
+      "emoji": "⛷",
+      "set": "redvk",
+      "position": 18,
+      "kind": "static",
+      "bytes": 164655
+    },
+    {
+      "file": "103.png",
+      "emoji": "😍",
+      "set": "redvk",
+      "position": 19,
+      "kind": "static",
+      "bytes": 229925
+    },
+    {
+      "file": "104.png",
+      "emoji": "❓",
+      "set": "redvk",
+      "position": 20,
+      "kind": "static",
+      "bytes": 191304
+    },
+    {
+      "file": "105.png",
+      "emoji": "😐",
+      "set": "redvk",
+      "position": 21,
+      "kind": "static",
+      "bytes": 193893
+    },
+    {
+      "file": "106.png",
+      "emoji": "😳",
+      "set": "redvk",
+      "position": 22,
+      "kind": "static",
+      "bytes": 215845
+    },
+    {
+      "file": "107.png",
+      "emoji": "🔥",
+      "set": "redvk",
+      "position": 23,
+      "kind": "static",
+      "bytes": 231107
+    },
+    {
+      "file": "108.png",
+      "emoji": "🆘",
+      "set": "redvk",
+      "position": 24,
+      "kind": "static",
+      "bytes": 118066
+    },
+    {
+      "file": "109.png",
+      "emoji": "☺️",
+      "set": "redvk",
+      "position": 25,
+      "kind": "static",
+      "bytes": 214926
+    },
+    {
+      "file": "110.png",
+      "emoji": "😅",
+      "set": "redvk",
+      "position": 26,
+      "kind": "static",
+      "bytes": 232027
+    },
+    {
+      "file": "111.png",
+      "emoji": "❓",
+      "set": "redvk",
+      "position": 27,
+      "kind": "static",
+      "bytes": 233613
+    },
+    {
+      "file": "112.png",
+      "emoji": "🤔",
+      "set": "redvk",
+      "position": 28,
+      "kind": "static",
+      "bytes": 201245
+    },
+    {
+      "file": "113.png",
+      "emoji": "😳",
+      "set": "redvk",
+      "position": 29,
+      "kind": "static",
+      "bytes": 225996
+    },
+    {
+      "file": "114.png",
+      "emoji": "😊",
+      "set": "redvk",
+      "position": 30,
+      "kind": "static",
+      "bytes": 183075
+    },
+    {
+      "file": "115.png",
+      "emoji": "🍝",
+      "set": "redvk",
+      "position": 31,
+      "kind": "static",
+      "bytes": 214271
+    },
+    {
+      "file": "116.png",
+      "emoji": "😴",
+      "set": "redvk",
+      "position": 32,
+      "kind": "static",
+      "bytes": 196573
+    },
+    {
+      "file": "117.png",
+      "emoji": "😡",
+      "set": "redvk",
+      "position": 33,
+      "kind": "static",
+      "bytes": 211399
+    },
+    {
+      "file": "118.png",
+      "emoji": "🍦",
+      "set": "redvk",
+      "position": 34,
+      "kind": "static",
+      "bytes": 256175
+    },
+    {
+      "file": "119.png",
+      "emoji": "🥺",
+      "set": "redvk",
+      "position": 35,
+      "kind": "static",
+      "bytes": 198007
+    },
+    {
+      "file": "120.png",
+      "emoji": "❓",
+      "set": "redvk",
+      "position": 36,
+      "kind": "static",
+      "bytes": 242605
+    },
+    {
+      "file": "121.png",
+      "emoji": "🌡",
+      "set": "redvk",
+      "position": 37,
+      "kind": "static",
+      "bytes": 206438
+    },
+    {
+      "file": "122.png",
+      "emoji": "☺️",
+      "set": "redvk",
+      "position": 38,
+      "kind": "static",
+      "bytes": 221941
+    },
+    {
+      "file": "123.png",
+      "emoji": "😳",
+      "set": "redvk",
+      "position": 39,
+      "kind": "static",
+      "bytes": 239010
+    },
+    {
+      "file": "124.png",
+      "emoji": "😐",
+      "set": "redvk",
+      "position": 40,
+      "kind": "static",
+      "bytes": 203551
+    },
+    {
+      "file": "125.png",
+      "emoji": "😢",
+      "set": "redvk",
+      "position": 41,
+      "kind": "static",
+      "bytes": 176393
+    },
+    {
+      "file": "126.png",
+      "emoji": "🥶",
+      "set": "redvk",
+      "position": 42,
+      "kind": "static",
+      "bytes": 221137
+    },
+    {
+      "file": "127.png",
+      "emoji": "🥺",
+      "set": "redvk",
+      "position": 43,
+      "kind": "static",
+      "bytes": 221055
+    },
+    {
+      "file": "128.png",
+      "emoji": "🤷‍♂️",
+      "set": "redvk",
+      "position": 44,
+      "kind": "static",
+      "bytes": 209707
+    },
+    {
+      "file": "129.png",
+      "emoji": "💃",
+      "set": "redvk",
+      "position": 45,
+      "kind": "static",
+      "bytes": 173366
+    },
+    {
+      "file": "130.png",
+      "emoji": "😅",
+      "set": "redvk",
+      "position": 46,
+      "kind": "static",
+      "bytes": 206497
+    },
+    {
+      "file": "131.png",
+      "emoji": "👊",
+      "set": "redvk",
+      "position": 47,
+      "kind": "static",
+      "bytes": 125724
+    },
+    {
+      "file": "132.png",
+      "emoji": "👋",
+      "set": "redvk",
+      "position": 48,
+      "kind": "static",
+      "bytes": 204132
+    }
+  ],
   "telemost": {
     "status": "pending",
     "packUrl": null,

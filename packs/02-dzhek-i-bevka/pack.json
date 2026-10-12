@@ -2,7 +2,7 @@
   "title": "Джек и Бевка",
   "slug": "02-dzhek-i-bevka",
   "order": 2,
-  "sourceMessage": "https://t.me/tg2tm/4",
+  "sourceMessage": "https://t.me/tg2tm_samples/4",
   "stickerLinks": [
     "https://t.me/addstickers/squirrely_vk_by_TgEmojiBot",
     "https://t.me/addstickers/jack_vk_by_TgEmojiBot",
@@ -13,23 +13,1206 @@
       "url": "https://t.me/addstickers/squirrely_vk_by_TgEmojiBot",
       "name": "squirrely_vk_by_TgEmojiBot",
       "telegramTitle": "Бевка @stickersvvk",
-      "stickerCount": null
+      "stickerCount": 49,
+      "kinds": {
+        "static": 0,
+        "animated": 0,
+        "video": 48
+      },
+      "skipped": [
+        {
+          "position": 49,
+          "emoji": "©️",
+          "reason": "promo sticker for the pack author's channel"
+        }
+      ]
     },
     {
       "url": "https://t.me/addstickers/jack_vk_by_TgEmojiBot",
       "name": "jack_vk_by_TgEmojiBot",
       "telegramTitle": "Джек @stickersvvk",
-      "stickerCount": null
+      "stickerCount": 49,
+      "kinds": {
+        "static": 48,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": [
+        {
+          "position": 49,
+          "emoji": "©️",
+          "reason": "promo sticker for the pack author's channel"
+        }
+      ]
     },
     {
       "url": "https://t.me/addstickers/motherofjackalsjack2",
       "name": "motherofjackalsjack2",
       "telegramTitle": "Джек 2.0 от @TgSticker",
-      "stickerCount": null
+      "stickerCount": 48,
+      "kinds": {
+        "static": 48,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
     }
   ],
-  "stickerCount": null,
-  "images": [],
+  "stickerCount": 144,
+  "images": [
+    {
+      "file": "001.png",
+      "emoji": "😈",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 1,
+      "kind": "video",
+      "bytes": 124395
+    },
+    {
+      "file": "002.png",
+      "emoji": "🙂",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 2,
+      "kind": "video",
+      "bytes": 75114
+    },
+    {
+      "file": "003.png",
+      "emoji": "🍑",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 3,
+      "kind": "video",
+      "bytes": 120160
+    },
+    {
+      "file": "004.png",
+      "emoji": "😐",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 4,
+      "kind": "video",
+      "bytes": 123177
+    },
+    {
+      "file": "005.png",
+      "emoji": "🥱",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 5,
+      "kind": "video",
+      "bytes": 155021
+    },
+    {
+      "file": "006.png",
+      "emoji": "🍃",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 6,
+      "kind": "video",
+      "bytes": 125610
+    },
+    {
+      "file": "007.png",
+      "emoji": "🫥",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 7,
+      "kind": "video",
+      "bytes": 100905
+    },
+    {
+      "file": "008.png",
+      "emoji": "🤨",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 8,
+      "kind": "video",
+      "bytes": 103225
+    },
+    {
+      "file": "009.png",
+      "emoji": "😒",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 9,
+      "kind": "video",
+      "bytes": 111024
+    },
+    {
+      "file": "010.png",
+      "emoji": "💨",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 10,
+      "kind": "video",
+      "bytes": 126231
+    },
+    {
+      "file": "011.png",
+      "emoji": "💄",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 11,
+      "kind": "video",
+      "bytes": 139645
+    },
+    {
+      "file": "012.png",
+      "emoji": "🫂",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 12,
+      "kind": "video",
+      "bytes": 132437
+    },
+    {
+      "file": "013.png",
+      "emoji": "👻",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 13,
+      "kind": "video",
+      "bytes": 114162
+    },
+    {
+      "file": "014.png",
+      "emoji": "😬",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 14,
+      "kind": "video",
+      "bytes": 129995
+    },
+    {
+      "file": "015.png",
+      "emoji": "😋",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 15,
+      "kind": "video",
+      "bytes": 134762
+    },
+    {
+      "file": "016.png",
+      "emoji": "🤓",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 16,
+      "kind": "video",
+      "bytes": 180082
+    },
+    {
+      "file": "017.png",
+      "emoji": "😱",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 17,
+      "kind": "video",
+      "bytes": 185923
+    },
+    {
+      "file": "018.png",
+      "emoji": "🤧",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 18,
+      "kind": "video",
+      "bytes": 147417
+    },
+    {
+      "file": "019.png",
+      "emoji": "😬",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 19,
+      "kind": "video",
+      "bytes": 145251
+    },
+    {
+      "file": "020.png",
+      "emoji": "😌",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 20,
+      "kind": "video",
+      "bytes": 110068
+    },
+    {
+      "file": "021.png",
+      "emoji": "😛",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 21,
+      "kind": "video",
+      "bytes": 114587
+    },
+    {
+      "file": "022.png",
+      "emoji": "🥰",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 22,
+      "kind": "video",
+      "bytes": 93538
+    },
+    {
+      "file": "023.png",
+      "emoji": "😵",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 23,
+      "kind": "video",
+      "bytes": 111142
+    },
+    {
+      "file": "024.png",
+      "emoji": "😒",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 24,
+      "kind": "video",
+      "bytes": 123936
+    },
+    {
+      "file": "025.png",
+      "emoji": "👋",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 25,
+      "kind": "video",
+      "bytes": 171288
+    },
+    {
+      "file": "026.png",
+      "emoji": "😳",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 26,
+      "kind": "video",
+      "bytes": 161595
+    },
+    {
+      "file": "027.png",
+      "emoji": "🤔",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 27,
+      "kind": "video",
+      "bytes": 97068
+    },
+    {
+      "file": "028.png",
+      "emoji": "🤠",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 28,
+      "kind": "video",
+      "bytes": 159126
+    },
+    {
+      "file": "029.png",
+      "emoji": "❓",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 29,
+      "kind": "video",
+      "bytes": 126101
+    },
+    {
+      "file": "030.png",
+      "emoji": "💥",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 30,
+      "kind": "video",
+      "bytes": 187656
+    },
+    {
+      "file": "031.png",
+      "emoji": "🎂",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 31,
+      "kind": "video",
+      "bytes": 168090
+    },
+    {
+      "file": "032.png",
+      "emoji": "💪",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 32,
+      "kind": "video",
+      "bytes": 125956
+    },
+    {
+      "file": "033.png",
+      "emoji": "😏",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 33,
+      "kind": "video",
+      "bytes": 124719
+    },
+    {
+      "file": "034.png",
+      "emoji": "🫤",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 34,
+      "kind": "video",
+      "bytes": 141431
+    },
+    {
+      "file": "035.png",
+      "emoji": "🤦‍♂️",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 35,
+      "kind": "video",
+      "bytes": 113679
+    },
+    {
+      "file": "036.png",
+      "emoji": "🫠",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 36,
+      "kind": "video",
+      "bytes": 105066
+    },
+    {
+      "file": "037.png",
+      "emoji": "💵",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 37,
+      "kind": "video",
+      "bytes": 161583
+    },
+    {
+      "file": "038.png",
+      "emoji": "😱",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 38,
+      "kind": "video",
+      "bytes": 130031
+    },
+    {
+      "file": "039.png",
+      "emoji": "🥛",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 39,
+      "kind": "video",
+      "bytes": 152615
+    },
+    {
+      "file": "040.png",
+      "emoji": "🫨",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 40,
+      "kind": "video",
+      "bytes": 68020
+    },
+    {
+      "file": "041.png",
+      "emoji": "😴",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 41,
+      "kind": "video",
+      "bytes": 177185
+    },
+    {
+      "file": "042.png",
+      "emoji": "😐",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 42,
+      "kind": "video",
+      "bytes": 157374
+    },
+    {
+      "file": "043.png",
+      "emoji": "#️⃣",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 43,
+      "kind": "video",
+      "bytes": 151688
+    },
+    {
+      "file": "044.png",
+      "emoji": "🩻",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 44,
+      "kind": "video",
+      "bytes": 68461
+    },
+    {
+      "file": "045.png",
+      "emoji": "😵",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 45,
+      "kind": "video",
+      "bytes": 175026
+    },
+    {
+      "file": "046.png",
+      "emoji": "😶",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 46,
+      "kind": "video",
+      "bytes": 164514
+    },
+    {
+      "file": "047.png",
+      "emoji": "👨‍💻",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 47,
+      "kind": "video",
+      "bytes": 172996
+    },
+    {
+      "file": "048.png",
+      "emoji": "🍿",
+      "set": "squirrely_vk_by_TgEmojiBot",
+      "position": 48,
+      "kind": "video",
+      "bytes": 230509
+    },
+    {
+      "file": "049.png",
+      "emoji": "😳",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 1,
+      "kind": "static",
+      "bytes": 207550
+    },
+    {
+      "file": "050.png",
+      "emoji": "😁",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 2,
+      "kind": "static",
+      "bytes": 258364
+    },
+    {
+      "file": "051.png",
+      "emoji": "🤷‍♂",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 3,
+      "kind": "static",
+      "bytes": 216945
+    },
+    {
+      "file": "052.png",
+      "emoji": "🤗",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 4,
+      "kind": "static",
+      "bytes": 185739
+    },
+    {
+      "file": "053.png",
+      "emoji": "😱",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 5,
+      "kind": "static",
+      "bytes": 227741
+    },
+    {
+      "file": "054.png",
+      "emoji": "😏",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 6,
+      "kind": "static",
+      "bytes": 222463
+    },
+    {
+      "file": "055.png",
+      "emoji": "😮",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 7,
+      "kind": "static",
+      "bytes": 228586
+    },
+    {
+      "file": "056.png",
+      "emoji": "😈",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 8,
+      "kind": "static",
+      "bytes": 176917
+    },
+    {
+      "file": "057.png",
+      "emoji": "😮",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 9,
+      "kind": "static",
+      "bytes": 210715
+    },
+    {
+      "file": "058.png",
+      "emoji": "🚽",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 10,
+      "kind": "static",
+      "bytes": 196994
+    },
+    {
+      "file": "059.png",
+      "emoji": "💤",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 11,
+      "kind": "static",
+      "bytes": 233127
+    },
+    {
+      "file": "060.png",
+      "emoji": "🚩",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 12,
+      "kind": "static",
+      "bytes": 209546
+    },
+    {
+      "file": "061.png",
+      "emoji": "😬",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 13,
+      "kind": "static",
+      "bytes": 187120
+    },
+    {
+      "file": "062.png",
+      "emoji": "😢",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 14,
+      "kind": "static",
+      "bytes": 186153
+    },
+    {
+      "file": "063.png",
+      "emoji": "🥳",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 15,
+      "kind": "static",
+      "bytes": 212077
+    },
+    {
+      "file": "064.png",
+      "emoji": "😒",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 16,
+      "kind": "static",
+      "bytes": 256412
+    },
+    {
+      "file": "065.png",
+      "emoji": "🤩",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 17,
+      "kind": "static",
+      "bytes": 201846
+    },
+    {
+      "file": "066.png",
+      "emoji": "👍",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 18,
+      "kind": "static",
+      "bytes": 153590
+    },
+    {
+      "file": "067.png",
+      "emoji": "😭",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 19,
+      "kind": "static",
+      "bytes": 211601
+    },
+    {
+      "file": "068.png",
+      "emoji": "😭",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 20,
+      "kind": "static",
+      "bytes": 140307
+    },
+    {
+      "file": "069.png",
+      "emoji": "☺️",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 21,
+      "kind": "static",
+      "bytes": 211519
+    },
+    {
+      "file": "070.png",
+      "emoji": "🤯",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 22,
+      "kind": "static",
+      "bytes": 190825
+    },
+    {
+      "file": "071.png",
+      "emoji": "🪦",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 23,
+      "kind": "static",
+      "bytes": 191595
+    },
+    {
+      "file": "072.png",
+      "emoji": "😒",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 24,
+      "kind": "static",
+      "bytes": 180341
+    },
+    {
+      "file": "073.png",
+      "emoji": "🥤",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 25,
+      "kind": "static",
+      "bytes": 180297
+    },
+    {
+      "file": "074.png",
+      "emoji": "😳",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 26,
+      "kind": "static",
+      "bytes": 168429
+    },
+    {
+      "file": "075.png",
+      "emoji": "🥺",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 27,
+      "kind": "static",
+      "bytes": 207916
+    },
+    {
+      "file": "076.png",
+      "emoji": "🍔",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 28,
+      "kind": "static",
+      "bytes": 214211
+    },
+    {
+      "file": "077.png",
+      "emoji": "🔩",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 29,
+      "kind": "static",
+      "bytes": 171446
+    },
+    {
+      "file": "078.png",
+      "emoji": "🔇",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 30,
+      "kind": "static",
+      "bytes": 154348
+    },
+    {
+      "file": "079.png",
+      "emoji": "😌",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 31,
+      "kind": "static",
+      "bytes": 158403
+    },
+    {
+      "file": "080.png",
+      "emoji": "❤️‍🔥",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 32,
+      "kind": "static",
+      "bytes": 223256
+    },
+    {
+      "file": "081.png",
+      "emoji": "😡",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 33,
+      "kind": "static",
+      "bytes": 228998
+    },
+    {
+      "file": "082.png",
+      "emoji": "😶",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 34,
+      "kind": "static",
+      "bytes": 195898
+    },
+    {
+      "file": "083.png",
+      "emoji": "😌",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 35,
+      "kind": "static",
+      "bytes": 207513
+    },
+    {
+      "file": "084.png",
+      "emoji": "🤦‍♂",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 36,
+      "kind": "static",
+      "bytes": 204931
+    },
+    {
+      "file": "085.png",
+      "emoji": "💃",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 37,
+      "kind": "static",
+      "bytes": 177454
+    },
+    {
+      "file": "086.png",
+      "emoji": "🫤",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 38,
+      "kind": "static",
+      "bytes": 142416
+    },
+    {
+      "file": "087.png",
+      "emoji": "😌",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 39,
+      "kind": "static",
+      "bytes": 131465
+    },
+    {
+      "file": "088.png",
+      "emoji": "🤡",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 40,
+      "kind": "static",
+      "bytes": 182803
+    },
+    {
+      "file": "089.png",
+      "emoji": "😓",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 41,
+      "kind": "static",
+      "bytes": 259715
+    },
+    {
+      "file": "090.png",
+      "emoji": "🚬",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 42,
+      "kind": "static",
+      "bytes": 126398
+    },
+    {
+      "file": "091.png",
+      "emoji": "😓",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 43,
+      "kind": "static",
+      "bytes": 225713
+    },
+    {
+      "file": "092.png",
+      "emoji": "😳",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 44,
+      "kind": "static",
+      "bytes": 198720
+    },
+    {
+      "file": "093.png",
+      "emoji": "😎",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 45,
+      "kind": "static",
+      "bytes": 168117
+    },
+    {
+      "file": "094.png",
+      "emoji": "⌛️",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 46,
+      "kind": "static",
+      "bytes": 154080
+    },
+    {
+      "file": "095.png",
+      "emoji": "☕",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 47,
+      "kind": "static",
+      "bytes": 235709
+    },
+    {
+      "file": "096.png",
+      "emoji": "😕",
+      "set": "jack_vk_by_TgEmojiBot",
+      "position": 48,
+      "kind": "static",
+      "bytes": 208106
+    },
+    {
+      "file": "097.png",
+      "emoji": "😴",
+      "set": "motherofjackalsjack2",
+      "position": 1,
+      "kind": "static",
+      "bytes": 174564
+    },
+    {
+      "file": "098.png",
+      "emoji": "😐",
+      "set": "motherofjackalsjack2",
+      "position": 2,
+      "kind": "static",
+      "bytes": 125977
+    },
+    {
+      "file": "099.png",
+      "emoji": "😠",
+      "set": "motherofjackalsjack2",
+      "position": 3,
+      "kind": "static",
+      "bytes": 136029
+    },
+    {
+      "file": "100.png",
+      "emoji": "🤪",
+      "set": "motherofjackalsjack2",
+      "position": 4,
+      "kind": "static",
+      "bytes": 178571
+    },
+    {
+      "file": "101.png",
+      "emoji": "🤝",
+      "set": "motherofjackalsjack2",
+      "position": 5,
+      "kind": "static",
+      "bytes": 178232
+    },
+    {
+      "file": "102.png",
+      "emoji": "😭",
+      "set": "motherofjackalsjack2",
+      "position": 6,
+      "kind": "static",
+      "bytes": 188636
+    },
+    {
+      "file": "103.png",
+      "emoji": "🚃",
+      "set": "motherofjackalsjack2",
+      "position": 7,
+      "kind": "static",
+      "bytes": 227623
+    },
+    {
+      "file": "104.png",
+      "emoji": "☠",
+      "set": "motherofjackalsjack2",
+      "position": 8,
+      "kind": "static",
+      "bytes": 166337
+    },
+    {
+      "file": "105.png",
+      "emoji": "🥳",
+      "set": "motherofjackalsjack2",
+      "position": 9,
+      "kind": "static",
+      "bytes": 215363
+    },
+    {
+      "file": "106.png",
+      "emoji": "🚽",
+      "set": "motherofjackalsjack2",
+      "position": 10,
+      "kind": "static",
+      "bytes": 192604
+    },
+    {
+      "file": "107.png",
+      "emoji": "☕️",
+      "set": "motherofjackalsjack2",
+      "position": 11,
+      "kind": "static",
+      "bytes": 213823
+    },
+    {
+      "file": "108.png",
+      "emoji": "😧",
+      "set": "motherofjackalsjack2",
+      "position": 12,
+      "kind": "static",
+      "bytes": 164732
+    },
+    {
+      "file": "109.png",
+      "emoji": "👍",
+      "set": "motherofjackalsjack2",
+      "position": 13,
+      "kind": "static",
+      "bytes": 220557
+    },
+    {
+      "file": "110.png",
+      "emoji": "🤒",
+      "set": "motherofjackalsjack2",
+      "position": 14,
+      "kind": "static",
+      "bytes": 244581
+    },
+    {
+      "file": "111.png",
+      "emoji": "🥱",
+      "set": "motherofjackalsjack2",
+      "position": 15,
+      "kind": "static",
+      "bytes": 234009
+    },
+    {
+      "file": "112.png",
+      "emoji": "🥳",
+      "set": "motherofjackalsjack2",
+      "position": 16,
+      "kind": "static",
+      "bytes": 211497
+    },
+    {
+      "file": "113.png",
+      "emoji": "😈",
+      "set": "motherofjackalsjack2",
+      "position": 17,
+      "kind": "static",
+      "bytes": 160172
+    },
+    {
+      "file": "114.png",
+      "emoji": "😭",
+      "set": "motherofjackalsjack2",
+      "position": 18,
+      "kind": "static",
+      "bytes": 183172
+    },
+    {
+      "file": "115.png",
+      "emoji": "🌺",
+      "set": "motherofjackalsjack2",
+      "position": 19,
+      "kind": "static",
+      "bytes": 236684
+    },
+    {
+      "file": "116.png",
+      "emoji": "🪟",
+      "set": "motherofjackalsjack2",
+      "position": 20,
+      "kind": "static",
+      "bytes": 201706
+    },
+    {
+      "file": "117.png",
+      "emoji": "🙄",
+      "set": "motherofjackalsjack2",
+      "position": 21,
+      "kind": "static",
+      "bytes": 171303
+    },
+    {
+      "file": "118.png",
+      "emoji": "😑",
+      "set": "motherofjackalsjack2",
+      "position": 22,
+      "kind": "static",
+      "bytes": 201747
+    },
+    {
+      "file": "119.png",
+      "emoji": "😵",
+      "set": "motherofjackalsjack2",
+      "position": 23,
+      "kind": "static",
+      "bytes": 233447
+    },
+    {
+      "file": "120.png",
+      "emoji": "🤨",
+      "set": "motherofjackalsjack2",
+      "position": 24,
+      "kind": "static",
+      "bytes": 201113
+    },
+    {
+      "file": "121.png",
+      "emoji": "🔪",
+      "set": "motherofjackalsjack2",
+      "position": 25,
+      "kind": "static",
+      "bytes": 169591
+    },
+    {
+      "file": "122.png",
+      "emoji": "🔪",
+      "set": "motherofjackalsjack2",
+      "position": 26,
+      "kind": "static",
+      "bytes": 226887
+    },
+    {
+      "file": "123.png",
+      "emoji": "😠",
+      "set": "motherofjackalsjack2",
+      "position": 27,
+      "kind": "static",
+      "bytes": 196858
+    },
+    {
+      "file": "124.png",
+      "emoji": "🧑‍💼",
+      "set": "motherofjackalsjack2",
+      "position": 28,
+      "kind": "static",
+      "bytes": 177146
+    },
+    {
+      "file": "125.png",
+      "emoji": "😁",
+      "set": "motherofjackalsjack2",
+      "position": 29,
+      "kind": "static",
+      "bytes": 120949
+    },
+    {
+      "file": "126.png",
+      "emoji": "🤔",
+      "set": "motherofjackalsjack2",
+      "position": 30,
+      "kind": "static",
+      "bytes": 156999
+    },
+    {
+      "file": "127.png",
+      "emoji": "😢",
+      "set": "motherofjackalsjack2",
+      "position": 31,
+      "kind": "static",
+      "bytes": 195231
+    },
+    {
+      "file": "128.png",
+      "emoji": "🙂",
+      "set": "motherofjackalsjack2",
+      "position": 32,
+      "kind": "static",
+      "bytes": 159300
+    },
+    {
+      "file": "129.png",
+      "emoji": "😭",
+      "set": "motherofjackalsjack2",
+      "position": 33,
+      "kind": "static",
+      "bytes": 187668
+    },
+    {
+      "file": "130.png",
+      "emoji": "👍",
+      "set": "motherofjackalsjack2",
+      "position": 34,
+      "kind": "static",
+      "bytes": 170953
+    },
+    {
+      "file": "131.png",
+      "emoji": "😴",
+      "set": "motherofjackalsjack2",
+      "position": 35,
+      "kind": "static",
+      "bytes": 208165
+    },
+    {
+      "file": "132.png",
+      "emoji": "🥺",
+      "set": "motherofjackalsjack2",
+      "position": 36,
+      "kind": "static",
+      "bytes": 187054
+    },
+    {
+      "file": "133.png",
+      "emoji": "🙁",
+      "set": "motherofjackalsjack2",
+      "position": 37,
+      "kind": "static",
+      "bytes": 157129
+    },
+    {
+      "file": "134.png",
+      "emoji": "❌",
+      "set": "motherofjackalsjack2",
+      "position": 38,
+      "kind": "static",
+      "bytes": 132472
+    },
+    {
+      "file": "135.png",
+      "emoji": "👊",
+      "set": "motherofjackalsjack2",
+      "position": 39,
+      "kind": "static",
+      "bytes": 169454
+    },
+    {
+      "file": "136.png",
+      "emoji": "🗡",
+      "set": "motherofjackalsjack2",
+      "position": 40,
+      "kind": "static",
+      "bytes": 200117
+    },
+    {
+      "file": "137.png",
+      "emoji": "❤️",
+      "set": "motherofjackalsjack2",
+      "position": 41,
+      "kind": "static",
+      "bytes": 141800
+    },
+    {
+      "file": "138.png",
+      "emoji": "🗒",
+      "set": "motherofjackalsjack2",
+      "position": 42,
+      "kind": "static",
+      "bytes": 186894
+    },
+    {
+      "file": "139.png",
+      "emoji": "🤵‍♂",
+      "set": "motherofjackalsjack2",
+      "position": 43,
+      "kind": "static",
+      "bytes": 164729
+    },
+    {
+      "file": "140.png",
+      "emoji": "☝️",
+      "set": "motherofjackalsjack2",
+      "position": 44,
+      "kind": "static",
+      "bytes": 196544
+    },
+    {
+      "file": "141.png",
+      "emoji": "📸",
+      "set": "motherofjackalsjack2",
+      "position": 45,
+      "kind": "static",
+      "bytes": 158017
+    },
+    {
+      "file": "142.png",
+      "emoji": "🤷‍♂",
+      "set": "motherofjackalsjack2",
+      "position": 46,
+      "kind": "static",
+      "bytes": 165229
+    },
+    {
+      "file": "143.png",
+      "emoji": "🧐",
+      "set": "motherofjackalsjack2",
+      "position": 47,
+      "kind": "static",
+      "bytes": 179144
+    },
+    {
+      "file": "144.png",
+      "emoji": "🤨",
+      "set": "motherofjackalsjack2",
+      "position": 48,
+      "kind": "static",
+      "bytes": 165451
+    }
+  ],
   "telemost": {
     "status": "pending",
     "packUrl": null,

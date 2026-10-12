@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKS = ROOT / "packs"
 REQUIRED = ("title", "slug", "order", "sourceMessage", "stickerLinks", "telemost")
 STATUSES = {"pending", "uploading", "done", "error"}
+MAX_PER_PACK = 150
 
 
 def main() -> int:
@@ -41,14 +42,24 @@ def main() -> int:
         if not links or not all(isinstance(x, str) and x.startswith("https://t.me/addstickers/") for x in links):
             errors.append(f"{folder.name}: stickerLinks must be t.me/addstickers URLs")
         source = data.get("sourceMessage") or ""
-        if not source.startswith("https://t.me/tg2tm/"):
-            errors.append(f"{folder.name}: sourceMessage must point at t.me/tg2tm")
+        if not source.startswith("https://t.me/tg2tm_samples/"):
+            errors.append(f"{folder.name}: sourceMessage must point at t.me/tg2tm_samples")
         status = (data.get("telemost") or {}).get("status")
         if status not in STATUSES:
             errors.append(f"{folder.name}: telemost.status {status!r}")
-        for name in data.get("images") or []:
+        images = data.get("images") or []
+        for item in images:
+            name = item["file"] if isinstance(item, dict) else item
             if not (folder / name).is_file():
                 errors.append(f"{folder.name}: listed image missing: {name}")
+        if len(images) > MAX_PER_PACK:
+            errors.append(f"{folder.name}: {len(images)} images > {MAX_PER_PACK}")
+        if images and data.get("stickerCount") != len(images):
+            errors.append(f"{folder.name}: stickerCount {data.get('stickerCount')} != {len(images)} images")
+        on_disk = sorted(p.name for p in folder.glob("*.png"))
+        listed = sorted((i["file"] if isinstance(i, dict) else i) for i in images)
+        if on_disk != listed:
+            errors.append(f"{folder.name}: {len(on_disk)} PNG files on disk, {len(listed)} listed")
 
     if orders != list(range(1, len(orders) + 1)):
         errors.append(f"pack order is {orders}, expected 1..{len(orders)}")
