@@ -26,6 +26,8 @@ venv/
 
 # Node
 node_modules/
+.wrangler/
+.dev.vars
 
 # Sticker images are rebuilt with scripts/fetch_and_convert.py; only pack.json is tracked
 packs/**/*.png

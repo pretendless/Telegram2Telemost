@@ -2,7 +2,7 @@
 
 Перенос стикерпаков из Telegram в стикеры Яндекс Телемоста.
 
-Источник списка — канал [t.me/tg2tm](https://t.me/tg2tm). Каждое сообщение канала — один пак в Телемосте: первая строка это название, дальше ссылки `t.me/addstickers/...` в нужном порядке. Владелец уже уложил каждое сообщение в лимит Телемоста (не больше 150 стикеров на пак). Формат описан в `docs/bot.md`. Бот [@tg2tmbot](https://t.me/tg2tmbot) показывает этот формат и проверяет присланный пак.
+Бот [@tg2tmbot](https://t.me/tg2tmbot) (отображаемое имя Telegram2Telemost) принимает в чате один пак: первая строка — название, дальше ссылки `t.me/addstickers/...`, не больше 150 стикеров. Пример он показывает сам (`/start`, `/format`, `/example`). Канал [t.me/tg2tm](https://t.me/tg2tm) публикует уже перенесённые наборы: название и ссылка Телемоста. Формат и тексты — в `docs/bot.md`.
 
 Локальная копия репозитория: `D:\Telemost2Telegram`.
 
@@ -19,9 +19,11 @@
 | `scripts/telemost_upload.mjs` | Загружает картинки в бота Телемоста через открытый Chrome. |
 | `scripts/telemost_links.mjs` | Дописывает `telemost.packUrl` по сообщениям бота «Набор … сохранён». |
 | `scripts/cleanup_uploaded.py` | Удаляет локальные картинки и кэш паков, уже загруженных в Телемост и получивших ссылку. |
-| `scripts/tg2tmbot.py` | Бот @tg2tmbot: `/start`, `/status`, `/format`, `/example`, проверка пака и уведомления. |
+| `scripts/tg2tmbot.py` | Тот же бот через long polling, пока не включён вебхук. |
+| `scripts/report_progress.mjs` | Шлёт ход загрузки на `POST /progress` воркера. |
 | `scripts/chrome_cdp.mjs` | Клиент Chrome DevTools, общий для скриптов браузера. |
 | `scripts/telegram_web.mjs` | Открыть чат Telegram Web и отправить текст. Разовые шаги вроде @BotFather собираются из этих вызовов. |
+| `worker/` | Cloudflare Worker @tg2tmbot: вебхук, KV, проверка пака. |
 | `scripts/validate_packs.py` | Проверяет, что папки, картинки и `pack.json` сходятся. |
 
 Имена каталогов и файлов только ASCII, чтобы их нормально открывал Windows.
@@ -70,4 +72,19 @@ TELEGRAM_BOT_TOKEN=$(cat config/bot.token) python scripts/fetch_and_convert.py 0
 TELEGRAM_BOT_TOKEN=$(cat config/bot.token) python scripts/fetch_and_convert.py   # все паки или номера: 01 02
 node scripts/telemost_upload.mjs 01 02                                             # нужен Chrome с --remote-debugging-port=9222 и открытым Телемостом
 python scripts/validate_packs.py
+```
+
+## Бот
+
+Telegram2Telemost (@tg2tmbot) отвечает на запрос пака в чате и пишет ход переноса тем, кто отправил `/start`. Готовый пак со ссылкой он публикует в канале. Саму загрузку в Телемост воркер не делает: её оставляет скриптам с Chrome.
+
+```
+чат Telegram --> POST /telegram --> worker/ --> KV и sendMessage
+pack.json     --> POST /progress --> worker/ --> подписчики и пост в t.me/tg2tm
+```
+
+Исходники воркера, `wrangler.toml` (без секретов) и тесты лежат в `worker/`. Выкладка и имена секретов — в `worker/README.md`. Локально, без токенов и без Cloudflare:
+
+```bash
+cd worker && node --test
 ```

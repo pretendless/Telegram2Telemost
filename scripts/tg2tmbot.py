@@ -1,11 +1,12 @@
-"""@tg2tmbot: pack format help, pack checks, and Telemost transfer notifications.
+"""@tg2tmbot (display name Telegram2Telemost): pack requests and Telemost progress.
 
 One message = one Telemost pack: first line is the title, then t.me/addstickers links, at most 150 stickers in total.
+The example lives in /start, /format and /example. The channel https://t.me/tg2tm only announces finished packs.
 
 While running, the bot also watches packs/*/pack.json (written by scripts/telemost_upload.mjs):
-- everyone who sent /start gets progress messages (pack started, every 25 %, errors, done + Telemost link);
-- when a pack is done, it posts an announcement with the Telemost link to the channel @tg2tm.
-Announcements contain no t.me/addstickers links, so they are never mistaken for pack submissions.
+- everyone who sent /start gets progress messages (pack started, every 25 %, errors);
+- the "done" note and the channel post wait until telemost.packUrl is a real link.
+Announcements are the title plus that link, with no t.me/addstickers URLs.
 
 Token: config/tg2tmbot.token (git-ignored) or TG2TMBOT_TOKEN.
   python scripts/tg2tmbot.py --setup   # set description, about text and command list
@@ -43,6 +44,7 @@ EXAMPLE = (
     "https://t.me/addstickers/minty2_vk"
 )
 
+BOT_NAME = "Telegram2Telemost"
 FORMAT = (
     "Одно сообщение — один пак Телемоста.\n"
     "\n"
@@ -50,34 +52,34 @@ FORMAT = (
     "2. Дальше ссылки t.me/addstickers/…, по одной в строке. Порядок ссылок = порядок стикеров.\n"
     f"3. Всего не больше {MAX_STICKERS} стикеров: это лимит Телемоста на пак.\n"
     "\n"
-    f"Готовые образцы — в канале {CHANNEL}"
+    "Пример:\n"
+    "\n"
+    + EXAMPLE
 )
 
 START = (
-    "Бот принимает паки стикеров для переноса из Telegram в Телемост.\n"
+    f"{BOT_NAME} (@tg2tmbot) переносит стикеры из Telegram в Телемост.\n"
     "\n"
     + FORMAT
-    + "\n\nПример (из канала):\n\n"
-    + EXAMPLE
+    + f"\n\nГотовые наборы публикуются в канале {CHANNEL}"
     + "\n\nПришлите сообщение в таком виде — бот проверит название, ссылки и число стикеров."
     "\n\nВы подписаны на ход переноса: бот напишет, когда пак начнёт загружаться, как идёт загрузка и пришлёт ссылку на готовый пак в Телемосте. /status — текущее состояние, /stop — отписаться."
 )
 
 DESCRIPTION = (
-    "Перенос стикеров из Telegram в Яндекс Телемост.\n\n"
+    f"{BOT_NAME} переносит стикеры из Telegram в Телемост.\n\n"
     "Одно сообщение — один пак: первая строка — название, дальше ссылки t.me/addstickers/… по порядку, "
     f"всего до {MAX_STICKERS} стикеров.\n\n"
     "Пример:\n" + EXAMPLE + "\n\n"
-    "Бот сообщает о ходе загрузки и присылает ссылку на готовый пак.\n\n"
-    f"Образцы и готовые паки: {CHANNEL}"
+    f"Бот проверяет набор и сообщает о ходе загрузки. Готовые наборы: {CHANNEL}"
 )
-ABOUT = f"Пак = сообщение: название + ссылки t.me/addstickers, до {MAX_STICKERS} стикеров. Образцы: t.me/tg2tm"
+ABOUT = "Переносит стикеры из Telegram в Телемост."
 COMMANDS = [
-    {"command": "start", "description": "Как оформить пак и пример; подписка на прогресс"},
-    {"command": "status", "description": "Ход переноса паков в Телемост"},
-    {"command": "format", "description": "Формат сообщения: название + ссылки"},
-    {"command": "example", "description": "Пример из канала t.me/tg2tm"},
-    {"command": "stop", "description": "Отписаться от уведомлений"},
+    {"command": "start", "description": "Как пользоваться"},
+    {"command": "status", "description": "Ход переноса"},
+    {"command": "format", "description": "Формат запроса"},
+    {"command": "example", "description": "Пример набора"},
+    {"command": "stop", "description": "Отписаться"},
 ]
 
 
@@ -141,6 +143,7 @@ def notify(text: str) -> None:
 
 
 def setup() -> None:
+    api("setMyName", name=BOT_NAME)
     api("setMyDescription", description=DESCRIPTION)
     api("setMyShortDescription", short_description=ABOUT)
     api("setMyCommands", commands=COMMANDS)
@@ -210,11 +213,26 @@ def status_text() -> str:
     return f"Перенос в Телемост: готово {done} из {len(rows)}\n\n" + "\n".join(rows)
 
 
+def real_pack_url(url) -> str | None:
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    if not url.startswith(("http://", "https://")) or "addstickers" in url.lower():
+        return None
+    return url
+
+
 def channel_post(p: dict) -> str:
-    text = f"Новый пак в Телемосте: «{p['title']}»\n\n{p['total']} стикеров\n{p['url']}"
-    if p["source"]:
-        text += f"\n\nСписок стикеров: {p['source']}"
-    return text
+    return f"«{p['title']}»\n\n{p['url']}"
+
+
+def done_notice(p: dict, follow_up: bool) -> str:
+    url = p["url"]
+    if follow_up:
+        head = f"Ссылка на пак «{p['title']}» в Телемосте:\n{url}"
+    else:
+        head = f"Готово: пак «{p['title']}» в Телемосте, {p['total']} стикеров.\n{url}"
+    return f"{head}\n\nГотовые наборы: {CHANNEL}"
 
 
 def watch_once(state: dict) -> None:
@@ -236,12 +254,14 @@ def watch_once(state: dict) -> None:
             s["error"] = p["error"]
             notify(f"Ошибка в паке «{p['title']}»: {p['error']}. Загрузка остановлена на {p['uploaded']}/{p['total']}; перезапуск продолжит с этого места.")
 
-        if p["status"] == "done" and not s["done"]:
+        url = real_pack_url(p["url"])
+        p = {**p, "url": url}
+        if p["status"] == "done" and url and not s.get("doneWithLink"):
+            notify(done_notice(p, follow_up=bool(s.get("done"))))
             s["done"] = True
-            link = p["url"] or "ссылка не пришла от бота Телемоста, ищите пак в чате «Стикеры»"
-            notify(f"Готово: пак «{p['title']}» в Телемосте, {p['total']} стикеров.\n{link}")
+            s["doneWithLink"] = True
 
-        if p["status"] == "done" and p["url"] and not s["posted"]:
+        if p["status"] == "done" and url and not s.get("posted"):
             try:
                 api("sendMessage", chat_id=CHANNEL_CHAT, text=channel_post(p))
                 s["posted"] = True
@@ -280,7 +300,7 @@ def reply(update: dict) -> None:
     elif cmd == "/format":
         out = FORMAT
     elif cmd == "/example":
-        out = "Пример из канала:\n\n" + EXAMPLE
+        out = "Пример:\n\n" + EXAMPLE
     else:
         out = check_pack(text)
     send(chat_id, out)
