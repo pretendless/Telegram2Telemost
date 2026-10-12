@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   abandonReplyOk,
+  afterNewpack,
   draftNeedsAbandon,
   leaveUnpublishedDraft,
+  mustOpenNewPack,
+  packDialogOpen,
   resetForNewPack,
+  wantsPicture,
 } from "./telemost_upload.mjs";
 
 const partial = {
@@ -46,6 +50,17 @@ test("leaving the draft sends /start only, never an emoji or /done", async () =>
   assert.deepEqual(sent, ["/start"]);
   assert.equal(reply.text, menu);
   assert.equal(abandonReplyOk(menu), true);
+});
+
+test("a stopped draft is opened with /newpack, not resumed and not /start", () => {
+  assert.equal(mustOpenNewPack(partial), true);
+  assert.equal(mustOpenNewPack({ status: "done", created: true }), false);
+  assert.equal(afterNewpack("Напишите название набора"), "title");
+  assert.equal(afterNewpack("Создан набор. Отправьте картинку стикера."), "picture");
+  assert.equal(wantsPicture("Отправьте картинку для стикера."), true);
+  assert.equal(wantsPicture("Отправьте эмодзи для стикера."), false);
+  assert.equal(packDialogOpen("Это не эмодзи :)"), true);
+  assert.equal(afterNewpack("Это не эмодзи :)"), "open");
 });
 
 test("a reply that is still asking for an emoji does not continue", async () => {
