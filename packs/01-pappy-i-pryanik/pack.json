@@ -1165,7 +1165,7 @@
   ],
   "telemost": {
     "status": "uploading",
-    "uploaded": 30,
+    "uploaded": 60,
     "packUrl": null,
     "error": null,
     "created": true

@@ -42,8 +42,8 @@ def main() -> int:
         if not links or not all(isinstance(x, str) and x.startswith("https://t.me/addstickers/") for x in links):
             errors.append(f"{folder.name}: stickerLinks must be t.me/addstickers URLs")
         source = data.get("sourceMessage") or ""
-        if not source.startswith("https://t.me/tg2tm_samples/"):
-            errors.append(f"{folder.name}: sourceMessage must point at t.me/tg2tm_samples")
+        if not source.startswith("https://t.me/tg2tm/"):
+            errors.append(f"{folder.name}: sourceMessage must point at t.me/tg2tm")
         status = (data.get("telemost") or {}).get("status")
         if status not in STATUSES:
             errors.append(f"{folder.name}: telemost.status {status!r}")

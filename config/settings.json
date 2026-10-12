@@ -1,6 +1,6 @@
 {
-  "sourceChannel": "https://t.me/tg2tm_samples",
-  "sourceChannelPreview": "https://t.me/s/tg2tm_samples",
+  "sourceChannel": "https://t.me/tg2tm",
+  "sourceChannelPreview": "https://t.me/s/tg2tm",
   "localCheckoutHint": "D:\\Telemost2Telegram",
   "imageNamePattern": "{index:03d}.png",
   "botTokenFile": "config/bot.token",
@@ -26,5 +26,10 @@
       "/deletepack",
       "/done"
     ]
+  },
+  "submissionBot": {
+    "username": "tg2tmbot",
+    "url": "https://t.me/tg2tmbot",
+    "tokenFile": "config/tg2tmbot.token"
   }
 }
