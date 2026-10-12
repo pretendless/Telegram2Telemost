@@ -94,8 +94,31 @@ class Bot {
   // Wait for a new incoming (bot) message that appeared after markSeen().
   async waitReply() {
     const t0 = Date.now();
+    let transferRetries = 0;
     while ((Date.now() - t0) / 1000 < REPLY_TIMEOUT_S) {
       await sleep(1000);
+      const failedTransfer = await this.c.ev(`(() => {
+        const failed = [...document.querySelectorAll('article.message')]
+          .filter(a => !a.dataset.tg2tmSeen && a.querySelector('.yamb-message-row_own .yamb-transfer-status_status_failed'))
+          .at(-1);
+        const retry = failed && failed.querySelector('[aria-label="Повторить попытку"]');
+        if (!retry) return false;
+        const b = retry.getBoundingClientRect();
+        const o = {bubbles: true, cancelable: true, composed: true, clientX: b.x + b.width / 2, clientY: b.y + b.height / 2, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true};
+        retry.dispatchEvent(new PointerEvent('pointerdown', {...o, buttons: 1}));
+        retry.dispatchEvent(new MouseEvent('mousedown', {...o, buttons: 1}));
+        retry.dispatchEvent(new PointerEvent('pointerup', {...o, buttons: 0}));
+        retry.dispatchEvent(new MouseEvent('mouseup', {...o, buttons: 0}));
+        retry.dispatchEvent(new MouseEvent('click', {...o, buttons: 0}));
+        return true;
+      })()`);
+      if (failedTransfer) {
+        transferRetries++;
+        if (transferRetries >= 5) throw new Error('file transfer error mark after 5 retries');
+        // This is a transport error, not the bot's image-refusal reply.
+        await sleep(2000);
+        continue;
+      }
       const txt = await this.c.ev(`(() => {
         const fresh = [...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen && a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
         return fresh.length ? fresh.map(a => (a.innerText || '').trim()).join('\\n') : null;
