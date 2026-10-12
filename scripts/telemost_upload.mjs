@@ -231,6 +231,7 @@ async function uploadPack(bot, dir) {
   for (let i = tm.uploaded; i < m.images.length; i++) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
+    console.log(dir, 'send', img.file);
     let ok = false;
     for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
       try {
