@@ -21,6 +21,7 @@
 | `scripts/cleanup_uploaded.py` | Удаляет локальные картинки и кэш паков, уже загруженных в Телемост и получивших ссылку. |
 | `scripts/tg2tmbot.py` | Бот @tg2tmbot: `/start`, `/status`, `/format`, `/example`, проверка пака и уведомления. |
 | `scripts/chrome_cdp.mjs` | Клиент Chrome DevTools, общий для скриптов браузера. |
+| `vm/` | Браузер для входа в Яндекс: Docker, noVNC, workflow. Выбор машины — `docs/telemost-login-vm.md`. |
 | `scripts/telegram_web.mjs` | Открыть чат Telegram Web и отправить текст. Разовые шаги вроде @BotFather собираются из этих вызовов. |
 | `scripts/validate_packs.py` | Проверяет, что папки, картинки и `pack.json` сходятся. |
 
@@ -70,4 +71,5 @@ TELEGRAM_BOT_TOKEN=$(cat config/bot.token) python scripts/fetch_and_convert.py 0
 TELEGRAM_BOT_TOKEN=$(cat config/bot.token) python scripts/fetch_and_convert.py   # все паки или номера: 01 02
 node scripts/telemost_upload.mjs 01 02                                             # нужен Chrome с --remote-debugging-port=9222 и открытым Телемостом
 python scripts/validate_packs.py
+node --test vm/test/login_vm.test.js                                           # вход в Яндекс с телефона, без браузера и без токенов
 ```
