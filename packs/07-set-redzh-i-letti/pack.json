@@ -1202,8 +1202,15 @@
     }
   ],
   "telemost": {
-    "status": "pending",
+    "status": "stopped",
+    "uploaded": 14,
     "packUrl": null,
-    "error": null
+    "error": null,
+    "created": true,
+    "nextImage": 14,
+    "skippedStickers": [],
+    "botReply": "Отправьте эмодзи для стикера.",
+    "pendingFile": "015.png",
+    "stoppedAt": "2026-10-12 15:58"
   }
 }
