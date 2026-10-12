@@ -10,7 +10,7 @@ const PACKS = join(ROOT, 'packs');
 const LOG = join(ROOT, 'logs', 'transfer-log.md');
 const BOT_URL = process.env.TELEMOST_BOT_URL || 'https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d';
 const DEVTOOLS = process.env.DEVTOOLS || 'http://127.0.0.1:9222';
-const REPLY_TIMEOUT_S = Number(process.env.REPLY_TIMEOUT_S || 600);
+const REPLY_TIMEOUT_S = Number(process.env.REPLY_TIMEOUT_S || 240);
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -77,6 +77,13 @@ class Bot {
     throw new Error('Telemost bot chat did not load');
   }
 
+  // A tab whose file uploads stall (red "!" on the image) recovers only after a reload.
+  async reload() {
+    await this.c.send('Page.reload', { ignoreCache: true });
+    await sleep(2000);
+    await this.ensureChat();
+  }
+
   markSeen() {
     return this.c.ev(`document.querySelectorAll('article.message').forEach(a => a.dataset.tg2tmSeen = '1')`);
   }
@@ -139,6 +146,7 @@ class Bot {
 
 const READY = /Стикер готов/;
 const ASK_EMOJI = /Отправьте эмодзи/;
+const NOT_EMOJI = /Это не эмодзи/;
 const ASK_TITLE = /Напишите название/;
 const CREATED = /Создан набор/;
 
@@ -189,15 +197,23 @@ async function uploadPack(bot, dir) {
       try {
         const r = await bot.sendImage(file);
         if (READY.test(r.text)) { ok = true; break; }
+        // Still waiting for the emoji of this same image from an earlier attempt: finish it, do not resend.
+        if (NOT_EMOJI.test(r.text)) {
+          const e = await bot.say('🙂');
+          if (!READY.test(e.text)) throw new Error(`emoji fallback: ${e.text.slice(0, 200)}`);
+          ok = true;
+          break;
+        }
         if (!ASK_EMOJI.test(r.text)) throw new Error(`image rejected: ${r.text.slice(0, 200)}`);
         let e = await bot.say(img.emoji || '🙂');
-        if (!READY.test(e.text) && ASK_EMOJI.test(e.text)) e = await bot.say('🙂');
+        if (!READY.test(e.text) && (ASK_EMOJI.test(e.text) || NOT_EMOJI.test(e.text))) e = await bot.say('🙂');
         if (!READY.test(e.text)) throw new Error(`emoji: ${e.text.slice(0, 200)}`);
         ok = true;
         if (r.seconds + e.seconds > 60) log(m.title, img.file, 'медленно', `${(r.seconds + e.seconds).toFixed(0)} с`);
       } catch (err) {
         log(m.title, img.file, `ошибка, попытка ${attempt}`, err.message);
         await sleep(10000 * attempt);
+        if (/no bot reply/.test(err.message)) await bot.reload();
       }
     }
     if (!ok) {

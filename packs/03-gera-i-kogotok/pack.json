@@ -1120,10 +1120,11 @@
     }
   ],
   "telemost": {
-    "status": "uploading",
-    "uploaded": 30,
-    "packUrl": null,
+    "status": "done",
+    "uploaded": 133,
+    "packUrl": "https://messenger.360.yandex.ru/#/stickers/8378",
     "error": null,
-    "created": true
+    "created": true,
+    "botReply": "Набор «Гера и Коготок» сохранён и доступен по ссылке.\n\n/start — показать команды\n/newpack — создать набор\n/addsticker — добавить стикер в существующий набор\n/delsticker — удалить стикер\n/deletepack — удалить набор\n/done — завершить действие\n\n13:13\n13:13"
   }
 }
