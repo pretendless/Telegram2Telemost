@@ -239,7 +239,7 @@ async function sendImageWithPolicy(bot, m, img, file, number, phase) {
       log(m.title, img.file, `ошибка, попытка ${transientAttempt}/3`, err.message);
       if (transientAttempt >= 3) throw err;
       await sleep(10000 * transientAttempt);
-      if (/no bot reply/.test(err.message)) await bot.reload();
+      if (/no bot reply|file transfer error mark/.test(err.message)) await bot.reload();
     }
   }
   return {
