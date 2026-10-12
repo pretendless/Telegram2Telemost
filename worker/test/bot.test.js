@@ -244,6 +244,72 @@ test("a pack-shaped message counts stickers and enforces 150", async () => {
   assert.match(sent[0], /больше лимита 150/);
 });
 
+function telegramRequest(chatId, text) {
+  return new Request("https://tg2tmbot.example/telegram", {
+    method: "POST",
+    headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret", "content-type": "application/json" },
+    body: JSON.stringify({ message: { chat: { id: chatId }, text } }),
+  });
+}
+
+test("/login and /connect refuse every chat outside LOGIN_CHAT_IDS", async () => {
+  const sent = [];
+  let fetched = 0;
+  const env = { ...envWith(), LOGIN_CHAT_IDS: String(INITIAL_SUBSCRIBER), GH_DISPATCH_TOKEN: "dispatch-token" };
+  const fetch = async () => {
+    fetched += 1;
+    return new Response(null, { status: 204 });
+  };
+  const sendMessage = async (_env, chatId, text) => sent.push({ chatId, text });
+  for (const text of ["/login", "/connect work", "/login@tg2tmbot"]) {
+    const res = await handle(telegramRequest(111, text), env, { sendMessage, fetch });
+    assert.equal(res.status, 200);
+  }
+  assert.equal(fetched, 0);
+  assert.equal(sent.length, 3);
+  for (const item of sent) {
+    assert.equal(item.chatId, 111);
+    assert.equal(item.text, "Эта команда только для владельца.");
+  }
+});
+
+test("an allowlisted /login and /connect dispatch the Telemost workflow", async () => {
+  const sent = [];
+  const calls = [];
+  const env = { ...envWith(), LOGIN_CHAT_IDS: "8502935020", GH_DISPATCH_TOKEN: "dispatch-token" };
+  const fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body), authorization: init.headers.authorization });
+    return new Response(null, { status: 204 });
+  };
+  const sendMessage = async (_env, chatId, text) => sent.push({ chatId, text });
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/login"), env, { sendMessage, fetch });
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/connect work"), env, { sendMessage, fetch });
+  assert.equal(calls.length, 2);
+  assert.equal(
+    calls[0].url,
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/telemost-session.yml/dispatches",
+  );
+  assert.equal(calls[0].authorization, "Bearer dispatch-token");
+  assert.equal(calls[0].body.ref, "main");
+  assert.deepEqual(calls[0].body.inputs, { mode: "login", account: "default", chat_id: "8502935020", packs: "" });
+  assert.deepEqual(calls[1].body.inputs, { mode: "login", account: "work", chat_id: "8502935020", packs: "" });
+  assert.match(sent[0].text, /QR-код Яндекса/);
+  assert.match(sent[1].text, /«work»/);
+  assert.equal(COMMANDS.find((item) => item.command === "login").description, "Войти в Яндекс");
+  assert.equal(COMMANDS.find((item) => item.command === "connect").description, "Войти в аккаунт с меткой");
+});
+
+test("login does not dispatch when the GitHub token is missing", async () => {
+  const sent = [];
+  const env = { ...envWith(), LOGIN_CHAT_IDS: "8502935020" };
+  const res = await handle(telegramRequest(INITIAL_SUBSCRIBER, "/login"), env, {
+    sendMessage: async (_env, chatId, text) => sent.push({ chatId, text }),
+    fetch: async () => assert.fail("should not dispatch"),
+  });
+  assert.equal(res.status, 200);
+  assert.match(sent[0].text, /GH_DISPATCH_TOKEN/);
+});
+
 test("/format and /stop", async () => {
   const sent = [];
   const env = envWith();

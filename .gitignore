@@ -18,6 +18,11 @@ config/tg2tmbot-subscribers.json
 .env.*
 *.pem
 
+# Encrypted Telemost sessions and a QR saved when Telegram delivery is off
+sessions/
+*.tg2tm-session
+last-qr.png
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,4 +1,5 @@
 // @tg2tmbot on Cloudflare Workers: Telegram webhook plus the uploader progress endpoint.
+import { handleVmCommand } from "../../vm/worker_login.js";
 import {
   CHANNEL_CHAT,
   INITIAL_SUBSCRIBER,
@@ -199,7 +200,7 @@ async function handleProgress(request, env, send) {
   );
 }
 
-async function answer(env, update, send, stickerCount) {
+async function answer(env, update, send, stickerCount, deps = {}) {
   const message = update && update.message;
   if (!message || typeof message.text !== "string") return;
   const chatId = message.chat && message.chat.id;
@@ -215,6 +216,9 @@ async function answer(env, update, send, stickerCount) {
     out = known.text;
   } else if (cmd === "/status") {
     out = statusText(await listPacks(env.BOT_KV));
+  } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
+    await handleVmCommand(env, message, { send, fetch: deps.fetch });
+    return;
   } else if (cmd) {
     return;
   } else {
@@ -239,7 +243,7 @@ async function answer(env, update, send, stickerCount) {
   await send(env, chatId, out);
 }
 
-async function handleTelegram(request, env, send, stickerCount) {
+async function handleTelegram(request, env, send, stickerCount, deps) {
   const secret = env.WEBHOOK_SECRET || "";
   const got = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
   if (!secret || !timingSafeEqual(got, secret)) return new Response("unauthorized", { status: 401 });
@@ -250,7 +254,7 @@ async function handleTelegram(request, env, send, stickerCount) {
     return new Response("bad json", { status: 400 });
   }
   try {
-    await answer(env, update, send, stickerCount);
+    await answer(env, update, send, stickerCount, deps);
   } catch (err) {
     console.error("reply failed", err && err.message);
   }
@@ -263,7 +267,7 @@ export async function handle(request, env, deps = {}) {
   const url = new URL(request.url);
   if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) return json({ ok: true });
   if (request.method === "POST" && url.pathname === "/progress") return handleProgress(request, env, send);
-  if (request.method === "POST" && url.pathname === "/telegram") return handleTelegram(request, env, send, stickerCount);
+  if (request.method === "POST" && url.pathname === "/telegram") return handleTelegram(request, env, send, stickerCount, deps);
   return new Response("not found", { status: 404 });
 }
 

@@ -56,6 +56,9 @@ export const COMMANDS = [
   { command: "format", description: "Формат запроса" },
   { command: "example", description: "Пример набора" },
   { command: "stop", description: "Отписаться" },
+  { command: "login", description: "Войти в Яндекс" },
+  { command: "connect", description: "Войти в аккаунт с меткой" },
+  { command: "upload", description: "Загрузить паки этой сессией" },
 ];
 
 const STATUS_RU = { pending: "ждёт", uploading: "загружается", done: "готов", error: "ошибка" };

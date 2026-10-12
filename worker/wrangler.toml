@@ -9,3 +9,7 @@ workers_dev = true
 [[kv_namespaces]]
 binding = "BOT_KV"
 id = "69c9d9f3572a48469a312e5914e8a233"
+
+# Chat ids allowed to run /login, /connect and /upload. Not a credential.
+[vars]
+LOGIN_CHAT_IDS = "8502935020"
