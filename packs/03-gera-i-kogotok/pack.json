@@ -1,0 +1,38 @@
+{
+  "title": "Гера и Коготок",
+  "slug": "03-gera-i-kogotok",
+  "order": 3,
+  "sourceMessage": "https://t.me/tg2tm/5",
+  "stickerLinks": [
+    "https://t.me/addstickers/claws_vk_by_TgEmojiBot",
+    "https://t.me/addstickers/little_gera",
+    "https://t.me/addstickers/gera_the_stoat"
+  ],
+  "stickerSets": [
+    {
+      "url": "https://t.me/addstickers/claws_vk_by_TgEmojiBot",
+      "name": "claws_vk_by_TgEmojiBot",
+      "telegramTitle": "Коготок @stickersvvk",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/little_gera",
+      "name": "little_gera",
+      "telegramTitle": "Горностайчик Гера от @TgSticker",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/gera_the_stoat",
+      "name": "gera_the_stoat",
+      "telegramTitle": "Горностай Гера • @TgSticker",
+      "stickerCount": null
+    }
+  ],
+  "stickerCount": null,
+  "images": [],
+  "telemost": {
+    "status": "pending",
+    "packUrl": null,
+    "error": null
+  }
+}

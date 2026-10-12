@@ -1,0 +1,38 @@
+{
+  "title": "Паппи и Пряник",
+  "slug": "01-pappy-i-pryanik",
+  "order": 1,
+  "sourceMessage": "https://t.me/tg2tm/2",
+  "stickerLinks": [
+    "https://t.me/addstickers/poppy_vk_by_TgEmojiBot",
+    "https://t.me/addstickers/poppy2_vk_by_TgEmojiBot",
+    "https://t.me/addstickers/gingerbreadthefox_vk_by_TgEmojiBot"
+  ],
+  "stickerSets": [
+    {
+      "url": "https://t.me/addstickers/poppy_vk_by_TgEmojiBot",
+      "name": "poppy_vk_by_TgEmojiBot",
+      "telegramTitle": "Паппи @stickersvvk",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/poppy2_vk_by_TgEmojiBot",
+      "name": "poppy2_vk_by_TgEmojiBot",
+      "telegramTitle": "Паппи 2.0 @stickersvvk",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/gingerbreadthefox_vk_by_TgEmojiBot",
+      "name": "gingerbreadthefox_vk_by_TgEmojiBot",
+      "telegramTitle": "Пряник @stickersvvk",
+      "stickerCount": null
+    }
+  ],
+  "stickerCount": null,
+  "images": [],
+  "telemost": {
+    "status": "pending",
+    "packUrl": null,
+    "error": null
+  }
+}

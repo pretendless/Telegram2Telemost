@@ -1,0 +1,30 @@
+{
+  "sourceChannel": "https://t.me/tg2tm",
+  "sourceChannelPreview": "https://t.me/s/tg2tm",
+  "localCheckoutHint": "D:\\\\Telemost2Telegram",
+  "imageNamePattern": "{index:03d}.png",
+  "telemost": {
+    "site": "https://telemost.yandex.ru",
+    "botName": "Стикеры",
+    "formats": [
+      "png",
+      "jpeg"
+    ],
+    "minWidth": 512,
+    "minHeight": 512,
+    "heightNotGreaterThanWidth": true,
+    "maxBytes": 524288,
+    "maxStickersPerPack": 150,
+    "maxPacksPerUser": 100,
+    "oneImageAtATime": true,
+    "commands": [
+      "/start",
+      "/newpack",
+      "/addsticker",
+      "/seticon",
+      "/delsticker",
+      "/deletepack",
+      "/done"
+    ]
+  }
+}

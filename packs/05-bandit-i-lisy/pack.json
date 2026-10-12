@@ -1,0 +1,38 @@
+{
+  "title": "Бандит и Лисы",
+  "slug": "05-bandit-i-lisy",
+  "order": 5,
+  "sourceMessage": "https://t.me/tg2tm/7",
+  "stickerLinks": [
+    "https://t.me/addstickers/bandit_vk",
+    "https://t.me/addstickers/slyfox_vk",
+    "https://t.me/addstickers/redvk"
+  ],
+  "stickerSets": [
+    {
+      "url": "https://t.me/addstickers/bandit_vk",
+      "name": "bandit_vk",
+      "telegramTitle": "Бандит (@TgSticker)",
+      "stickerCount": 48
+    },
+    {
+      "url": "https://t.me/addstickers/slyfox_vk",
+      "name": "slyfox_vk",
+      "telegramTitle": "Хищный Лис от @TgSticker",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/redvk",
+      "name": "redvk",
+      "telegramTitle": "Рэд (@TgSticker)",
+      "stickerCount": null
+    }
+  ],
+  "stickerCount": null,
+  "images": [],
+  "telemost": {
+    "status": "pending",
+    "packUrl": null,
+    "error": null
+  }
+}

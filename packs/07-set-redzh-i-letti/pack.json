@@ -1,0 +1,38 @@
+{
+  "title": "Сэт, Рэдж и Летти",
+  "slug": "07-set-redzh-i-letti",
+  "order": 7,
+  "sourceMessage": "https://t.me/tg2tm/9",
+  "stickerLinks": [
+    "https://t.me/addstickers/letty_vk",
+    "https://t.me/addstickers/set_kitty_ukr",
+    "https://t.me/addstickers/redge_vk"
+  ],
+  "stickerSets": [
+    {
+      "url": "https://t.me/addstickers/letty_vk",
+      "name": "letty_vk",
+      "telegramTitle": "Летти (@TgSticker)",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/set_kitty_ukr",
+      "name": "set_kitty_ukr",
+      "telegramTitle": "Кицька Сет @ukrainian_stickers",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/redge_vk",
+      "name": "redge_vk",
+      "telegramTitle": "Редж (@TgSticker)",
+      "stickerCount": null
+    }
+  ],
+  "stickerCount": null,
+  "images": [],
+  "telemost": {
+    "status": "pending",
+    "packUrl": null,
+    "error": null
+  }
+}

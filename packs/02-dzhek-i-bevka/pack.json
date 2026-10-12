@@ -1,0 +1,38 @@
+{
+  "title": "Джек и Бевка",
+  "slug": "02-dzhek-i-bevka",
+  "order": 2,
+  "sourceMessage": "https://t.me/tg2tm/4",
+  "stickerLinks": [
+    "https://t.me/addstickers/squirrely_vk_by_TgEmojiBot",
+    "https://t.me/addstickers/jack_vk_by_TgEmojiBot",
+    "https://t.me/addstickers/motherofjackalsjack2"
+  ],
+  "stickerSets": [
+    {
+      "url": "https://t.me/addstickers/squirrely_vk_by_TgEmojiBot",
+      "name": "squirrely_vk_by_TgEmojiBot",
+      "telegramTitle": "Бевка @stickersvvk",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/jack_vk_by_TgEmojiBot",
+      "name": "jack_vk_by_TgEmojiBot",
+      "telegramTitle": "Джек @stickersvvk",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/motherofjackalsjack2",
+      "name": "motherofjackalsjack2",
+      "telegramTitle": "Джек 2.0 от @TgSticker",
+      "stickerCount": null
+    }
+  ],
+  "stickerCount": null,
+  "images": [],
+  "telemost": {
+    "status": "pending",
+    "packUrl": null,
+    "error": null
+  }
+}

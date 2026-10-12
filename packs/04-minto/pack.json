@@ -1,0 +1,38 @@
+{
+  "title": "Минто",
+  "slug": "04-minto",
+  "order": 4,
+  "sourceMessage": "https://t.me/tg2tm/6",
+  "stickerLinks": [
+    "https://t.me/addstickers/minty_vk",
+    "https://t.me/addstickers/minty2_vk",
+    "https://t.me/addstickers/minto3_vk"
+  ],
+  "stickerSets": [
+    {
+      "url": "https://t.me/addstickers/minty_vk",
+      "name": "minty_vk",
+      "telegramTitle": "Минто (@TgSticker)",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/minty2_vk",
+      "name": "minty2_vk",
+      "telegramTitle": "Минто 2 • @TgSticker",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/minto3_vk",
+      "name": "minto3_vk",
+      "telegramTitle": "Минто 3 • @TgSticker",
+      "stickerCount": null
+    }
+  ],
+  "stickerCount": null,
+  "images": [],
+  "telemost": {
+    "status": "pending",
+    "packUrl": null,
+    "error": null
+  }
+}

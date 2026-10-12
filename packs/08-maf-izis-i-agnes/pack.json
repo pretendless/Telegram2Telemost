@@ -1,0 +1,38 @@
+{
+  "title": "Маф, Изис и Агнес",
+  "slug": "08-maf-izis-i-agnes",
+  "order": 8,
+  "sourceMessage": "https://t.me/tg2tm/10",
+  "stickerLinks": [
+    "https://t.me/addstickers/muff_vk",
+    "https://t.me/addstickers/issie_vk",
+    "https://t.me/addstickers/agnes_vk_by_TgEmojiBot"
+  ],
+  "stickerSets": [
+    {
+      "url": "https://t.me/addstickers/muff_vk",
+      "name": "muff_vk",
+      "telegramTitle": "Маф от @TgSticker",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/issie_vk",
+      "name": "issie_vk",
+      "telegramTitle": "Изис (@TgSticker)",
+      "stickerCount": null
+    },
+    {
+      "url": "https://t.me/addstickers/agnes_vk_by_TgEmojiBot",
+      "name": "agnes_vk_by_TgEmojiBot",
+      "telegramTitle": "Агнес @stickersvvk",
+      "stickerCount": null
+    }
+  ],
+  "stickerCount": null,
+  "images": [],
+  "telemost": {
+    "status": "pending",
+    "packUrl": null,
+    "error": null
+  }
+}
