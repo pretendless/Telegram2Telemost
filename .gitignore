@@ -27,7 +27,18 @@ venv/
 # Node
 node_modules/
 
-# Scratch downloads, not the pack PNGs under packs/
+# Sticker images are rebuilt with scripts/fetch_and_convert.py; only pack.json is tracked
+packs/**/*.png
+packs/**/*.jpg
+packs/**/*.jpeg
+packs/**/*.webp
+packs/**/*.webm
+packs/**/*.tgs
+packs/**/*.gif
+packs/**/*.lottie
+packs/**/*.zip
+
+# Scratch downloads and bot state
 /tmp/
 /.cache/
 *.tmp

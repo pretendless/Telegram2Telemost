@@ -48,18 +48,17 @@ def main() -> int:
         if status not in STATUSES:
             errors.append(f"{folder.name}: telemost.status {status!r}")
         images = data.get("images") or []
-        for item in images:
-            name = item["file"] if isinstance(item, dict) else item
-            if not (folder / name).is_file():
-                errors.append(f"{folder.name}: listed image missing: {name}")
         if len(images) > MAX_PER_PACK:
             errors.append(f"{folder.name}: {len(images)} images > {MAX_PER_PACK}")
         if images and data.get("stickerCount") != len(images):
             errors.append(f"{folder.name}: stickerCount {data.get('stickerCount')} != {len(images)} images")
+        # PNGs are not tracked: a folder may hold none (rebuild with fetch_and_convert.py) or the full set.
         on_disk = sorted(p.name for p in folder.glob("*.png"))
         listed = sorted((i["file"] if isinstance(i, dict) else i) for i in images)
-        if on_disk != listed:
+        if on_disk and on_disk != listed:
             errors.append(f"{folder.name}: {len(on_disk)} PNG files on disk, {len(listed)} listed")
+        if status == "done" and not (data.get("telemost") or {}).get("packUrl"):
+            print(f"note: {folder.name} is done but has no telemost.packUrl yet", file=sys.stderr)
 
     if orders != list(range(1, len(orders) + 1)):
         errors.append(f"pack order is {orders}, expected 1..{len(orders)}")

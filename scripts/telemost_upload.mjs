@@ -89,7 +89,10 @@ class Bot {
         const fresh = [...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen && a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
         return fresh.length ? fresh.map(a => (a.innerText || '').trim()).join('\\n') : null;
       })()`);
-      if (txt) return { text: txt, seconds: (Date.now() - t0) / 1000 };
+      if (txt) {
+        const links = await this.c.ev(`[...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen).flatMap(a => [...a.querySelectorAll('a[href]')].map(x => x.href))`);
+        return { text: txt, links, seconds: (Date.now() - t0) / 1000 };
+      }
     }
     throw new Error(`no bot reply in ${REPLY_TIMEOUT_S}s`);
   }
@@ -208,7 +211,7 @@ async function uploadPack(bot, dir) {
   }
 
   const done = await withRetry('done', () => bot.say('/done'));
-  const url = done.text.match(/https?:\/\/\S+/)?.[0] || null;
+  const url = (done.links || []).find(h => /\/stickers\//.test(h)) || done.text.match(/https?:\/\/\S+/)?.[0] || null;
   tm.status = 'done';
   tm.packUrl = url;
   tm.error = null;

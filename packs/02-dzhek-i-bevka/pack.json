@@ -1214,10 +1214,11 @@
     }
   ],
   "telemost": {
-    "status": "uploading",
-    "uploaded": 140,
-    "packUrl": null,
+    "status": "done",
+    "uploaded": 144,
+    "packUrl": "https://messenger.360.yandex.ru/#/stickers/8377",
     "error": null,
-    "created": true
+    "created": true,
+    "botReply": "Набор «Джек и Бевка» сохранён и доступен по ссылке.\n\n/start — показать команды\n/newpack — создать набор\n/addsticker — добавить стикер в существующий набор\n/delsticker — удалить стикер\n/deletepack — удалить набор\n/done — завершить действие\n\n12:12\n12:12"
   }
 }
