@@ -1,0 +1,17 @@
+.git
+sessions
+**/*.tg2tm-session
+**/*.token
+.env
+.env.*
+node_modules
+.cache
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.webp
+**/*.webm
+**/*.tgs
+**/*.gif
+**/*.zip
+**/*.lottie
