@@ -1,8 +1,11 @@
 // Uploads packs/<slug>/ images to the Telemost "Стикеры" bot through Chrome DevTools (port 9222).
-// Resumes from pack.json telemost.uploaded. Usage: node scripts/telemost_upload.mjs [NN ...]
+// A finished pack (status done) is skipped. A draft left waiting for an emoji is not
+// continued and is not closed with /done: that would publish the short pack. /start
+// leaves that draft, then the same title is created again from the first image.
+// Usage: node scripts/telemost_upload.mjs [NN ...]
 import { readFileSync, writeFileSync, readdirSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKS = join(ROOT, 'packs');
@@ -14,8 +17,13 @@ const REPLY_TIMEOUT_S = Number(process.env.REPLY_TIMEOUT_S || 600);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
 const log = (pack, item, status, err = '') => {
-  appendFileSync(LOG, `| ${stamp()} | ${pack}${item ? ' / ' + item : ''} | ${status} | ${err.replace(/\|/g, '/').replace(/\n/g, ' ')} |\n`);
-  console.log(stamp(), pack, item, status, err);
+  const line = `| ${stamp()} | ${pack}${item ? ' / ' + item : ''} | ${status} | ${String(err).replace(/\|/g, '/').replace(/\n/g, ' ')} |`;
+  console.log(line);
+  try {
+    appendFileSync(LOG, line + '\n');
+  } catch (e) {
+    console.log('log file skipped', e && e.code ? e.code : '');
+  }
 };
 
 async function connect() {
@@ -140,6 +148,46 @@ const READY = /Стикер готов/;
 const ASK_EMOJI = /Отправьте эмодзи/;
 const ASK_TITLE = /Напишите название/;
 const CREATED = /Создан набор/;
+const PUBLISHED = /сохранён|\/stickers\//;
+const COMMAND_MENU = /\/newpack/;
+
+// The partial «Сэт, Рэдж и Летти» pack is this case: 14 accepted, 015.png sent, emoji never sent.
+export function draftNeedsAbandon(tm) {
+  if (!tm || tm.status === 'done') return false;
+  const waiting = ASK_EMOJI.test(tm.botReply || '');
+  return Boolean(tm.pendingFile) || (tm.status === 'stopped' && waiting);
+}
+
+export function resetForNewPack(tm) {
+  return {
+    ...tm,
+    status: 'pending',
+    uploaded: 0,
+    nextImage: 0,
+    created: false,
+    pendingFile: null,
+    botReply: null,
+    error: null,
+    packUrl: null,
+    stoppedAt: null,
+  };
+}
+
+// /start shows the command list. It is not an emoji and it is not /done.
+export function abandonReplyOk(text) {
+  const body = String(text || '');
+  if (ASK_EMOJI.test(body) || READY.test(body) || PUBLISHED.test(body)) return false;
+  return COMMAND_MENU.test(body);
+}
+
+export async function leaveUnpublishedDraft(say) {
+  const reply = await say('/start');
+  const text = reply && reply.text ? reply.text : '';
+  if (!abandonReplyOk(text)) {
+    throw new Error('still inside the unpublished pack; not sending an emoji and not sending /done');
+  }
+  return reply;
+}
 
 function loadPack(dir) {
   const path = join(PACKS, dir, 'pack.json');
@@ -167,6 +215,13 @@ async function uploadPack(bot, dir) {
   if (tm.status === 'done') { console.log(dir, 'already done'); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
 
+  if (draftNeedsAbandon(tm)) {
+    await leaveUnpublishedDraft((text) => bot.say(text));
+    Object.assign(tm, resetForNewPack(tm));
+    savePack(p);
+    log(m.title, '', 'черновик брошен без /done', 'новый набор с первого стикера');
+  }
+
   if (!tm.created) {
     const r1 = await withRetry('newpack', () => bot.say('/newpack'));
     if (!ASK_TITLE.test(r1.text)) throw new Error(`/newpack: unexpected reply: ${r1.text.slice(0, 200)}`);
@@ -181,6 +236,7 @@ async function uploadPack(bot, dir) {
   for (let i = tm.uploaded; i < m.images.length; i++) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
+    console.log(dir, 'send', img.file);
     let ok = false;
     for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
       try {
@@ -220,17 +276,23 @@ async function uploadPack(bot, dir) {
   log(m.title, '', `готово, ${m.images.length} стикеров`, url || '');
 }
 
-const wanted = process.argv.slice(2);
-const dirs = readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort().filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
-const c = await connect();
-const bot = new Bot(c);
-for (const d of dirs) {
-  try {
-    await uploadPack(bot, d);
-  } catch (e) {
-    log(d, '', 'остановлено', e.message);
-    process.exitCode = 1;
-    break;
+async function main() {
+  const wanted = process.argv.slice(2);
+  const dirs = readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort().filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
+  const c = await connect();
+  const bot = new Bot(c);
+  for (const d of dirs) {
+    try {
+      await uploadPack(bot, d);
+    } catch (e) {
+      log(d, '', 'остановлено', e.message);
+      process.exitCode = 1;
+      break;
+    }
   }
+  c.close();
 }
-c.close();
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

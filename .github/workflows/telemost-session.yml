@@ -87,6 +87,20 @@ jobs:
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
         run: node vm/login.mjs notify no-session
 
+      - name: Fetch sticker images
+        if: steps.in.outputs.mode == 'upload' && steps.session.outputs.present == 'yes'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          PACK_NUMBERS: ${{ steps.in.outputs.packs }}
+        run: |
+          case "$PACK_NUMBERS" in
+            *[!0-9\ ]*) echo "bad packs" >&2; exit 1 ;;
+          esac
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          # shellcheck disable=SC2086
+          python3 scripts/fetch_and_convert.py $PACK_NUMBERS
+
       - name: Build browser image
         if: steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes'
         run: docker build -f vm/Dockerfile -t tg2tm-browser .
@@ -102,10 +116,12 @@ jobs:
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
           ENABLE_TUNNEL: "1"
         run: |
-          mkdir -p sessions
+          mkdir -p sessions logs
+          chmod a+rwx logs
           docker run --rm --shm-size=1g \
             --user "$(id -u):$(id -g)" \
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL \
+            -e GITHUB_ACTIONS \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
             -e HOME=/tmp \

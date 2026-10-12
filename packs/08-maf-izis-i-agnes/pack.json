@@ -1,0 +1,1215 @@
+{
+  "title": "Маф, Изис и Агнес",
+  "slug": "08-maf-izis-i-agnes",
+  "order": 8,
+  "sourceMessage": "https://t.me/tg2tm/10",
+  "stickerLinks": [
+    "https://t.me/addstickers/muff_vk",
+    "https://t.me/addstickers/issie_vk",
+    "https://t.me/addstickers/agnes_vk_by_TgEmojiBot"
+  ],
+  "stickerSets": [
+    {
+      "url": "https://t.me/addstickers/muff_vk",
+      "name": "muff_vk",
+      "telegramTitle": "Маф от @TgSticker",
+      "stickerCount": 48,
+      "kinds": {
+        "static": 48,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
+    },
+    {
+      "url": "https://t.me/addstickers/issie_vk",
+      "name": "issie_vk",
+      "telegramTitle": "Изис (@TgSticker)",
+      "stickerCount": 48,
+      "kinds": {
+        "static": 48,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": []
+    },
+    {
+      "url": "https://t.me/addstickers/agnes_vk_by_TgEmojiBot",
+      "name": "agnes_vk_by_TgEmojiBot",
+      "telegramTitle": "Агнес @stickersvvk",
+      "stickerCount": 49,
+      "kinds": {
+        "static": 48,
+        "animated": 0,
+        "video": 0
+      },
+      "skipped": [
+        {
+          "position": 49,
+          "emoji": "©️",
+          "reason": "promo sticker for the pack author's channel"
+        }
+      ]
+    }
+  ],
+  "stickerCount": 144,
+  "images": [
+    {
+      "file": "001.png",
+      "emoji": "🤡",
+      "set": "muff_vk",
+      "position": 1,
+      "kind": "static",
+      "bytes": 245969
+    },
+    {
+      "file": "002.png",
+      "emoji": "🤡",
+      "set": "muff_vk",
+      "position": 2,
+      "kind": "static",
+      "bytes": 239678
+    },
+    {
+      "file": "003.png",
+      "emoji": "😉",
+      "set": "muff_vk",
+      "position": 3,
+      "kind": "static",
+      "bytes": 157290
+    },
+    {
+      "file": "004.png",
+      "emoji": "😅",
+      "set": "muff_vk",
+      "position": 4,
+      "kind": "static",
+      "bytes": 275669
+    },
+    {
+      "file": "005.png",
+      "emoji": "🤦‍♂",
+      "set": "muff_vk",
+      "position": 5,
+      "kind": "static",
+      "bytes": 237700
+    },
+    {
+      "file": "006.png",
+      "emoji": "🤨",
+      "set": "muff_vk",
+      "position": 6,
+      "kind": "static",
+      "bytes": 223998
+    },
+    {
+      "file": "007.png",
+      "emoji": "👋",
+      "set": "muff_vk",
+      "position": 7,
+      "kind": "static",
+      "bytes": 250207
+    },
+    {
+      "file": "008.png",
+      "emoji": "🤡",
+      "set": "muff_vk",
+      "position": 8,
+      "kind": "static",
+      "bytes": 233891
+    },
+    {
+      "file": "009.png",
+      "emoji": "❤️",
+      "set": "muff_vk",
+      "position": 9,
+      "kind": "static",
+      "bytes": 228720
+    },
+    {
+      "file": "010.png",
+      "emoji": "☺️",
+      "set": "muff_vk",
+      "position": 10,
+      "kind": "static",
+      "bytes": 177786
+    },
+    {
+      "file": "011.png",
+      "emoji": "🤔",
+      "set": "muff_vk",
+      "position": 11,
+      "kind": "static",
+      "bytes": 233439
+    },
+    {
+      "file": "012.png",
+      "emoji": "😏",
+      "set": "muff_vk",
+      "position": 12,
+      "kind": "static",
+      "bytes": 219180
+    },
+    {
+      "file": "013.png",
+      "emoji": "🖕",
+      "set": "muff_vk",
+      "position": 13,
+      "kind": "static",
+      "bytes": 206245
+    },
+    {
+      "file": "014.png",
+      "emoji": "☺️",
+      "set": "muff_vk",
+      "position": 14,
+      "kind": "static",
+      "bytes": 217271
+    },
+    {
+      "file": "015.png",
+      "emoji": "😘",
+      "set": "muff_vk",
+      "position": 15,
+      "kind": "static",
+      "bytes": 248181
+    },
+    {
+      "file": "016.png",
+      "emoji": "😑",
+      "set": "muff_vk",
+      "position": 16,
+      "kind": "static",
+      "bytes": 229547
+    },
+    {
+      "file": "017.png",
+      "emoji": "👋",
+      "set": "muff_vk",
+      "position": 17,
+      "kind": "static",
+      "bytes": 233980
+    },
+    {
+      "file": "018.png",
+      "emoji": "🫣",
+      "set": "muff_vk",
+      "position": 18,
+      "kind": "static",
+      "bytes": 238224
+    },
+    {
+      "file": "019.png",
+      "emoji": "😉",
+      "set": "muff_vk",
+      "position": 19,
+      "kind": "static",
+      "bytes": 211330
+    },
+    {
+      "file": "020.png",
+      "emoji": "🤗",
+      "set": "muff_vk",
+      "position": 20,
+      "kind": "static",
+      "bytes": 239412
+    },
+    {
+      "file": "021.png",
+      "emoji": "☕️",
+      "set": "muff_vk",
+      "position": 21,
+      "kind": "static",
+      "bytes": 217499
+    },
+    {
+      "file": "022.png",
+      "emoji": "✌️",
+      "set": "muff_vk",
+      "position": 22,
+      "kind": "static",
+      "bytes": 254388
+    },
+    {
+      "file": "023.png",
+      "emoji": "😏",
+      "set": "muff_vk",
+      "position": 23,
+      "kind": "static",
+      "bytes": 257623
+    },
+    {
+      "file": "024.png",
+      "emoji": "😄",
+      "set": "muff_vk",
+      "position": 24,
+      "kind": "static",
+      "bytes": 232529
+    },
+    {
+      "file": "025.png",
+      "emoji": "🎪",
+      "set": "muff_vk",
+      "position": 25,
+      "kind": "static",
+      "bytes": 275666
+    },
+    {
+      "file": "026.png",
+      "emoji": "🥺",
+      "set": "muff_vk",
+      "position": 26,
+      "kind": "static",
+      "bytes": 231843
+    },
+    {
+      "file": "027.png",
+      "emoji": "😏",
+      "set": "muff_vk",
+      "position": 27,
+      "kind": "static",
+      "bytes": 245394
+    },
+    {
+      "file": "028.png",
+      "emoji": "👍",
+      "set": "muff_vk",
+      "position": 28,
+      "kind": "static",
+      "bytes": 177704
+    },
+    {
+      "file": "029.png",
+      "emoji": "🫣",
+      "set": "muff_vk",
+      "position": 29,
+      "kind": "static",
+      "bytes": 221148
+    },
+    {
+      "file": "030.png",
+      "emoji": "🥺",
+      "set": "muff_vk",
+      "position": 30,
+      "kind": "static",
+      "bytes": 194552
+    },
+    {
+      "file": "031.png",
+      "emoji": "😘",
+      "set": "muff_vk",
+      "position": 31,
+      "kind": "static",
+      "bytes": 250706
+    },
+    {
+      "file": "032.png",
+      "emoji": "🙈",
+      "set": "muff_vk",
+      "position": 32,
+      "kind": "static",
+      "bytes": 225190
+    },
+    {
+      "file": "033.png",
+      "emoji": "😴",
+      "set": "muff_vk",
+      "position": 33,
+      "kind": "static",
+      "bytes": 248544
+    },
+    {
+      "file": "034.png",
+      "emoji": "😒",
+      "set": "muff_vk",
+      "position": 34,
+      "kind": "static",
+      "bytes": 248631
+    },
+    {
+      "file": "035.png",
+      "emoji": "🤩",
+      "set": "muff_vk",
+      "position": 35,
+      "kind": "static",
+      "bytes": 233034
+    },
+    {
+      "file": "036.png",
+      "emoji": "🥺",
+      "set": "muff_vk",
+      "position": 36,
+      "kind": "static",
+      "bytes": 235969
+    },
+    {
+      "file": "037.png",
+      "emoji": "😬",
+      "set": "muff_vk",
+      "position": 37,
+      "kind": "static",
+      "bytes": 244785
+    },
+    {
+      "file": "038.png",
+      "emoji": "😅",
+      "set": "muff_vk",
+      "position": 38,
+      "kind": "static",
+      "bytes": 247396
+    },
+    {
+      "file": "039.png",
+      "emoji": "🤯",
+      "set": "muff_vk",
+      "position": 39,
+      "kind": "static",
+      "bytes": 262775
+    },
+    {
+      "file": "040.png",
+      "emoji": "😠",
+      "set": "muff_vk",
+      "position": 40,
+      "kind": "static",
+      "bytes": 193731
+    },
+    {
+      "file": "041.png",
+      "emoji": "🤡",
+      "set": "muff_vk",
+      "position": 41,
+      "kind": "static",
+      "bytes": 208018
+    },
+    {
+      "file": "042.png",
+      "emoji": "🍰",
+      "set": "muff_vk",
+      "position": 42,
+      "kind": "static",
+      "bytes": 257020
+    },
+    {
+      "file": "043.png",
+      "emoji": "👌",
+      "set": "muff_vk",
+      "position": 43,
+      "kind": "static",
+      "bytes": 227508
+    },
+    {
+      "file": "044.png",
+      "emoji": "👌",
+      "set": "muff_vk",
+      "position": 44,
+      "kind": "static",
+      "bytes": 229863
+    },
+    {
+      "file": "045.png",
+      "emoji": "😑",
+      "set": "muff_vk",
+      "position": 45,
+      "kind": "static",
+      "bytes": 246449
+    },
+    {
+      "file": "046.png",
+      "emoji": "😏",
+      "set": "muff_vk",
+      "position": 46,
+      "kind": "static",
+      "bytes": 244794
+    },
+    {
+      "file": "047.png",
+      "emoji": "🎂",
+      "set": "muff_vk",
+      "position": 47,
+      "kind": "static",
+      "bytes": 242559
+    },
+    {
+      "file": "048.png",
+      "emoji": "❌",
+      "set": "muff_vk",
+      "position": 48,
+      "kind": "static",
+      "bytes": 145907
+    },
+    {
+      "file": "049.png",
+      "emoji": "🧟‍♀",
+      "set": "issie_vk",
+      "position": 1,
+      "kind": "static",
+      "bytes": 238890
+    },
+    {
+      "file": "050.png",
+      "emoji": "🤨",
+      "set": "issie_vk",
+      "position": 2,
+      "kind": "static",
+      "bytes": 240534
+    },
+    {
+      "file": "051.png",
+      "emoji": "😢",
+      "set": "issie_vk",
+      "position": 3,
+      "kind": "static",
+      "bytes": 220309
+    },
+    {
+      "file": "052.png",
+      "emoji": "😵",
+      "set": "issie_vk",
+      "position": 4,
+      "kind": "static",
+      "bytes": 249581
+    },
+    {
+      "file": "053.png",
+      "emoji": "👻",
+      "set": "issie_vk",
+      "position": 5,
+      "kind": "static",
+      "bytes": 275458
+    },
+    {
+      "file": "054.png",
+      "emoji": "🙈",
+      "set": "issie_vk",
+      "position": 6,
+      "kind": "static",
+      "bytes": 239802
+    },
+    {
+      "file": "055.png",
+      "emoji": "🙂",
+      "set": "issie_vk",
+      "position": 7,
+      "kind": "static",
+      "bytes": 219352
+    },
+    {
+      "file": "056.png",
+      "emoji": "🤷",
+      "set": "issie_vk",
+      "position": 8,
+      "kind": "static",
+      "bytes": 244969
+    },
+    {
+      "file": "057.png",
+      "emoji": "☺️",
+      "set": "issie_vk",
+      "position": 9,
+      "kind": "static",
+      "bytes": 266528
+    },
+    {
+      "file": "058.png",
+      "emoji": "🙂",
+      "set": "issie_vk",
+      "position": 10,
+      "kind": "static",
+      "bytes": 226631
+    },
+    {
+      "file": "059.png",
+      "emoji": "😴",
+      "set": "issie_vk",
+      "position": 11,
+      "kind": "static",
+      "bytes": 270971
+    },
+    {
+      "file": "060.png",
+      "emoji": "😵",
+      "set": "issie_vk",
+      "position": 12,
+      "kind": "static",
+      "bytes": 196524
+    },
+    {
+      "file": "061.png",
+      "emoji": "🤩",
+      "set": "issie_vk",
+      "position": 13,
+      "kind": "static",
+      "bytes": 248098
+    },
+    {
+      "file": "062.png",
+      "emoji": "🙏",
+      "set": "issie_vk",
+      "position": 14,
+      "kind": "static",
+      "bytes": 237697
+    },
+    {
+      "file": "063.png",
+      "emoji": "😵",
+      "set": "issie_vk",
+      "position": 15,
+      "kind": "static",
+      "bytes": 207562
+    },
+    {
+      "file": "064.png",
+      "emoji": "😅",
+      "set": "issie_vk",
+      "position": 16,
+      "kind": "static",
+      "bytes": 267973
+    },
+    {
+      "file": "065.png",
+      "emoji": "👻",
+      "set": "issie_vk",
+      "position": 17,
+      "kind": "static",
+      "bytes": 241017
+    },
+    {
+      "file": "066.png",
+      "emoji": "🤗",
+      "set": "issie_vk",
+      "position": 18,
+      "kind": "static",
+      "bytes": 245088
+    },
+    {
+      "file": "067.png",
+      "emoji": "😴",
+      "set": "issie_vk",
+      "position": 19,
+      "kind": "static",
+      "bytes": 212440
+    },
+    {
+      "file": "068.png",
+      "emoji": "😝",
+      "set": "issie_vk",
+      "position": 20,
+      "kind": "static",
+      "bytes": 239550
+    },
+    {
+      "file": "069.png",
+      "emoji": "😝",
+      "set": "issie_vk",
+      "position": 21,
+      "kind": "static",
+      "bytes": 232820
+    },
+    {
+      "file": "070.png",
+      "emoji": "😡",
+      "set": "issie_vk",
+      "position": 22,
+      "kind": "static",
+      "bytes": 267577
+    },
+    {
+      "file": "071.png",
+      "emoji": "😵",
+      "set": "issie_vk",
+      "position": 23,
+      "kind": "static",
+      "bytes": 244491
+    },
+    {
+      "file": "072.png",
+      "emoji": "😩",
+      "set": "issie_vk",
+      "position": 24,
+      "kind": "static",
+      "bytes": 263200
+    },
+    {
+      "file": "073.png",
+      "emoji": "😒",
+      "set": "issie_vk",
+      "position": 25,
+      "kind": "static",
+      "bytes": 247355
+    },
+    {
+      "file": "074.png",
+      "emoji": "👋",
+      "set": "issie_vk",
+      "position": 26,
+      "kind": "static",
+      "bytes": 264469
+    },
+    {
+      "file": "075.png",
+      "emoji": "😔",
+      "set": "issie_vk",
+      "position": 27,
+      "kind": "static",
+      "bytes": 248702
+    },
+    {
+      "file": "076.png",
+      "emoji": "😳",
+      "set": "issie_vk",
+      "position": 28,
+      "kind": "static",
+      "bytes": 160752
+    },
+    {
+      "file": "077.png",
+      "emoji": "😭",
+      "set": "issie_vk",
+      "position": 29,
+      "kind": "static",
+      "bytes": 255181
+    },
+    {
+      "file": "078.png",
+      "emoji": "🤨",
+      "set": "issie_vk",
+      "position": 30,
+      "kind": "static",
+      "bytes": 236741
+    },
+    {
+      "file": "079.png",
+      "emoji": "😭",
+      "set": "issie_vk",
+      "position": 31,
+      "kind": "static",
+      "bytes": 234347
+    },
+    {
+      "file": "080.png",
+      "emoji": "🤕",
+      "set": "issie_vk",
+      "position": 32,
+      "kind": "static",
+      "bytes": 248903
+    },
+    {
+      "file": "081.png",
+      "emoji": "☺️",
+      "set": "issie_vk",
+      "position": 33,
+      "kind": "static",
+      "bytes": 233248
+    },
+    {
+      "file": "082.png",
+      "emoji": "😧",
+      "set": "issie_vk",
+      "position": 34,
+      "kind": "static",
+      "bytes": 244690
+    },
+    {
+      "file": "083.png",
+      "emoji": "😲",
+      "set": "issie_vk",
+      "position": 35,
+      "kind": "static",
+      "bytes": 221121
+    },
+    {
+      "file": "084.png",
+      "emoji": "☺️",
+      "set": "issie_vk",
+      "position": 36,
+      "kind": "static",
+      "bytes": 252309
+    },
+    {
+      "file": "085.png",
+      "emoji": "😭",
+      "set": "issie_vk",
+      "position": 37,
+      "kind": "static",
+      "bytes": 243056
+    },
+    {
+      "file": "086.png",
+      "emoji": "☺️",
+      "set": "issie_vk",
+      "position": 38,
+      "kind": "static",
+      "bytes": 251172
+    },
+    {
+      "file": "087.png",
+      "emoji": "😏",
+      "set": "issie_vk",
+      "position": 39,
+      "kind": "static",
+      "bytes": 225152
+    },
+    {
+      "file": "088.png",
+      "emoji": "❓",
+      "set": "issie_vk",
+      "position": 40,
+      "kind": "static",
+      "bytes": 251190
+    },
+    {
+      "file": "089.png",
+      "emoji": "😭",
+      "set": "issie_vk",
+      "position": 41,
+      "kind": "static",
+      "bytes": 214620
+    },
+    {
+      "file": "090.png",
+      "emoji": "🤔",
+      "set": "issie_vk",
+      "position": 42,
+      "kind": "static",
+      "bytes": 253139
+    },
+    {
+      "file": "091.png",
+      "emoji": "👀",
+      "set": "issie_vk",
+      "position": 43,
+      "kind": "static",
+      "bytes": 265544
+    },
+    {
+      "file": "092.png",
+      "emoji": "😠",
+      "set": "issie_vk",
+      "position": 44,
+      "kind": "static",
+      "bytes": 261833
+    },
+    {
+      "file": "093.png",
+      "emoji": "😡",
+      "set": "issie_vk",
+      "position": 45,
+      "kind": "static",
+      "bytes": 194413
+    },
+    {
+      "file": "094.png",
+      "emoji": "😒",
+      "set": "issie_vk",
+      "position": 46,
+      "kind": "static",
+      "bytes": 232695
+    },
+    {
+      "file": "095.png",
+      "emoji": "☺️",
+      "set": "issie_vk",
+      "position": 47,
+      "kind": "static",
+      "bytes": 228186
+    },
+    {
+      "file": "096.png",
+      "emoji": "🙉",
+      "set": "issie_vk",
+      "position": 48,
+      "kind": "static",
+      "bytes": 272440
+    },
+    {
+      "file": "097.png",
+      "emoji": "🤫",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 1,
+      "kind": "static",
+      "bytes": 225979
+    },
+    {
+      "file": "098.png",
+      "emoji": "☕️",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 2,
+      "kind": "static",
+      "bytes": 231003
+    },
+    {
+      "file": "099.png",
+      "emoji": "🤔",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 3,
+      "kind": "static",
+      "bytes": 224375
+    },
+    {
+      "file": "100.png",
+      "emoji": "👹",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 4,
+      "kind": "static",
+      "bytes": 299142
+    },
+    {
+      "file": "101.png",
+      "emoji": "😴",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 5,
+      "kind": "static",
+      "bytes": 301810
+    },
+    {
+      "file": "102.png",
+      "emoji": "😩",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 6,
+      "kind": "static",
+      "bytes": 261917
+    },
+    {
+      "file": "103.png",
+      "emoji": "😒",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 7,
+      "kind": "static",
+      "bytes": 262711
+    },
+    {
+      "file": "104.png",
+      "emoji": "😡",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 8,
+      "kind": "static",
+      "bytes": 311770
+    },
+    {
+      "file": "105.png",
+      "emoji": "❓",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 9,
+      "kind": "static",
+      "bytes": 272804
+    },
+    {
+      "file": "106.png",
+      "emoji": "😭",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 10,
+      "kind": "static",
+      "bytes": 272067
+    },
+    {
+      "file": "107.png",
+      "emoji": "👍",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 11,
+      "kind": "static",
+      "bytes": 262606
+    },
+    {
+      "file": "108.png",
+      "emoji": "🤔",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 12,
+      "kind": "static",
+      "bytes": 247192
+    },
+    {
+      "file": "109.png",
+      "emoji": "😕",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 13,
+      "kind": "static",
+      "bytes": 274663
+    },
+    {
+      "file": "110.png",
+      "emoji": "🤗",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 14,
+      "kind": "static",
+      "bytes": 259049
+    },
+    {
+      "file": "111.png",
+      "emoji": "🩸",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 15,
+      "kind": "static",
+      "bytes": 265231
+    },
+    {
+      "file": "112.png",
+      "emoji": "🙈",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 16,
+      "kind": "static",
+      "bytes": 248139
+    },
+    {
+      "file": "113.png",
+      "emoji": "🍿",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 17,
+      "kind": "static",
+      "bytes": 301297
+    },
+    {
+      "file": "114.png",
+      "emoji": "👋",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 18,
+      "kind": "static",
+      "bytes": 310461
+    },
+    {
+      "file": "115.png",
+      "emoji": "😎",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 19,
+      "kind": "static",
+      "bytes": 305720
+    },
+    {
+      "file": "116.png",
+      "emoji": "🍵",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 20,
+      "kind": "static",
+      "bytes": 241080
+    },
+    {
+      "file": "117.png",
+      "emoji": "😨",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 21,
+      "kind": "static",
+      "bytes": 295284
+    },
+    {
+      "file": "118.png",
+      "emoji": "❤️",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 22,
+      "kind": "static",
+      "bytes": 254730
+    },
+    {
+      "file": "119.png",
+      "emoji": "❤️",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 23,
+      "kind": "static",
+      "bytes": 260274
+    },
+    {
+      "file": "120.png",
+      "emoji": "😈",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 24,
+      "kind": "static",
+      "bytes": 312970
+    },
+    {
+      "file": "121.png",
+      "emoji": "🥰",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 25,
+      "kind": "static",
+      "bytes": 287886
+    },
+    {
+      "file": "122.png",
+      "emoji": "👌",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 26,
+      "kind": "static",
+      "bytes": 244893
+    },
+    {
+      "file": "123.png",
+      "emoji": "🥵",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 27,
+      "kind": "static",
+      "bytes": 279465
+    },
+    {
+      "file": "124.png",
+      "emoji": "😊",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 28,
+      "kind": "static",
+      "bytes": 301660
+    },
+    {
+      "file": "125.png",
+      "emoji": "😳",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 29,
+      "kind": "static",
+      "bytes": 236021
+    },
+    {
+      "file": "126.png",
+      "emoji": "☺️",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 30,
+      "kind": "static",
+      "bytes": 296149
+    },
+    {
+      "file": "127.png",
+      "emoji": "🤦",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 31,
+      "kind": "static",
+      "bytes": 266209
+    },
+    {
+      "file": "128.png",
+      "emoji": "👎",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 32,
+      "kind": "static",
+      "bytes": 243997
+    },
+    {
+      "file": "129.png",
+      "emoji": "🖕",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 33,
+      "kind": "static",
+      "bytes": 277268
+    },
+    {
+      "file": "130.png",
+      "emoji": "👀",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 34,
+      "kind": "static",
+      "bytes": 314945
+    },
+    {
+      "file": "131.png",
+      "emoji": "📞",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 35,
+      "kind": "static",
+      "bytes": 309169
+    },
+    {
+      "file": "132.png",
+      "emoji": "💔",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 36,
+      "kind": "static",
+      "bytes": 278382
+    },
+    {
+      "file": "133.png",
+      "emoji": "😔",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 37,
+      "kind": "static",
+      "bytes": 287409
+    },
+    {
+      "file": "134.png",
+      "emoji": "🥳",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 38,
+      "kind": "static",
+      "bytes": 302275
+    },
+    {
+      "file": "135.png",
+      "emoji": "🎂",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 39,
+      "kind": "static",
+      "bytes": 271930
+    },
+    {
+      "file": "136.png",
+      "emoji": "😬",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 40,
+      "kind": "static",
+      "bytes": 264212
+    },
+    {
+      "file": "137.png",
+      "emoji": "☺️",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 41,
+      "kind": "static",
+      "bytes": 285843
+    },
+    {
+      "file": "138.png",
+      "emoji": "🤑",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 42,
+      "kind": "static",
+      "bytes": 305490
+    },
+    {
+      "file": "139.png",
+      "emoji": "📖",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 43,
+      "kind": "static",
+      "bytes": 280468
+    },
+    {
+      "file": "140.png",
+      "emoji": "🍴",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 44,
+      "kind": "static",
+      "bytes": 228549
+    },
+    {
+      "file": "141.png",
+      "emoji": "😞",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 45,
+      "kind": "static",
+      "bytes": 219406
+    },
+    {
+      "file": "142.png",
+      "emoji": "💃",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 46,
+      "kind": "static",
+      "bytes": 203866
+    },
+    {
+      "file": "143.png",
+      "emoji": "🤔",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 47,
+      "kind": "static",
+      "bytes": 278663
+    },
+    {
+      "file": "144.png",
+      "emoji": "😰",
+      "set": "agnes_vk_by_TgEmojiBot",
+      "position": 48,
+      "kind": "static",
+      "bytes": 163371
+    }
+  ],
+  "telemost": {
+    "status": "pending",
+    "packUrl": null,
+    "error": null
+  }
+}
