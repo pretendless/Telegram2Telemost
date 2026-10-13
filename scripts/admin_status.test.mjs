@@ -230,6 +230,8 @@ test('a restart failure names the open pack, or says перезапуск when t
   assert.equal(failurePackName({ mode: 'restart', packs: '' }), 'перезапуск');
   assert.equal(failurePackName({ mode: 'restart-peek', packs: '' }), 'перезапуск');
   assert.equal(failurePackName({ mode: 'restart', title: 'Север' }), 'Север');
+  assert.equal(failurePackName({ mode: 'restart', title: '11:57' }), 'перезапуск');
+  assert.equal(failurePackName({ mode: 'restart', pack: '11:57' }), 'перезапуск');
   const sent = [];
   const fetchImpl = async (_url, options) => {
     sent.push(JSON.parse(options.body).text);

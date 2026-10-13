@@ -34,7 +34,7 @@ test('github output values drop newlines so GITHUB_OUTPUT stays valid', () => {
   assert.match(text, /^restart_seen_last_line=Отправьте эмодзи для стикера\.$/m);
 });
 
-test('empty title on an open dialog does not hard-fail prepare', () => {
+test('empty or clock title on an open dialog closes or continues, not a hard fail', () => {
   const catalogs = [{ title: 'Юг', dir: '02-yug' }];
   const active = [{
     id: 'a',
@@ -53,20 +53,20 @@ test('empty title on an open dialog does not hard-fail prepare', () => {
   });
   assert.equal(withActive.action, 'restart');
   assert.equal(withActive.title, 'Запад');
-  const unmatched = restartTarget({
+  const clockTitle = restartTarget({
     unfinished: true,
-    title: '',
-    liveText: '11:57\nОтправьте эмодзи для стикера.',
+    title: '11:57',
+    liveText: 'Стикер готов.\n11:57',
     catalogs,
     requests: [],
   });
-  assert.equal(unmatched.action, 'seen');
-  assert.equal(unmatched.title, '');
+  assert.equal(clockTitle.action, 'close');
+  assert.equal(clockTitle.title, '');
   const output = restartGithubOutput({
-    action: unmatched.action,
-    title: unmatched.title,
+    action: clockTitle.action,
+    title: clockTitle.title,
     lastLine: '11:57',
   });
-  assert.match(output, /^action=seen$/m);
+  assert.match(output, /^action=close$/m);
   assert.match(output, /^restart_seen_title=$/m);
 });

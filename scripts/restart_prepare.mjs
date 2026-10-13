@@ -3,7 +3,7 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { restartTarget, screenLine, stickerSetName } from './telemost_upload.mjs';
+import { isClockLine, restartTarget, screenLine, statusPackName, stickerSetName } from './telemost_upload.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -79,24 +79,26 @@ function writeGithubOutput(payload) {
 async function main() {
   const githubOutput = process.argv.includes('--github-output');
   const choice = JSON.parse(readFileSync(join(ROOT, 'logs', 'restart-choice.json'), 'utf8'));
-  const seen = {
-    title: choice.title || '',
-    lastLine: choice.lastLine || screenLine(choice.liveText),
-  };
+  const title = statusPackName(choice.title);
+  const lastLine = (!isClockLine(choice.lastLine) && choice.lastLine)
+    ? String(choice.lastLine).replace(/\s+/g, ' ').trim()
+    : screenLine(choice.liveText);
+  const seen = { title, lastLine };
   // Keep diagnostics off stdout when that stream is GITHUB_OUTPUT.
   console.error('restart-seen', JSON.stringify(seen));
   const target = restartTarget({
     unfinished: Boolean(choice.unfinished),
-    title: choice.title || '',
+    title,
     liveText: choice.liveText || '',
     catalogs: catalogs(),
     requests: await storedRequests(),
   });
   mkdirSync(join(ROOT, 'logs'), { recursive: true });
-  if (target.action === 'idle' || target.action === 'seen') {
+  if (target.action === 'idle' || target.action === 'seen' || target.action === 'close') {
     writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify({ ...target, ...seen, liveText: choice.liveText || '' }));
     if (githubOutput) writeGithubOutput({ action: target.action, ...seen });
-    // Empty title is fine: an open dialog may still continue as "seen".
+    // Empty or clock-only title is fine: close the open dialog, or report a
+    // real unmatched title as "seen". Neither may write invalid GITHUB_OUTPUT.
     process.exit(0);
   }
   const dir = target.dir || writeRequestPack(target);
