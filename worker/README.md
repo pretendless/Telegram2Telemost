@@ -14,14 +14,18 @@ uploader  --Bearer-->   POST /progress   Worker  --KV-->           подпис�
 ```
 
 - `POST /telegram` — обновления Telegram. Заголовок `X-Telegram-Bot-Api-Secret-Token` равен секрету `WEBHOOK_SECRET`.
-- `POST /progress` — ход загрузки. Заголовок `Authorization: Bearer <UPLOADER_SECRET>`. Тело: `slug`, `title`, `source`, `status` (`pending` / `uploading` / `done` / `error`), `uploaded`, `total`, `packUrl`, `error`. Можно прислать и блок `telemost` из `pack.json`.
+- `POST /progress` — ход загрузки. Заголовок `Authorization: Bearer <UPLOADER_SECRET>`. Тело: `slug`, `title`, `source`, `status` (`pending` / `uploading` / `done` / `error`), `uploaded`, `total`, `packUrl`, `error`, `requesterChatId`, `queueRequestId`. Можно прислать и блок `telemost` из `pack.json`.
+- `POST /session-started` — один раз на run Actions: `runId`, `url`, `reason` (или `mode` для подписи по умолчанию).
 - «Готово» подписчику и пост в канал уходят только когда `packUrl` — настоящая ссылка `http(s)`. Пока её нет, воркер лишь помнит статус. Если «готово» уже уходило без ссылки, следующее сообщение со ссылкой досылает её и тогда же публикует пост.
 - Пост в канале — название и ссылка Телемоста, без `t.me/addstickers`.
 - KV `BOT_KV`: `sub:<chat id>`, `state:<slug>`, `pack:<slug>`, `meta:seeded`, один ключ `queue` (приоритетные chat id и очередь запросов).
 - Принятый набор пишется в `queue` одним разом. Повтор того же набора не пишет KV снова. `GET /health` KV не трогает. `/status` человека с запросом читает только `queue`, без list.
 - Принятый запрос от любого пользователя попадает в `queue`. Если Actions сейчас не крутят Telemost, воркер сам запускает `telemost-session` (`mode=restart` с `main`), без `/restart`. Когда пак догружен или упал с ошибкой, воркер закрывает строку в `queue` и снова запускает workflow, пока в очереди есть `queued` или «зависший» `uploading`.
 - `/restart` в чате `8502935020` — только если нужно **прервать** текущий запуск Actions и начать заново (как раньше: отмена run + один dispatch). Обычным пользователям команда не нужна; повтор того же набора после `done` не принимается.
+- При **старте каждого** run `telemost-session` админ получает одно сообщение с **причиной** и ссылкой на Actions. В dispatch передаётся `dispatch_reason`; workflow шлёт `POST /session-started` (дедуп по `runId` в KV). Без повторов, если run уже объявлен.
+- `/queue` в админ-чате — очередь, текущая загрузка (N из M из `pack:request-<id>`), недавние `done`/`error`. Только ключ `queue` и один pack-ключ для uploading, без list KV.
 - Чат `8502935020` получает ход и ошибки даже если набор запросил кто-то другой. Один запуск пака — одно сообщение, и в нём всегда «стикер N из TOTAL». Отправка, эмодзи, «Стикер готов», ожидание, повтор, ошибка и ссылка правят его. Если правку отклонили, старое сообщение удаляется и уходит одно новое. Сбой Actions дописывает в него ошибку и ссылку на запуск. `/status` в этом чате отвечает `идёт` или `простаивает`.
+- Запросивший пользователь получает **одну карточку** на запрос (очередь → загрузка → N из M). В `/progress` поля `requesterChatId`, `queueRequestId`; в `pack.json` очереди — `requesterChatId`.
 - `POST /queue/claim` с `Authorization: Bearer <UPLOADER_SECRET>` забирает следующий запрос. Уже загружаемый набор не вытесняется. Приоритетные запросы идут раньше обычных, в порядке поступления. Тело `{ "release": { "id": "<id>", "status": "done" } }` закрывает запрос; следующий старт даёт воркер после `POST /progress` с `done`+ссылкой или `error` (и при новом запросе в Telegram, если pipeline простаивает).
 
 `scripts/telemost_upload.mjs` пишет ход в админ-чат напрямую. Если заданы `TG2TM_PROGRESS_URL` и `UPLOADER_SECRET`, тот же ход уходит в `POST /progress` с `adminDelivered`, чтобы `/status` видел задачу и не слал вторую карточку. Без этих переменных загрузка в Телемост продолжается.

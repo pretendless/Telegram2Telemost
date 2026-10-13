@@ -31,9 +31,9 @@ export function usageText(error) {
 
 export function startedText(parsed) {
   if (parsed.mode === "upload") {
-    return `Запускаю загрузку (${parsed.packs}) аккаунтом «${parsed.account}». Нужна уже сохранённая сессия.`;
+    return `Запускаю загрузку (${parsed.packs}) аккаунтом «${parsed.account}». Нужна уже сохранённая сессия. Ссылка на Actions придёт отдельным сообщением.`;
   }
-  return `Запускаю браузер для аккаунта «${parsed.account}». QR-код Яндекса придёт в этот чат. Если кода не будет, пришлю ссылку на экран.`;
+  return `Запускаю браузер для аккаунта «${parsed.account}». QR-код Яндекса придёт в этот чат. Если кода не будет, пришлю ссылку на экран. Ссылка на Actions — отдельным сообщением.`;
 }
 
 export function githubFailText(status) {
@@ -42,9 +42,9 @@ export function githubFailText(status) {
 
 export function restartReply({ ok, url, reason, status }) {
   if (ok && url) {
-    return "Останавливаю текущую загрузку и запускаю одну новую с main. Если в Телемосте открыт набор, он будет закрыт через /done и начат заново со своего первого стикера. Если диалог пуст, возьму следующий запрос.\n" + url;
+    return "Останавливаю текущую загрузку и запускаю одну новую с main. Если в Телемосте открыт набор, он будет закрыт через /done и начат заново со своего первого стикера. Если диалог пуст, возьму следующий запрос. Ссылка на Actions — отдельным сообщением.";
   }
-  if (ok) return "Запуск принят, ссылка на Actions ещё не появилась. Второй запуск не создаю.";
+  if (ok) return "Запуск принят. Ссылка на Actions придёт отдельным сообщением. Второй запуск не создаю.";
   if (reason === "still-running") {
     return "Текущий запуск ещё не остановился. Новый не стартую, чтобы не открыть второй браузер. Пришлите /restart ещё раз через минуту.";
   }
@@ -73,6 +73,7 @@ export async function handleRestart(env, message, deps = {}) {
       ref: DEFAULT_REF,
       chatId,
       sleep: deps.sleep,
+      dispatchReason: "админ: /restart",
     });
   } catch (err) {
     console.error("restart failed", err && err.message);
@@ -108,6 +109,9 @@ export async function handleVmCommand(env, message, deps = {}) {
   const fetchImpl = deps.fetch || fetch;
   let result;
   try {
+    const dispatchReason = parsed.mode === "upload"
+      ? `админ: /upload ${parsed.packs}`
+      : "админ: /login или /connect";
     result = await dispatchWorkflow(fetchImpl, {
       token: env.GH_DISPATCH_TOKEN,
       repo: env.GH_REPO || DEFAULT_REPO,
@@ -117,6 +121,7 @@ export async function handleVmCommand(env, message, deps = {}) {
       account: parsed.account,
       chatId,
       packs: parsed.packs,
+      dispatchReason,
     });
   } catch (err) {
     console.error("dispatch failed", err && err.message);

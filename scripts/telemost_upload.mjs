@@ -881,15 +881,30 @@ export function restartTarget({ unfinished, title, liveText, catalogs, requests 
         dir: catalogsHit[0].dir || '',
         requestId: named ? named.id || '' : '',
         links: named && named.links ? named.links : [],
+        chatId: named ? named.chatId || '' : '',
       };
     }
     if (catalogsHit.length === 0 && requestsHit.length === 1) {
       const named = requestsHit[0];
-      return { action: 'restart', title: named.title, dir: '', requestId: named.id || '', links: named.links || [] };
+      return {
+        action: 'restart',
+        title: named.title,
+        dir: '',
+        requestId: named.id || '',
+        links: named.links || [],
+        chatId: named.chatId || '',
+      };
     }
     const active = stored.filter((item) => item && item.status === 'uploading');
     if (!packTitleKey(namedTitle) && catalogsHit.length === 0 && requestsHit.length === 0 && active.length === 1) {
-      return { action: 'restart', title: active[0].title, dir: '', requestId: active[0].id || '', links: active[0].links || [] };
+      return {
+        action: 'restart',
+        title: active[0].title,
+        dir: '',
+        requestId: active[0].id || '',
+        links: active[0].links || [],
+        chatId: active[0].chatId || '',
+      };
     }
     // Real unmatched / ambiguous title still surfaces as "seen". An empty or
     // clock-only title falls through so /done can run and the queue can continue.
@@ -899,12 +914,28 @@ export function restartTarget({ unfinished, title, liveText, catalogs, requests 
     }
   }
   const active = stored.find((item) => item && item.status === 'uploading');
-  if (active) return { action: 'upload', title: active.title, dir: '', requestId: active.id || '', links: active.links || [] };
+  if (active) {
+    return {
+      action: 'upload',
+      title: active.title,
+      dir: '',
+      requestId: active.id || '',
+      links: active.links || [],
+      chatId: active.chatId || '',
+    };
+  }
   const waiting = stored.filter((item) => item && item.status === 'queued').sort(byRequestTime);
   const priority = waiting.filter((item) => item.priority);
   const next = (priority.length ? priority : waiting)[0];
   if (!next) return unfinished ? { action: 'close', title: '', liveText: liveText || '' } : { action: 'idle' };
-  return { action: 'upload', title: next.title, dir: '', requestId: next.id || '', links: next.links || [] };
+  return {
+    action: 'upload',
+    title: next.title,
+    dir: '',
+    requestId: next.id || '',
+    links: next.links || [],
+    chatId: next.chatId || '',
+  };
 }
 
 export function restartAfterClose(text) {
@@ -944,7 +975,7 @@ function openAdminFeed(dirRef) {
   const token = process.env.TG2TMBOT_TOKEN || '';
   return createAdminFeed({
     io: token ? telegramIo(fetch, token) : null,
-    requester: process.env.TELEGRAM_CHAT_ID || '',
+    requester: dirRef.requesterChatId || process.env.TELEGRAM_CHAT_ID || '',
     writeState: (state) => {
       try {
         mkdirSync(join(ROOT, 'logs'), { recursive: true });
@@ -967,7 +998,8 @@ function openAdminFeed(dirRef) {
         error: event.error || null,
         lastLine: event.lastLine || null,
         phase: event.phase,
-        requester: event.requester || null,
+        requester: event.requester || dirRef.requesterChatId || null,
+        requesterChatId: dirRef.requesterChatId || event.requester || null,
         queueRequestId: dirRef.queueRequestId || null,
       });
     },
@@ -1064,6 +1096,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   if (dirRef) {
     dirRef.title = m.title;
     dirRef.queueRequestId = m.queueRequestId || '';
+    dirRef.requesterChatId = m.requesterChatId || '';
   }
   await note({ phase: 'start', pack: m.title, total: m.images.length });
 
@@ -1406,6 +1439,7 @@ async function finalizePack(bot, dir, note = async () => {}, dirRef = null) {
   if (dirRef) {
     dirRef.title = m.title;
     dirRef.queueRequestId = m.queueRequestId || '';
+    dirRef.requesterChatId = m.requesterChatId || '';
   }
   const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
   if (tm.status === 'done' && tm.packUrl) {

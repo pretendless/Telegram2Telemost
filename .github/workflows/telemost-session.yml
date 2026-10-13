@@ -30,6 +30,11 @@ on:
         required: false
         default: ""
         type: string
+      dispatch_reason:
+        description: Why this run started (admin Telegram notice)
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -46,6 +51,16 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
+
+      - name: Notify admin of new session
+        env:
+          UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
+          TG2TM_PROGRESS_URL: https://tg2tmbot.prtndz.workers.dev/progress
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISPATCH_REASON: ${{ inputs.dispatch_reason }}
+          MODE: ${{ inputs.mode }}
+        run: node scripts/notify_session_start.mjs
 
       - name: Check inputs
         id: in

@@ -57,9 +57,10 @@ export function assertRef(ref) {
   return value;
 }
 
-export function buildDispatch({ repo, workflow, ref, mode, account, chatId, packs }) {
+export function buildDispatch({ repo, workflow, ref, mode, account, chatId, packs, dispatchReason }) {
   if (!ACCOUNT_RE.test(account)) throw new Error("account");
   if (mode !== "login" && mode !== "upload" && mode !== "restart") throw new Error("mode");
+  const reason = dispatchReason == null ? "" : String(dispatchReason).replace(/[\r\n]+/g, " ").trim().slice(0, 200);
   return {
     url: dispatchUrl(repo, workflow),
     body: {
@@ -69,6 +70,7 @@ export function buildDispatch({ repo, workflow, ref, mode, account, chatId, pack
         account,
         chat_id: chatId == null ? "" : String(chatId),
         packs: packs || "",
+        dispatch_reason: reason,
       },
     },
   };
@@ -84,8 +86,8 @@ export function githubHeaders(token) {
   };
 }
 
-export async function dispatchWorkflow(fetchImpl, { token, repo, workflow, ref, mode, account, chatId, packs }) {
-  const built = buildDispatch({ repo, workflow, ref, mode, account, chatId, packs });
+export async function dispatchWorkflow(fetchImpl, { token, repo, workflow, ref, mode, account, chatId, packs, dispatchReason }) {
+  const built = buildDispatch({ repo, workflow, ref, mode, account, chatId, packs, dispatchReason });
   const res = await fetchImpl(built.url, {
     method: "POST",
     headers: githubHeaders(token),
@@ -121,7 +123,7 @@ async function readBody(response) {
 
 // Dispatch one restart from main, then cancel the runs that were already active.
 // If GitHub refuses the dispatch, the current upload stays.
-export async function restartWorkflow(fetchImpl, { token, repo, workflow, ref, chatId, sleep, now } = {}) {
+export async function restartWorkflow(fetchImpl, { token, repo, workflow, ref, chatId, sleep, now, dispatchReason } = {}) {
   const headers = githubHeaders(token);
   const listUrl = workflowRunsUrl(repo, workflow);
   const startedAt = typeof now === "function" ? now() : Date.now();
@@ -142,6 +144,7 @@ export async function restartWorkflow(fetchImpl, { token, repo, workflow, ref, c
     account: "default",
     chatId,
     packs: "",
+    dispatchReason: dispatchReason || "админ: /restart",
   });
   if (!dispatched.ok) return { ok: false, reason: "dispatch", status: dispatched.status };
   for (const id of previous) {
