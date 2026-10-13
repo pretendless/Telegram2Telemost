@@ -33,7 +33,7 @@ test('a sticker number, a wait, or a retry edits the same card', () => {
 
 test('emoji, the next send, an error, and the saved link edit the same card', () => {
   const sending = card({ phase: 'sending', index: 1, total: 144 });
-  for (const phase of ['emoji', 'done', 'error', 'saved', 'link', 'start', 'newpack', 'failed', 'waiting', 'retry']) {
+  for (const phase of ['emoji', 'ready', 'done', 'error', 'saved', 'link', 'start', 'newpack', 'failed', 'waiting', 'retry']) {
     assert.equal(adminDelivery(sending, card({ phase, index: 1, total: 144 })).action, 'edit');
     assert.equal(adminDelivery(card({ phase, index: 1, total: 144 }), card({ phase, index: 2, total: 144 })).action, 'edit');
   }
@@ -49,19 +49,29 @@ test('the card names the pack, the step, the bot line, and another user only by 
     lastLine: 'Отправьте эмодзи для стикера.',
     requester: '111',
   }));
-  assert.match(text, /^10:44 \| «Маф, Изис и Агнес» \| отправка 16\/144/);
+  assert.match(text, /^10:44 \| «Маф, Изис и Агнес» \| стикер 16 из 144 \| отправка/);
   assert.match(text, /бот: Отправьте эмодзи для стикера\./);
   assert.match(text, /запрос: 111/);
   assert.equal(isAdminChat(ADMIN_CHAT_ID), true);
   assert.doesNotMatch(formatAdminStatus(card({ phase: 'waiting', seconds: 20, requester: ADMIN_CHAT_ID })), /запрос:/);
+  const waiting = formatAdminStatus(card({ phase: 'waiting', index: 16, total: 144, seconds: 20 }));
+  assert.match(waiting, /стикер 16 из 144 \| жду бота 20 с/);
+  const retry = formatAdminStatus(card({ phase: 'retry', index: 16, total: 144, attempt: 2 }));
+  assert.match(retry, /стикер 16 из 144 \| повтор 2/);
+  const ready = formatAdminStatus(card({ phase: 'ready', index: 16, total: 144, lastLine: 'Стикер готов. Отправьте картинку.' }));
+  assert.match(ready, /стикер 16 из 144 \| Стикер готов/);
+  assert.match(ready, /бот: Стикер готов\. Отправьте картинку\./);
   const failed = formatAdminStatus(card({
     phase: 'failed',
-    step: 'отправка 1/144',
+    index: 1,
+    total: 144,
+    step: 'отправка',
     lastLine: 'Отправьте эмодзи',
     error: 'Actions завершились с ошибкой',
     runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/1',
   }));
-  assert.match(failed, /сбой Actions \| отправка 1\/144/);
+  assert.match(failed, /стикер 1 из 144/);
+  assert.match(failed, /сбой Actions \| отправка/);
   assert.match(failed, /ошибка: Actions завершились с ошибкой/);
   assert.match(failed, /actions\/runs\/1/);
 });
@@ -70,7 +80,7 @@ test('/status says the job is running or idle', () => {
   assert.equal(adminJobText(currentAdminJob([], { items: [] })), 'простаивает');
   assert.equal(
     adminJobText(currentAdminJob([{ title: pack, status: 'uploading', uploaded: 16, total: 144 }], { items: [] })),
-    `идёт | «${pack}» | отправка 16/144`,
+    `идёт | «${pack}» | стикер 16 из 144`,
   );
   assert.match(adminJobText(currentAdminJob([], { items: [{ status: 'uploading', title: pack, stickers: 144 }] })), /^идёт \|/);
 });
@@ -98,7 +108,8 @@ test('a failed edit deletes the old card and sends the replacement', async () =>
   assert.equal(second.messageId, 11);
   assert.deepEqual(calls.map((call) => call[0]), ['send', 'edit', 'delete', 'send']);
   assert.equal(calls[2][2], 10);
-  assert.match(calls[3][2], /отправка 2\/144/);
+  assert.match(calls[3][2], /стикер 2 из 144/);
+  assert.equal(calls.filter((call) => call[0] === 'send').length, 2);
 });
 
 test('the feed edits a repeated wait and does not call Telegram when the card is unchanged', async () => {
@@ -117,14 +128,23 @@ test('the feed edits a repeated wait and does not call Telegram when the card is
     },
   };
   const notify = createAdminFeed({ io, requester: '111' });
-  await notify(card({ phase: 'waiting', seconds: 20, requester: '' }));
-  await notify(card({ phase: 'waiting', seconds: 20 }));
-  await notify(card({ phase: 'waiting', seconds: 40 }));
+  await notify(card({ phase: 'sending', index: 1, total: 144, requester: '' }));
   await notify(card({ phase: 'emoji', index: 1, total: 144 }));
-  assert.deepEqual(calls.map((call) => call[0]), ['send', 'edit', 'edit']);
-  assert.match(calls[1][2], /жду бота 40 с/);
+  await notify(card({ phase: 'ready', index: 1, total: 144, lastLine: 'Стикер готов' }));
+  await notify(card({ phase: 'waiting', index: 2, total: 144, seconds: 20 }));
+  await notify(card({ phase: 'waiting', index: 2, total: 144, seconds: 20 }));
+  await notify(card({ phase: 'waiting', index: 2, total: 144, seconds: 40 }));
+  await notify(card({ phase: 'retry', index: 2, total: 144, attempt: 1 }));
+  await notify({ phase: 'error', pack, at: '10:44', error: 'упало' });
+  assert.deepEqual(calls.map((call) => call[0]), ['send', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit']);
+  assert.equal(calls.filter((call) => call[0] === 'send').length, 1);
+  assert.match(calls[1][2], /стикер 1 из 144 \| эмодзи/);
   assert.match(calls[1][2], /запрос: 111/);
-  assert.match(calls[2][2], /эмодзи 1\/144/);
+  assert.match(calls[2][2], /стикер 1 из 144 \| Стикер готов/);
+  assert.match(calls[4][2], /стикер 2 из 144 \| жду бота 40 с/);
+  assert.match(calls[5][2], /стикер 2 из 144 \| повтор 1/);
+  assert.match(calls[6][2], /стикер 2 из 144/);
+  assert.match(calls[6][2], /ошибка: упало/);
   messageId = 8;
 });
 
@@ -173,7 +193,33 @@ test('a failed Actions run sends one forwardable card and skips when the error w
   assert.equal(edited.length, 1);
   assert.match(edited[0].url, /editMessageText/);
   assert.equal(edited[0].body.message_id, 9);
+  assert.match(edited[0].body.text, /стикер 4 из 144/);
   assert.match(edited[0].body.text, /сбой Actions/);
+  assert.match(edited[0].body.text, /ошибка: Actions завершились с ошибкой/);
+  assert.match(edited[0].body.text, /actions\/runs\/1/);
+
+  writeFileSync(path, JSON.stringify({
+    messageId: 9,
+    event: { phase: 'error', pack, index: 4, total: 144, error: 'уже отправлено' },
+  }));
+  const updated = [];
+  await reportRunFailed({
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      updated.push({ url, body });
+      return { ok: true, json: async () => ({ ok: true, result: { message_id: 9 } }) };
+    },
+    token: 'bot-token',
+    statePath: path,
+    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/2',
+  });
+  assert.equal(updated.length, 1);
+  assert.match(updated[0].url, /editMessageText/);
+  assert.equal(updated[0].body.message_id, 9);
+  assert.match(updated[0].body.text, /стикер 4 из 144/);
+  assert.match(updated[0].body.text, /ошибка: уже отправлено/);
+  assert.match(updated[0].body.text, /actions\/runs\/2/);
+  assert.equal(updated[0].body.text.includes('bot-token'), false);
   rmSync(dir, { recursive: true });
   await reportRunFailed({ fetchImpl, token: '', statePath: path });
   assert.equal(sent.length, 1);
