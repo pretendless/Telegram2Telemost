@@ -2,10 +2,24 @@
 // dialog takes the next stored user request. No pack title is fixed here.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { restartTarget, screenLine, stickerSetName } from './telemost_upload.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// GITHUB_OUTPUT is name=value per line. Values may include spaces and =, but
+// not newlines. Names must stay a single token (no spaces, no JSON).
+export function githubOutputValue(value) {
+  return String(value ?? '').replace(/[\r\n]+/g, ' ').trimEnd();
+}
+
+export function restartGithubOutput({ action, title = '', lastLine = '' } = {}) {
+  return [
+    `action=${githubOutputValue(action)}`,
+    `restart_seen_title=${githubOutputValue(title)}`,
+    `restart_seen_last_line=${githubOutputValue(lastLine)}`,
+  ].join('\n') + '\n';
+}
 
 function catalogs() {
   const packs = join(ROOT, 'packs');
@@ -58,29 +72,42 @@ function writeRequestPack(target) {
   return slug;
 }
 
-const choice = JSON.parse(readFileSync(join(ROOT, 'logs', 'restart-choice.json'), 'utf8'));
-const seen = {
-  title: choice.title || '',
-  lastLine: choice.lastLine || screenLine(choice.liveText),
-};
-console.log('restart-seen', JSON.stringify(seen));
-const target = restartTarget({
-  unfinished: Boolean(choice.unfinished),
-  title: choice.title || '',
-  liveText: choice.liveText || '',
-  catalogs: catalogs(),
-  requests: await storedRequests(),
-});
-mkdirSync(join(ROOT, 'logs'), { recursive: true });
-if (target.action === 'idle' || target.action === 'seen') {
-  writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify({ ...target, ...seen, liveText: choice.liveText || '' }));
-  if (process.argv.includes('--github-output')) process.stdout.write(`action=${target.action}\n`);
-  process.exit(0);
+function writeGithubOutput(payload) {
+  process.stdout.write(restartGithubOutput(payload));
 }
-const dir = target.dir || writeRequestPack(target);
-await focusRequest(target.requestId);
-const selected = { ...target, dir, action: target.action };
-writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify(selected));
-writeFileSync(join(ROOT, 'logs', 'restart-fetch.txt'), join(ROOT, 'packs', dir));
-if (process.argv.includes('--github-output')) process.stdout.write('action=upload\n');
-console.log('restart-pack', selected.action, selected.title);
+
+async function main() {
+  const githubOutput = process.argv.includes('--github-output');
+  const choice = JSON.parse(readFileSync(join(ROOT, 'logs', 'restart-choice.json'), 'utf8'));
+  const seen = {
+    title: choice.title || '',
+    lastLine: choice.lastLine || screenLine(choice.liveText),
+  };
+  // Keep diagnostics off stdout when that stream is GITHUB_OUTPUT.
+  console.error('restart-seen', JSON.stringify(seen));
+  const target = restartTarget({
+    unfinished: Boolean(choice.unfinished),
+    title: choice.title || '',
+    liveText: choice.liveText || '',
+    catalogs: catalogs(),
+    requests: await storedRequests(),
+  });
+  mkdirSync(join(ROOT, 'logs'), { recursive: true });
+  if (target.action === 'idle' || target.action === 'seen') {
+    writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify({ ...target, ...seen, liveText: choice.liveText || '' }));
+    if (githubOutput) writeGithubOutput({ action: target.action, ...seen });
+    // Empty title is fine: an open dialog may still continue as "seen".
+    process.exit(0);
+  }
+  const dir = target.dir || writeRequestPack(target);
+  await focusRequest(target.requestId);
+  const selected = { ...target, dir, action: target.action };
+  writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify(selected));
+  writeFileSync(join(ROOT, 'logs', 'restart-fetch.txt'), join(ROOT, 'packs', dir));
+  if (githubOutput) writeGithubOutput({ action: 'upload', ...seen });
+  console.error('restart-pack', selected.action, selected.title);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
