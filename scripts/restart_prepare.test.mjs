@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { githubOutputValue, restartGithubOutput, restartQuietReason } from './restart_prepare.mjs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { githubOutputValue, patchRequestPack, restartGithubOutput, restartQuietReason } from './restart_prepare.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 import { restartTarget } from './telemost_upload.mjs';
 
 test('restart github output uses single-line keys, not raw JSON', () => {
@@ -79,4 +84,21 @@ test('empty or clock title on an open dialog closes or continues, not a hard fai
   });
   assert.match(output, /^action=close$/m);
   assert.match(output, /^restart_seen_title=$/m);
+});
+
+test('patchRequestPack adds queue requester metadata to an existing catalog pack', () => {
+  const dir = '99-patch-test';
+  const folder = join(ROOT, 'packs', dir);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'pack.json'), JSON.stringify({
+    title: 'Юг',
+    slug: dir,
+    stickerLinks: ['https://t.me/addstickers/yug'],
+    telemost: { status: 'pending', uploaded: 0 },
+  }, null, 2) + '\n');
+  assert.equal(patchRequestPack(dir, { requestId: 'req-9', chatId: '424242' }), true);
+  const meta = JSON.parse(readFileSync(join(folder, 'pack.json'), 'utf8'));
+  assert.equal(meta.queueRequestId, 'req-9');
+  assert.equal(meta.requesterChatId, '424242');
+  rmSync(folder, { recursive: true, force: true });
 });

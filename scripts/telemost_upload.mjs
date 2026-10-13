@@ -1003,8 +1003,8 @@ function openAdminFeed(dirRef) {
         error: event.error || null,
         lastLine: event.lastLine || null,
         phase: event.phase,
-        requester: event.requester || dirRef.requesterChatId || null,
-        requesterChatId: dirRef.requesterChatId || event.requester || null,
+        requester: dirRef.requesterChatId || null,
+        requesterChatId: dirRef.requesterChatId || null,
         queueRequestId: dirRef.queueRequestId || null,
       });
     },

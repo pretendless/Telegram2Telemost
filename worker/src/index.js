@@ -36,7 +36,9 @@ import {
   normalizeQueue,
   parsePackMessage,
   queueItemByRequestId,
+  queueItemBySlug,
   queueItemSlug,
+  resolveRequesterChatId,
   queueStatusText,
   unstickReply,
   unstickUploadingQueue,
@@ -210,10 +212,11 @@ async function readPackProgress(kv, item) {
 async function deliverRequesterCard(env, pack, prev, deps) {
   const kv = env.BOT_KV;
   const queue = await readQueue(kv);
-  const item = queueItemByRequestId(queue, pack.queueRequestId);
+  let item = queueItemByRequestId(queue, pack.queueRequestId);
+  if (!item) item = queueItemBySlug(queue, pack.slug);
   if (!pack.queueRequestId && !item) return null;
-  const chatRaw = String(pack.requesterChatId || (item && item.chatId) || pack.requester || "").trim();
-  if (!/^[0-9]{1,16}$/.test(chatRaw)) return null;
+  const chatRaw = resolveRequesterChatId(pack, item);
+  if (!chatRaw) return null;
   const chatId = Number(chatRaw);
   const io = adminIo(env, deps);
   const event = userRequestEvent({ item, pack, queue });
@@ -262,7 +265,10 @@ async function applyProgress(env, pack, deps) {
 
   let subs = [];
   if (steps.some((step) => step.kind !== "channel")) subs = await listSubscribers(kv);
-  const requesterId = pack.requesterChatId ? String(pack.requesterChatId) : "";
+  const queueForRequester = await readQueue(kv);
+  const requestItem =
+    queueItemByRequestId(queueForRequester, pack.queueRequestId) || queueItemBySlug(queueForRequester, pack.slug);
+  const requesterId = resolveRequesterChatId(pack, requestItem) || "";
   if (requesterId) subs = subs.filter((id) => String(id) !== requesterId);
 
   let notified = 0;

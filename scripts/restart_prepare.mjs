@@ -89,6 +89,24 @@ function writeRequestPack(target) {
   return slug;
 }
 
+// Catalog folders predate queue metadata; merge requester fields before upload.
+export function patchRequestPack(dir, target) {
+  const folder = join(ROOT, 'packs', dir);
+  const path = join(folder, 'pack.json');
+  const meta = JSON.parse(readFileSync(path, 'utf8'));
+  let changed = false;
+  if (target.requestId && meta.queueRequestId !== target.requestId) {
+    meta.queueRequestId = target.requestId;
+    changed = true;
+  }
+  if (target.chatId && meta.requesterChatId !== target.chatId) {
+    meta.requesterChatId = target.chatId;
+    changed = true;
+  }
+  if (changed) writeFileSync(path, JSON.stringify(meta, null, 2) + '\n');
+  return changed;
+}
+
 function writeGithubOutput(payload) {
   process.stdout.write(restartGithubOutput(payload));
 }
@@ -128,6 +146,7 @@ async function main() {
     process.exit(0);
   }
   const dir = target.dir || writeRequestPack(target);
+  if (target.dir && target.requestId) patchRequestPack(dir, target);
   await focusRequest(target.requestId);
   const selected = { ...target, dir, action: target.action };
   writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify(selected));

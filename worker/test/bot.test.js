@@ -21,6 +21,8 @@ import {
   queueHasQueuedWork,
   queueItemSlug,
   queueStatusText,
+  resolveRequesterChatId,
+  queueItemBySlug,
   userRequestEvent,
   realPackUrl,
   shouldStartPipeline,
@@ -1020,6 +1022,62 @@ test("accept reply includes queue position and opens a user card", async () => {
   assert.match(sent[1].reply, /в очереди/);
   const queue = JSON.parse(env.BOT_KV.store.get("queue"));
   assert.equal(queue.items[0].notifyMessageId, 2);
+});
+
+test("progress edits the queue requester card even when requester is the admin chat", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = "8502935020";
+  env.BOT_KV.store.set("meta:seeded", "1");
+  let queue = enqueueRequest(emptyQueue(), {
+    chatId: 424242,
+    title: "Fox",
+    links: ["https://t.me/addstickers/fox"],
+    priority: false,
+    createdAt: "1",
+    stickers: 5,
+  }).queue;
+  queue.items[0].status = "uploading";
+  queue.items[0].notifyMessageId = 77;
+  env.BOT_KV.store.set("queue", JSON.stringify(queue));
+  const item = queue.items[0];
+  const slug = queueItemSlug(item);
+  const edited = [];
+  const sendMessage = async (_env, chatId, text) => {
+    edited.push({ chatId, text, kind: "send" });
+    return { message_id: 1 };
+  };
+  const editMessage = async (_env, chatId, messageId, text) => {
+    edited.push({ chatId, messageId, text, kind: "edit" });
+  };
+  await handle(
+    progressRequest({
+      slug,
+      title: "Fox",
+      status: "uploading",
+      uploaded: 2,
+      total: 5,
+      queueRequestId: item.id,
+      requester: "8502935020",
+      adminDelivered: true,
+    }),
+    env,
+    { sendMessage, editMessage },
+  );
+  assert.equal(edited.length, 1);
+  assert.equal(String(edited[0].chatId), "424242");
+  assert.equal(edited[0].kind, "edit");
+  assert.equal(edited[0].messageId, 77);
+  assert.match(edited[0].text, /стикер 2 из 5/);
+});
+
+test("resolveRequesterChatId prefers the queue item over progress requester", () => {
+  const item = { chatId: "424242" };
+  assert.equal(
+    resolveRequesterChatId({ requesterChatId: "8502935020", requester: "8502935020" }, item),
+    "424242",
+  );
+  const keyed = { ...item, id: "abc" };
+  assert.equal(queueItemBySlug({ items: [keyed] }, queueItemSlug(keyed)), keyed);
 });
 
 test("user request card text follows upload progress", () => {
