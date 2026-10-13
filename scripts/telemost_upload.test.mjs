@@ -12,6 +12,10 @@ import {
   afterSendReply,
   changedBotText,
   emojiAnswer,
+  lastBotLine,
+  planUpload,
+  stickerReplyText,
+  waitLastLine,
   IMAGE_ATTEMPTS,
   imageReply,
   isEmojiRequest,
@@ -22,7 +26,6 @@ import {
   unfinishedPack,
   leaveUnpublishedDraft,
   mustOpenNewPack,
-  nextCommand,
   packDialogOpen,
   resetForNewPack,
   wantsPicture,
@@ -177,17 +180,46 @@ test("eighteen accepted stickers continue at 019", () => {
   assert.equal(pack.images[accepted.uploaded].file, "020.png");
 });
 
-test("an open pack is saved with /done before /newpack", () => {
-  const ready = "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
+test("an open pack is continued, not restarted with /newpack", () => {
+  const title = "Маф, Изис и Агнес";
+  const readyLine = { own: false, text: "Стикер готов. Отправьте картинку для следующего стикера.", links: [] };
+  const saved = { own: false, text: "Набор «Сэт, Рэдж и Летти» сохранён", links: [] };
+  const sent = [saved, ...Array.from({ length: 71 }, () => readyLine)];
+  const pack = JSON.parse(readFileSync(new URL("../packs/08-maf-izis-i-agnes/pack.json", import.meta.url), "utf8"));
+  const missed = { action: "newpack", uploaded: 0, lastText: "" };
+  const emoji = planUpload(missed, sent, "Стикеры Отправьте эмодзи для стикера. 11:17", 144);
+  assert.equal(emoji.action, "emoji");
+  assert.equal(emoji.uploaded, 71);
+  assert.equal(pack.images[emoji.uploaded].file, "072.png");
+  const ready = planUpload(missed, [...sent, readyLine], "Стикеры Стикер готов. Отправьте картинку. 11:18", 144);
+  assert.equal(ready.action, "continue");
+  assert.equal(ready.uploaded, 72);
+  assert.equal(pack.images[ready.uploaded].file, "073.png");
+  const quiet = planUpload(missed, sent, "Стикеры Отправьте картинку для следующего стикера. 11:19", 144);
+  assert.equal(quiet.action, "continue");
+  assert.equal(quiet.uploaded, 71);
+  assert.equal(pack.images[quiet.uploaded].file, "072.png");
   const menu = "Команды\n/newpack — создать набор\n/done — завершить действие";
-  assert.equal(unfinishedPack(ready), true);
-  assert.equal(nextCommand(ready, "/newpack"), "/done");
-  assert.equal(nextCommand(ready, "/start"), "/done");
-  assert.equal(nextCommand("Это не картинка :)", "/newpack"), "/done");
+  assert.equal(planUpload(missed, sent, menu, 144).action, "newpack");
   assert.equal(unfinishedPack(menu), false);
-  assert.equal(nextCommand(menu, "/newpack"), "/newpack");
-  assert.equal(nextCommand("Набор «Маф» сохранён", "/newpack"), "/newpack");
-  assert.equal(nextCommand("Напишите название набора", "/newpack"), "/newpack");
+  assert.equal(title.length > 0, true);
+});
+
+test("a clock tick is not a reply, and the last new line is", () => {
+  const baseline = [{ id: "7", text: "Стикеры Отправьте картинку для следующего стикера. 11:00" }];
+  const ticked = [{ id: "7", text: "Стикеры Отправьте картинку для следующего стикера. 11:10" }];
+  assert.equal(changedBotText(baseline, ticked), "");
+  assert.equal(stickerReplyText(baseline, ticked).kind, "pending");
+  const asked = [
+    { id: "7", text: "Стикеры Отправьте картинку для следующего стикера. 11:10" },
+    { id: "8", text: "Стикеры Отправьте эмодзи для стикера. 11:17" },
+  ];
+  assert.equal(stickerReplyText(baseline, asked).kind, "emoji");
+  const ready = [{ id: "8", text: "Стикеры Стикер готов. Отправьте картинку для следующего стикера. 11:18" }];
+  assert.equal(stickerReplyText(baseline, ready).kind, "ready");
+  assert.equal(waitLastLine(20, lastBotLine(asked)), "");
+  assert.match(waitLastLine(30, lastBotLine(asked)), /Отправьте эмодзи для стикера/);
+  assert.match(waitLastLine(621, "Стикеры Отправьте эмодзи для стикера. 11:17"), /Отправьте эмодзи/);
 });
 
 test("a ready sticker does not wait for an emoji", () => {

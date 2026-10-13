@@ -87,6 +87,8 @@ class Bot {
 
   botRows() {
     return this.c.ev(`(() => {
+      const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
+      if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight;
       window.__tg2tmNext = window.__tg2tmNext || 1;
       const rows = [...document.querySelectorAll('article.message')].filter((a) => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
       return rows.map((a) => {
@@ -109,8 +111,9 @@ class Bot {
     let stableAt = 0;
     for (;;) {
       const rows = await this.botRows();
-      const text = changedBotText(baseline, rows);
-      const kind = imageReply(text);
+      const seen = stickerReplyText(baseline, rows);
+      const text = seen.text;
+      const kind = seen.kind;
       const stickerReply = kind === 'ready' || kind === 'emoji' || kind === 'reject';
       if (until === 'sticker' && stickerReply) {
         return { text, links: [], seconds: (Date.now() - started) / 1000, kind };
@@ -128,7 +131,7 @@ class Bot {
       const now = Date.now();
       if (onWait && waitStatusDue(now, started, lastSentAt)) {
         lastSentAt = now;
-        await onWait(Math.round((now - started) / 1000));
+        await onWait(Math.round((now - started) / 1000), lastBotLine(rows));
       }
       await sleep(POLL_MS);
     }
@@ -313,15 +316,48 @@ export function emojiAnswer(replyText, stickerEmoji) {
 }
 
 // Same bubble, new text, is a new reply. A seen-flag would miss it.
+// A clock tick on the same bubble is not a new reply.
 export function changedBotText(baseline, rows) {
   const prev = new Map((baseline || []).map((row) => [String(row.id), row.text]));
   const parts = [];
   for (const row of rows || []) {
     if (!row || !row.text) continue;
-    if (prev.get(String(row.id)) === row.text) continue;
+    if (replyCore(prev.get(String(row.id))) === replyCore(row.text)) continue;
     parts.push(row.text);
   }
   return parts.join('\n');
+}
+
+export function lastBotLine(rows) {
+  for (let i = (rows || []).length - 1; i >= 0; i--) {
+    if (rows[i] && rows[i].text) return rows[i].text;
+  }
+  return '';
+}
+
+export function sameBotLine(left, right) {
+  return replyCore(left) === replyCore(right);
+}
+
+// The reply is the changed bubble, or the last line when that line is new.
+// A picture request whose only change is the clock stays unanswered.
+export function stickerReplyText(baseline, rows) {
+  const changed = changedBotText(baseline, rows);
+  const changedKind = imageReply(changed);
+  if (changedKind === 'ready' || changedKind === 'emoji' || changedKind === 'reject') {
+    return { text: changed, kind: changedKind };
+  }
+  const last = lastBotLine(rows);
+  if (!last || sameBotLine(last, lastBotLine(baseline))) return { text: changed, kind: 'pending' };
+  const lastKind = imageReply(last);
+  if (lastKind === 'ready' || lastKind === 'emoji' || lastKind === 'reject') return { text: last, kind: lastKind };
+  return { text: changed, kind: 'pending' };
+}
+
+// The first notices can be short. After 30s the card shows the line the bot is actually showing.
+export function waitLastLine(seconds, lastLine) {
+  if (Number(seconds) < 30) return '';
+  return String(lastLine || '').replace(/\s+/g, ' ').trim();
 }
 
 // After send: answer an emoji request, accept «Стикер готов», or retry a real
@@ -405,9 +441,40 @@ export function resumeFromChat(messages, title, imageCount) {
   const last = after.length ? after[after.length - 1] : null;
   const lastText = last ? last.text : '';
   if (accepted >= imageCount) return { action: 'finish', uploaded: imageCount, lastText };
-  if (last && (ASK_EMOJI.test(lastText) || NOT_EMOJI.test(lastText))) {
-    return { action: 'emoji', uploaded: accepted, lastText };
+  if (last && isEmojiRequest(lastText)) return { action: 'emoji', uploaded: accepted, lastText };
+  return { action: 'continue', uploaded: accepted, lastText };
+}
+
+// Ready lines at the tail of an open pack. The emoji ask or the picture request
+// after them is not another accepted sticker.
+export function acceptedInOpenPack(messages) {
+  const incoming = (messages || []).filter((message) => message && !message.own);
+  let end = incoming.length;
+  while (end > 0) {
+    const text = incoming[end - 1].text || '';
+    if (READY.test(text)) break;
+    if (isEmojiRequest(text) || wantsPicture(text) || /не картинк/i.test(text)) {
+      end -= 1;
+      continue;
+    }
+    break;
   }
+  let accepted = 0;
+  for (let i = end - 1; i >= 0; i--) {
+    if (!READY.test(incoming[i].text || '')) break;
+    accepted += 1;
+  }
+  return accepted;
+}
+
+// Survey can miss the created-title line and call the open pack "new".
+// Continue it. Do not send /newpack, and do not close it with /done.
+export function planUpload(historyPlan, messages, liveText, imageCount) {
+  if (!historyPlan || historyPlan.action !== 'newpack' || !unfinishedPack(liveText)) return historyPlan;
+  const accepted = Math.min(acceptedInOpenPack(messages), imageCount);
+  const lastText = String(liveText || historyPlan.lastText || '');
+  if (accepted >= imageCount) return { action: 'finish', uploaded: imageCount, lastText };
+  if (isEmojiRequest(lastText)) return { action: 'emoji', uploaded: accepted, lastText };
   return { action: 'continue', uploaded: accepted, lastText };
 }
 
@@ -599,29 +666,16 @@ async function uploadPack(bot, dir, { close = false, note = async () => {}, dirR
   await note({ phase: 'start', pack: m.title, total: m.images.length });
 
   const history = await bot.surveyChat();
-  const plan = resumeFromChat(history.messages, m.title, m.images.length);
+  let plan = resumeFromChat(history.messages, m.title, m.images.length);
   const live = await bot.recentIncoming(2);
   const liveText = String(live.text || plan.lastText || '');
+  plan = planUpload(plan, history.messages, liveText, m.images.length);
   console.log(dir, 'chat-plan', plan.action, plan.uploaded, history.reachedTop ? 'top' : 'partial', unfinishedPack(liveText) ? 'open' : 'idle');
   if (plan.action === 'newpack' && !history.reachedTop && !unfinishedPack(liveText)) {
     throw new Error('chat history did not load; not sending images');
   }
-  if (plan.action === 'newpack' && unfinishedPack(liveText) && nextCommand(liveText, '/newpack') === '/done') {
-    console.log(dir, 'close-open-pack');
-    await note({ phase: 'done', pack: m.title, lastLine: liveText });
-    const closed = await bot.say('/done');
-    const closedText = String(closed.text || '').replace(/\s+/g, ' ').trim();
-    console.log(dir, 'done-reply', closedText.slice(0, 400));
-    if (!SAVED.test(closed.text)) {
-      throw new Error(`open pack was not saved; not sending /newpack: ${closedText.slice(0, 200)}`);
-    }
-    const closedUrl = extractPackUrl(closed.text, closed.links);
-    if (closedUrl) console.log(dir, 'closed-pack-url', closedUrl);
-    await note({ phase: 'saved', pack: m.title, lastLine: closedText });
-    if (closedUrl) await note({ phase: 'link', pack: m.title, link: closedUrl, lastLine: closedText });
-    plan.action = 'newpack';
-    plan.uploaded = 0;
-    plan.lastText = closed.text || '';
+  if (plan.action === 'newpack' && unfinishedPack(liveText)) {
+    throw new Error(`refusing /newpack while a pack is still open: ${liveText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
   }
   if (plan.action === 'saved') {
     if (!plan.url) throw new Error('pack already saved but the link was not in the chat');
@@ -637,13 +691,13 @@ async function uploadPack(bot, dir, { close = false, note = async () => {}, dirR
     tm.status = 'uploading';
     if (plan.action === 'emoji') {
       const img = m.images[plan.uploaded];
-      const onWait = (seconds) => note({
+      const onWait = (seconds, seenLine) => note({
         phase: 'waiting',
         pack: m.title,
         index: plan.uploaded + 1,
         total: m.images.length,
         seconds,
-        lastLine: lastText,
+        lastLine: waitLastLine(seconds, seenLine),
       });
       await note({ phase: 'emoji', pack: m.title, index: plan.uploaded + 1, total: m.images.length, lastLine: lastText });
       let reply = await bot.say(emojiAnswer('', img.emoji), { onWait, until: 'sticker' });
@@ -695,13 +749,13 @@ async function uploadPack(bot, dir, { close = false, note = async () => {}, dirR
     const file = join(PACKS, dir, img.file);
     console.log(dir, 'send', img.file);
     await note({ phase: 'sending', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
-    const onWait = (seconds) => note({
+    const onWait = (seconds, seenLine) => note({
       phase: 'waiting',
       pack: m.title,
       index: i + 1,
       total: m.images.length,
       seconds,
-      lastLine: lastText,
+      lastLine: waitLastLine(seconds, seenLine),
     });
     let accepted = false;
     let rejects = 0;
