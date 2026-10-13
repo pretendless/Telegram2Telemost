@@ -357,10 +357,16 @@ export function queueHasPendingWork(queue) {
   return queue.items.some((item) => item.status === "queued" || item.status === "uploading");
 }
 
+export function queueHasQueuedWork(queue) {
+  return queue.items.some((item) => item.status === "queued");
+}
+
 // Start Actions only when nothing is running and the KV queue still has work.
 export function shouldStartPipeline(queue, activeRun) {
   if (activeRun) return false;
-  return queueHasPendingWork(queue);
+  // A lone "uploading" row means a run already claimed it; autostart must not
+  // dispatch again (that re-runs the same pack). New work is only "queued" rows.
+  return queueHasQueuedWork(queue);
 }
 
 export function duplicateRequestReply({ title, duplicate, priority }) {
@@ -508,6 +514,12 @@ export function adminQueueOverviewText(queue, activePack) {
   const waiting = items
     .filter((item) => item.status === "queued")
     .sort((left, right) => byTime(left, right));
+  if (uploading && waiting.length) {
+    lines.push("");
+    lines.push(
+      "Подсказка: в очереди есть ожидающие запросы, пока в KV висит «загружается». Если Actions снова берёт тот же набор, после merge обновите worker; при необходимости /restart или снимите зависшую строку в KV.",
+    );
+  }
   lines.push("");
   if (!waiting.length) {
     lines.push("В очереди: пусто.");
