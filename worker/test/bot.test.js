@@ -18,6 +18,7 @@ import {
   findUploadingReleaseId,
   formatUserRequestCard,
   queueHasPendingWork,
+  queueHasQueuedWork,
   queueItemSlug,
   queueStatusText,
   userRequestEvent,
@@ -468,10 +469,33 @@ test("pipeline start waits while a Telemost run is already active", () => {
   }).queue;
   queue.items[0].status = "uploading";
   assert.equal(shouldStartPipeline(queue, true), false);
-  assert.equal(shouldStartPipeline(queue, false), true);
+  assert.equal(shouldStartPipeline(queue, false), false);
   assert.equal(queueHasPendingWork(queue), true);
+  assert.equal(queueHasQueuedWork(queue), false);
   assert.equal(findUploadingReleaseId(queue, { title: "A", queueRequestId: queue.items[0].id }), queue.items[0].id);
   assert.equal(terminalProgress({ status: "done", url: PACK_URL }), true);
+});
+
+test("pipeline autostart needs a queued row, not a stuck uploading row alone", () => {
+  let queue = enqueueRequest(emptyQueue(), {
+    chatId: 1,
+    title: "A",
+    links: ["https://t.me/addstickers/a"],
+    priority: false,
+    createdAt: "1",
+    stickers: 1,
+  }).queue;
+  queue.items[0].status = "uploading";
+  assert.equal(shouldStartPipeline(queue, false), false);
+  queue = enqueueRequest(queue, {
+    chatId: 2,
+    title: "B",
+    links: ["https://t.me/addstickers/b"],
+    priority: false,
+    createdAt: "2",
+    stickers: 1,
+  }).queue;
+  assert.equal(shouldStartPipeline(queue, false), true);
 });
 
 test("an accepted priority request is one KV write and /status does not list", async () => {
@@ -824,6 +848,7 @@ test("admin /queue reads queue and one pack key for uploading progress", async (
   assert.match(sent[0], /Запад/);
   assert.match(sent[0], /стикер 3 из 10/);
   assert.match(sent[0], /Восток/);
+  assert.match(sent[0], /Подсказка:/);
   assert.equal(env.BOT_KV.ops.list, 0);
 });
 

@@ -866,7 +866,8 @@ function byRequestTime(left, right) {
 }
 
 // An open dialog restarts that pack from its first image. An idle dialog
-// takes the stored request that is already uploading, or the next queued one.
+// takes the next queued request first; only if the queue is empty does it
+// resume the row already marked uploading.
 // A missing title (or a bare Telemost clock) is not a hard stop: close the
 // open dialog, then restart via the active request or the next queued one.
 export function restartTarget({ unfinished, title, liveText, catalogs, requests } = {}) {
@@ -915,6 +916,19 @@ export function restartTarget({ unfinished, title, liveText, catalogs, requests 
       return { action: 'seen', title: namedTitle, liveText: liveText || '', matches };
     }
   }
+  const waiting = stored.filter((item) => item && item.status === 'queued').sort(byRequestTime);
+  const priority = waiting.filter((item) => item.priority);
+  const next = (priority.length ? priority : waiting)[0];
+  if (next) {
+    return {
+      action: 'upload',
+      title: next.title,
+      dir: '',
+      requestId: next.id || '',
+      links: next.links || [],
+      chatId: next.chatId || '',
+    };
+  }
   const active = stored.find((item) => item && item.status === 'uploading');
   if (active) {
     return {
@@ -926,18 +940,7 @@ export function restartTarget({ unfinished, title, liveText, catalogs, requests 
       chatId: active.chatId || '',
     };
   }
-  const waiting = stored.filter((item) => item && item.status === 'queued').sort(byRequestTime);
-  const priority = waiting.filter((item) => item.priority);
-  const next = (priority.length ? priority : waiting)[0];
-  if (!next) return unfinished ? { action: 'close', title: '', liveText: liveText || '' } : { action: 'idle' };
-  return {
-    action: 'upload',
-    title: next.title,
-    dir: '',
-    requestId: next.id || '',
-    links: next.links || [],
-    chatId: next.chatId || '',
-  };
+  return unfinished ? { action: 'close', title: '', liveText: liveText || '' } : { action: 'idle' };
 }
 
 export function restartAfterClose(text) {

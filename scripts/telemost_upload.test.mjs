@@ -502,7 +502,15 @@ test("restart follows the open pack, or the next stored request", () => {
   assert.deepEqual(named.links, ["https://t.me/addstickers/zapad"]);
   const idle = restartTarget({ unfinished: false, title: "", catalogs, requests });
   assert.equal(idle.action, "upload");
-  assert.equal(idle.title, "Запад");
+  assert.equal(idle.title, "Восток");
+  assert.equal(idle.requestId, "b");
+  const resumeOnly = restartTarget({
+    unfinished: false,
+    title: "",
+    catalogs,
+    requests: requests.filter((item) => item.status === "uploading"),
+  });
+  assert.equal(resumeOnly.title, "Запад");
   const next = restartTarget({
     unfinished: false,
     title: "",
