@@ -146,10 +146,40 @@ class Bot {
 
 const READY = /Стикер готов/;
 const ASK_EMOJI = /Отправьте эмодзи/;
+const NOT_EMOJI = /Это не эмодзи/;
 const ASK_TITLE = /Напишите название/;
 const CREATED = /Создан набор/;
 const PUBLISHED = /сохранён|\/stickers\//;
 const COMMAND_MENU = /\/newpack/;
+const ASK_PICTURE = /картинк|изображен|фото|Отправьте стикер|Пришлите стикер|отправьте файл/i;
+
+// A dialog already waiting for an emoji or rejecting text must not receive /start or /done.
+export function packDialogOpen(text) {
+  const body = String(text || '');
+  return ASK_EMOJI.test(body) || NOT_EMOJI.test(body);
+}
+
+// /newpack asks for a title first. A picture is sent only after the bot asks for one.
+export function afterNewpack(text) {
+  const body = String(text || '');
+  if (packDialogOpen(body)) return 'open';
+  if (ASK_TITLE.test(body)) return 'title';
+  if (wantsPicture(body)) return 'picture';
+  return 'other';
+}
+
+export function wantsPicture(text) {
+  const body = String(text || '');
+  if (packDialogOpen(body)) return false;
+  return ASK_PICTURE.test(body) || (CREATED.test(body) && /отправ/i.test(body));
+}
+
+// The saved 14-sticker draft is not the pack the bot is in now. Open a new one.
+export function mustOpenNewPack(tm) {
+  if (!tm || tm.status === 'done') return false;
+  if (tm.status === 'stopped' || tm.pendingFile) return true;
+  return !tm.created;
+}
 
 // The partial «Сэт, Рэдж и Летти» pack is this case: 14 accepted, 015.png sent, emoji never sent.
 export function draftNeedsAbandon(tm) {
@@ -215,22 +245,36 @@ async function uploadPack(bot, dir) {
   if (tm.status === 'done') { console.log(dir, 'already done'); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
 
-  if (draftNeedsAbandon(tm)) {
-    await leaveUnpublishedDraft((text) => bot.say(text));
-    Object.assign(tm, resetForNewPack(tm));
-    savePack(p);
-    log(m.title, '', 'черновик брошен без /done', 'новый набор с первого стикера');
-  }
-
-  if (!tm.created) {
-    const r1 = await withRetry('newpack', () => bot.say('/newpack'));
-    if (!ASK_TITLE.test(r1.text)) throw new Error(`/newpack: unexpected reply: ${r1.text.slice(0, 200)}`);
-    const r2 = await withRetry('title', () => bot.say(m.title));
-    if (!CREATED.test(r2.text)) throw new Error(`title: unexpected reply: ${r2.text.slice(0, 200)}`);
+  if (mustOpenNewPack(tm)) {
+    const opened = await withRetry('newpack', () => bot.say('/newpack'));
+    const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
+    console.log(dir, 'newpack-reply', openedText.slice(0, 400));
+    const step = afterNewpack(opened.text);
+    if (step === 'open') {
+      throw new Error(`pack dialog already open; not sending /start or /done: ${openedText.slice(0, 200)}`);
+    }
+    let picture = opened;
+    if (step === 'title') {
+      const titled = await withRetry('title', () => bot.say(m.title));
+      const titledText = String(titled.text || '').replace(/\s+/g, ' ').trim();
+      console.log(dir, 'title-reply', titledText.slice(0, 400));
+      if (packDialogOpen(titled.text)) {
+        throw new Error(`pack dialog already open; not sending /start or /done: ${titledText.slice(0, 200)}`);
+      }
+      picture = titled;
+    }
+    if (!wantsPicture(picture.text)) {
+      const shown = String(picture.text || '').replace(/\s+/g, ' ').trim();
+      throw new Error(`bot has not asked for a picture yet: ${shown.slice(0, 200)}`);
+    }
     tm.created = true;
+    tm.uploaded = 0;
+    tm.nextImage = 0;
+    tm.pendingFile = null;
     tm.status = 'uploading';
+    tm.botReply = String(picture.text || '').slice(0, 300);
     savePack(p);
-    log(m.title, '', 'набор создан');
+    log(m.title, '', 'набор создан', 'без /start и без /done');
   }
 
   for (let i = tm.uploaded; i < m.images.length; i++) {
@@ -266,14 +310,10 @@ async function uploadPack(bot, dir) {
     }
   }
 
-  const done = await withRetry('done', () => bot.say('/done'));
-  const url = (done.links || []).find(h => /\/stickers\//.test(h)) || done.text.match(/https?:\/\/\S+/)?.[0] || null;
-  tm.status = 'done';
-  tm.packUrl = url;
+  tm.status = 'uploading';
   tm.error = null;
-  tm.botReply = done.text.replace(/^Стикеры\s*/, '').slice(0, 300);
   savePack(p);
-  log(m.title, '', `готово, ${m.images.length} стикеров`, url || '');
+  log(m.title, '', `отправлены ${m.images.length} стикеров`, 'без /done');
 }
 
 async function main() {
