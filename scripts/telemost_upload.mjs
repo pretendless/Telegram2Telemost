@@ -111,7 +111,14 @@ class Bot {
     let stableAt = 0;
     for (;;) {
       const rows = await this.botRows();
-      const seen = stickerReplyText(baseline, rows);
+      // A sticker wait treats an existing «Стикер готов» line as acceptance.
+      // A command wait does not: /newpack and a title need a new bot line.
+      let seen;
+      if (until === 'sticker') seen = stickerReplyText(baseline, rows);
+      else {
+        const changed = changedBotText(baseline, rows);
+        seen = { text: changed, kind: imageReply(changed) };
+      }
       const text = seen.text;
       const kind = seen.kind;
       const stickerReply = kind === 'ready' || kind === 'emoji' || kind === 'reject';
@@ -339,16 +346,25 @@ export function sameBotLine(left, right) {
   return replyCore(left) === replyCore(right);
 }
 
-// The reply is the changed bubble, or the last line when that line is new.
-// A picture request whose only change is the clock stays unanswered.
+// «Стикер готов» already means this sticker is in the pack, so the next
+// image is sent. A clock tick on that bubble is the same acceptance, not a
+// new wait. The same clock can still be replaced by an emoji ask or a
+// rejection. A picture-request clock tick is not a reply.
 export function stickerReplyText(baseline, rows) {
   const changed = changedBotText(baseline, rows);
   const changedKind = imageReply(changed);
-  if (changedKind === 'ready' || changedKind === 'emoji' || changedKind === 'reject') {
+  if (changedKind === 'emoji' || changedKind === 'reject') {
     return { text: changed, kind: changedKind };
   }
+  if (changedKind === 'ready') return { text: changed, kind: 'ready' };
   const last = lastBotLine(rows);
-  if (!last || sameBotLine(last, lastBotLine(baseline))) return { text: changed, kind: 'pending' };
+  const prev = lastBotLine(baseline);
+  // The line is already «Стикер готов». The same words, or only a new clock,
+  // are that acceptance. Send the next image. Do not open another wait.
+  if (imageReply(last) === 'ready' && imageReply(prev) === 'ready' && sameBotLine(last, prev)) {
+    return { text: last, kind: 'ready' };
+  }
+  if (!last || sameBotLine(last, prev)) return { text: changed, kind: 'pending' };
   const lastKind = imageReply(last);
   if (lastKind === 'ready' || lastKind === 'emoji' || lastKind === 'reject') return { text: last, kind: lastKind };
   return { text: changed, kind: 'pending' };
@@ -805,6 +821,8 @@ async function uploadPack(bot, dir, { close = false, note = async () => {}, dirR
           continue;
         }
       }
+      // «Стикер готов» is already on screen, including when only its clock moved.
+      // That sticker is in the pack. Send the next image. Do not wait again.
       if (done.kind !== 'ready') continue;
       lastText = done.text;
       await note({ phase: 'ready', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
