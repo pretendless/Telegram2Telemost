@@ -1,0 +1,14 @@
+{
+  "name": "tg2tmbot-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "deploy": "wrangler deploy",
+    "setup-bot": "node setup-bot.mjs",
+    "set-webhook": "node set-webhook.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.42.0"
+  }
+}

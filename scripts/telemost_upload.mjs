@@ -3,9 +3,10 @@
 // continued and is not closed with /done: that would publish the short pack. /start
 // leaves that draft, then the same title is created again from the first image.
 // Usage: node scripts/telemost_upload.mjs [NN ...]
-import { readFileSync, writeFileSync, readdirSync, appendFileSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { createAdminFeed, postProgress, telegramIo } from './admin_status.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKS = join(ROOT, 'packs');
@@ -475,24 +476,37 @@ export function extractPackUrl(text, links) {
   return url;
 }
 
-export async function postAdminStatus(fetchImpl, token, chatId, text) {
-  const response = await fetchImpl('https://api.telegram.org/bot' + token + '/sendMessage', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, disable_notification: true }),
-  });
-  if (!response.ok) throw new Error('admin status http ' + response.status);
-}
-
-async function notifyAdmin(text) {
+function openAdminFeed(dirRef) {
   const token = process.env.TG2TMBOT_TOKEN || '';
-  const chatId = process.env.TELEGRAM_CHAT_ID || '';
-  if (!token || !chatId) return;
-  try {
-    await postAdminStatus(fetch, token, chatId, text);
-  } catch {
-    console.log('admin status skipped');
-  }
+  return createAdminFeed({
+    io: token ? telegramIo(fetch, token) : null,
+    requester: process.env.TELEGRAM_CHAT_ID || '',
+    writeState: (state) => {
+      try {
+        mkdirSync(join(ROOT, 'logs'), { recursive: true });
+        writeFileSync(join(ROOT, 'logs', 'admin-last.json'), JSON.stringify(state));
+      } catch {
+        console.log('admin status file skipped');
+      }
+    },
+    onDelivered: (event, delivery) => {
+      if (!delivery || delivery.action === 'skip' || !dirRef.dir) return;
+      const index = Number(event.index);
+      const total = Number(event.total);
+      return postProgress(fetch, process.env.TG2TM_PROGRESS_URL || '', process.env.UPLOADER_SECRET || '', {
+        slug: dirRef.dir,
+        title: event.pack,
+        status: event.phase === 'error' || event.phase === 'failed' ? 'error' : event.phase === 'saved' || event.phase === 'link' ? 'done' : 'uploading',
+        uploaded: Number.isFinite(index) ? index : 0,
+        total: Number.isFinite(total) ? total : 0,
+        packUrl: event.link || null,
+        error: event.error || null,
+        lastLine: event.lastLine || null,
+        phase: event.phase,
+        requester: event.requester || null,
+      });
+    },
+  });
 }
 
 export async function postPackLink(fetchImpl, token, title, url) {
@@ -575,12 +589,14 @@ async function withRetry(label, fn, tries = 4) {
   throw err;
 }
 
-async function uploadPack(bot, dir, { close = false } = {}) {
+async function uploadPack(bot, dir, { close = false, note = async () => {}, dirRef = null } = {}) {
   const p = loadPack(dir);
   const m = p.meta;
   const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
   if (tm.status === 'done') { console.log(dir, 'already done'); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
+  if (dirRef) dirRef.title = m.title;
+  await note({ phase: 'start', pack: m.title, total: m.images.length });
 
   const history = await bot.surveyChat();
   const plan = resumeFromChat(history.messages, m.title, m.images.length);
@@ -592,6 +608,7 @@ async function uploadPack(bot, dir, { close = false } = {}) {
   }
   if (plan.action === 'newpack' && unfinishedPack(liveText) && nextCommand(liveText, '/newpack') === '/done') {
     console.log(dir, 'close-open-pack');
+    await note({ phase: 'done', pack: m.title, lastLine: liveText });
     const closed = await bot.say('/done');
     const closedText = String(closed.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'done-reply', closedText.slice(0, 400));
@@ -600,13 +617,15 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     }
     const closedUrl = extractPackUrl(closed.text, closed.links);
     if (closedUrl) console.log(dir, 'closed-pack-url', closedUrl);
+    await note({ phase: 'saved', pack: m.title, lastLine: closedText });
+    if (closedUrl) await note({ phase: 'link', pack: m.title, link: closedUrl, lastLine: closedText });
     plan.action = 'newpack';
     plan.uploaded = 0;
     plan.lastText = closed.text || '';
   }
   if (plan.action === 'saved') {
     if (!plan.url) throw new Error('pack already saved but the link was not in the chat');
-    await rememberAndPost(p, dir, plan.url, plan.lastText);
+    await rememberAndPost(p, dir, plan.url, plan.lastText, note);
     return;
   }
 
@@ -618,7 +637,15 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     tm.status = 'uploading';
     if (plan.action === 'emoji') {
       const img = m.images[plan.uploaded];
-      const onWait = (seconds) => notifyAdmin(`«${m.title}»: ${img.file} уже отправлен, жду ответ бота ${seconds} с`);
+      const onWait = (seconds) => note({
+        phase: 'waiting',
+        pack: m.title,
+        index: plan.uploaded + 1,
+        total: m.images.length,
+        seconds,
+        lastLine: lastText,
+      });
+      await note({ phase: 'emoji', pack: m.title, index: plan.uploaded + 1, total: m.images.length, lastLine: lastText });
       let reply = await bot.say(emojiAnswer('', img.emoji), { onWait, until: 'sticker' });
       if (reply.kind === 'emoji') reply = await bot.say('🙂', { onWait, until: 'sticker' });
       if (reply.kind !== 'ready') throw new Error(`emoji: ${String(reply.text || '').slice(0, 200)}`);
@@ -631,6 +658,7 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     if (nextCommand(before.text, '/newpack') !== '/newpack') {
       throw new Error(`refusing /newpack while a pack is still open: ${String(before.text || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`);
     }
+    await note({ phase: 'newpack', pack: m.title, lastLine: before.text });
     const opened = await withRetry('newpack', () => bot.say('/newpack'));
     const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'newpack-reply', openedText.slice(0, 400));
@@ -666,7 +694,15 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
     console.log(dir, 'send', img.file);
-    const onWait = (seconds) => notifyAdmin(`«${m.title}»: ${img.file} отправлен, жду ответ бота ${seconds} с`);
+    await note({ phase: 'sending', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
+    const onWait = (seconds) => note({
+      phase: 'waiting',
+      pack: m.title,
+      index: i + 1,
+      total: m.images.length,
+      seconds,
+      lastLine: lastText,
+    });
     let accepted = false;
     let rejects = 0;
     while (!accepted) {
@@ -676,9 +712,11 @@ async function uploadPack(bot, dir, { close = false } = {}) {
       if (reply.kind === 'reject') {
         rejects += 1;
         log(m.title, img.file, `ошибка, попытка ${rejects}`, shown);
+        await note({ phase: 'retry', pack: m.title, index: i + 1, total: m.images.length, attempt: rejects, lastLine: shown, error: shown });
         if (afterImageAttempts(rejects, false) === 'skip') {
           tm.skipped = [...(tm.skipped || []), img.file];
           log(m.title, img.file, 'пропуск', 'бот отклонил картинку');
+          await note({ phase: 'error', pack: m.title, index: i + 1, total: m.images.length, lastLine: shown, error: 'бот отклонил картинку' });
           savePack(p);
           break;
         }
@@ -688,6 +726,7 @@ async function uploadPack(bot, dir, { close = false } = {}) {
       let done = reply;
       if (reply.kind === 'emoji') {
         console.log(dir, 'emoji', img.file);
+        await note({ phase: 'emoji', pack: m.title, index: i + 1, total: m.images.length, lastLine: shown });
         done = await bot.say(emojiAnswer(reply.text, img.emoji), { onWait, until: 'sticker' });
         if (done.kind === 'emoji') done = await bot.say('🙂', { onWait, until: 'sticker' });
         if (done.kind === 'emoji') {
@@ -699,9 +738,11 @@ async function uploadPack(bot, dir, { close = false } = {}) {
         if (done.kind === 'reject') {
           rejects += 1;
           log(m.title, img.file, `ошибка, попытка ${rejects}`, doneText);
+          await note({ phase: 'retry', pack: m.title, index: i + 1, total: m.images.length, attempt: rejects, lastLine: doneText, error: doneText });
           if (afterImageAttempts(rejects, false) === 'skip') {
             tm.skipped = [...(tm.skipped || []), img.file];
             log(m.title, img.file, 'пропуск', 'бот отклонил картинку');
+            await note({ phase: 'error', pack: m.title, index: i + 1, total: m.images.length, lastLine: doneText, error: 'бот отклонил картинку' });
             savePack(p);
             break;
           }
@@ -738,11 +779,11 @@ async function uploadPack(bot, dir, { close = false } = {}) {
   if (finalizeDecision(readyText).action !== 'done') {
     throw new Error(`not ready to save: ${String(readyText || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`);
   }
-  const saved = await publishSavedPack(bot, p, dir);
+  const saved = await publishSavedPack(bot, p, dir, note);
   if (!saved) throw new Error('done did not save the pack');
 }
 
-async function rememberAndPost(p, dir, url, replyText) {
+async function rememberAndPost(p, dir, url, replyText, note = async () => {}) {
   const m = p.meta;
   const tm = m.telemost;
   tm.status = 'done';
@@ -753,13 +794,16 @@ async function rememberAndPost(p, dir, url, replyText) {
   tm.botReply = String(replyText || '').slice(0, 300);
   savePack(p);
   console.log(dir, 'pack-url', url);
+  await note({ phase: 'saved', pack: m.title, lastLine: replyText });
+  await note({ phase: 'link', pack: m.title, lastLine: replyText, link: url });
   await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, url);
   console.log(dir, 'channel-posted', '@tg2tm');
 }
 
-async function publishSavedPack(bot, p, dir) {
+async function publishSavedPack(bot, p, dir, note = async () => {}) {
   const m = p.meta;
   const tm = m.telemost;
+  await note({ phase: 'done', pack: m.title, lastLine: tm.botReply || '' });
   const done = await bot.say('/done');
   const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
   console.log(dir, 'done-reply', doneText.slice(0, 400));
@@ -776,14 +820,17 @@ async function publishSavedPack(bot, p, dir) {
   tm.botReply = doneText.slice(0, 300);
   savePack(p);
   console.log(dir, 'pack-url', url);
+  await note({ phase: 'saved', pack: m.title, lastLine: doneText });
+  await note({ phase: 'link', pack: m.title, lastLine: doneText, link: url });
   await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, url);
   console.log(dir, 'channel-posted', '@tg2tm');
   return true;
 }
 
-async function finalizePack(bot, dir) {
+async function finalizePack(bot, dir, note = async () => {}, dirRef = null) {
   const p = loadPack(dir);
   const m = p.meta;
+  if (dirRef) dirRef.title = m.title;
   const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
   if (tm.status === 'done' && tm.packUrl) {
     console.log(dir, 'draft-gone', tm.packUrl);
@@ -797,7 +844,7 @@ async function finalizePack(bot, dir) {
     console.log(dir, 'draft-gone', decision.reason);
     return;
   }
-  const saved = await publishSavedPack(bot, p, dir);
+  const saved = await publishSavedPack(bot, p, dir, note);
   if (!saved) return;
 }
 
@@ -818,12 +865,16 @@ async function main() {
   dirs = dirsForRun(dirs, { finalize, close });
   const c = await connect();
   const bot = new Bot(c);
+  const dirRef = { dir: '', title: '' };
+  const note = openAdminFeed(dirRef);
   for (const d of dirs) {
+    dirRef.dir = d;
     try {
-      if (finalize) await finalizePack(bot, d);
-      else await uploadPack(bot, d, { close });
+      if (finalize) await finalizePack(bot, d, note, dirRef);
+      else await uploadPack(bot, d, { close, note, dirRef });
     } catch (e) {
       log(d, '', 'остановлено', e.message);
+      await note({ phase: 'error', pack: dirRef.title || d, error: e.message });
       process.exitCode = 1;
       break;
     }

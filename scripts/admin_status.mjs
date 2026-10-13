@@ -1,0 +1,261 @@
+// Status cards for the admin chat. A repeat that only moves the sticker number,
+// the wait, or the retry count edits the previous card. A phase change is a new message.
+import { readFileSync } from 'fs';
+import { pathToFileURL } from 'url';
+
+export const ADMIN_CHAT_ID = '8502935020';
+
+const EDITABLE = new Set(['sending', 'waiting', 'retry']);
+const PHASES = new Set(['start', 'newpack', 'sending', 'waiting', 'retry', 'emoji', 'done', 'saved', 'link', 'error', 'failed']);
+
+const LABEL = {
+  start: 'старт',
+  newpack: '/newpack',
+  sending: 'отправка',
+  waiting: 'жду бота',
+  retry: 'повтор',
+  emoji: 'эмодзи',
+  done: '/done',
+  saved: 'сохранён',
+  link: 'ссылка',
+  error: 'ошибка',
+  failed: 'сбой Actions',
+};
+
+function num(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function oneLine(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+export function formatClock(now = new Date()) {
+  return now.toISOString().slice(11, 16);
+}
+
+export function adminChatIds(raw) {
+  const ids = String(raw || ADMIN_CHAT_ID)
+    .split(/[\s,]+/)
+    .filter((id) => /^[0-9]{1,16}$/.test(id));
+  return ids.length ? ids : [ADMIN_CHAT_ID];
+}
+
+export function isAdminChat(chatId, raw) {
+  return adminChatIds(raw).includes(String(chatId));
+}
+
+export function formatAdminStatus(event, now = new Date()) {
+  const phase = PHASES.has(event && event.phase) ? event.phase : 'error';
+  let step = LABEL[phase];
+  const index = num(event.index);
+  const total = num(event.total);
+  const count = index != null && total != null ? `${index}/${total}` : '';
+  if (phase === 'sending' && count) step = `отправка ${count}`;
+  if (phase === 'emoji' && count) step = `эмодзи ${count}`;
+  if (phase === 'waiting') step = `жду бота ${num(event.seconds) || 0} с`;
+  if (phase === 'retry') step = `повтор ${num(event.attempt) || 0}`;
+  if (phase === 'failed' && event.step) step = `сбой Actions | ${oneLine(event.step)}`;
+  const lines = [`${event.at || formatClock(now)} | «${oneLine(event.pack) || 'пак'}» | ${step}`];
+  const lastLine = oneLine(event.lastLine);
+  if (lastLine) lines.push('бот: ' + lastLine);
+  const error = oneLine(event.error);
+  if (error) lines.push('ошибка: ' + error);
+  const link = oneLine(event.link);
+  if (link) lines.push(link);
+  const runUrl = oneLine(event.runUrl);
+  if (runUrl) lines.push(runUrl);
+  const requester = String(event.requester || '');
+  if (requester && requester !== ADMIN_CHAT_ID) lines.push('запрос: ' + requester);
+  return lines.join('\n');
+}
+
+// Same kind, and exactly one of sticker number / wait seconds / retry count moved:
+// edit the card already in the chat. Any other change is a new message.
+export function adminDelivery(prev, next) {
+  if (!prev || prev.phase !== next.phase) return { action: 'send' };
+  if (!EDITABLE.has(next.phase)) return { action: 'send' };
+  if ((prev.pack || '') !== (next.pack || '')) return { action: 'send' };
+  if (String(prev.requester || '') !== String(next.requester || '')) return { action: 'send' };
+  const changed = ['index', 'seconds', 'attempt'].filter((key) => num(prev[key]) !== num(next[key]));
+  if (changed.length === 1) return { action: 'edit' };
+  if (changed.length === 0) return { action: 'skip' };
+  return { action: 'send' };
+}
+
+export function adminJobText(job) {
+  if (!job || !job.running) return 'простаивает';
+  const index = num(job.index);
+  const total = num(job.total);
+  if (job.pack && index != null && total != null) return `идёт | «${oneLine(job.pack)}» | отправка ${index}/${total}`;
+  if (job.pack) return `идёт | «${oneLine(job.pack)}»`;
+  return 'идёт';
+}
+
+export function currentAdminJob(packs, queue) {
+  const item = ((queue && queue.items) || []).find((entry) => entry && entry.status === 'uploading');
+  if (item) return { running: true, pack: item.title, total: item.stickers, index: null };
+  const pack = (packs || []).find((entry) => entry && entry.status === 'uploading');
+  if (pack) return { running: true, pack: pack.title, index: pack.uploaded, total: pack.total };
+  return { running: false };
+}
+
+export function eventFromProgress(pack, prev) {
+  const base = {
+    pack: pack.title,
+    index: pack.uploaded,
+    total: pack.total,
+    lastLine: pack.lastLine || '',
+    error: pack.error || '',
+    link: pack.url || '',
+    requester: pack.requester || '',
+    seconds: pack.seconds,
+    attempt: pack.attempt,
+  };
+  if (pack.phase && PHASES.has(pack.phase)) return { ...base, phase: pack.phase };
+  if (pack.status === 'error') return { ...base, phase: 'error' };
+  if (pack.status === 'done' && pack.url) return { ...base, phase: 'link' };
+  if (!prev) return { ...base, phase: 'start' };
+  if (pack.status === 'done') return { ...base, phase: 'saved' };
+  return { ...base, phase: 'sending' };
+}
+
+function messageIdOf(result) {
+  if (result && typeof result === 'object' && result.message_id) return result.message_id;
+  if (typeof result === 'number') return result;
+  return null;
+}
+
+export async function deliverAdminStatus(io, chatId, prev, event, now) {
+  const decision = adminDelivery(prev && prev.event, event);
+  const text = formatAdminStatus(event, now);
+  if (decision.action === 'skip') {
+    return { action: 'skip', messageId: prev && prev.messageId, event: prev.event, text: prev && prev.text };
+  }
+  if (decision.action === 'edit' && prev && prev.messageId) {
+    try {
+      await io.edit(chatId, prev.messageId, text);
+      return { action: 'edit', messageId: prev.messageId, event, text };
+    } catch {
+      try {
+        await io.delete(chatId, prev.messageId);
+      } catch {
+        // The old card can stay if Telegram already dropped it. The replacement still goes out.
+      }
+      const messageId = messageIdOf(await io.send(chatId, text));
+      return { action: 'replace', messageId, event, text };
+    }
+  }
+  const messageId = messageIdOf(await io.send(chatId, text));
+  return { action: 'send', messageId, event, text };
+}
+
+export function createAdminFeed({ io, requester, writeState, onDelivered, now } = {}) {
+  let cursor = null;
+  return async function notify(event) {
+    const full = { ...event, requester: event.requester || requester || '' };
+    let delivery = { action: 'record', event: full };
+    if (io) {
+      try {
+        delivery = await deliverAdminStatus(io, ADMIN_CHAT_ID, cursor, full, now ? now() : new Date());
+        if (delivery.action !== 'skip') cursor = delivery;
+        if (writeState) writeState(cursor || delivery);
+      } catch {
+        console.log('admin status skipped');
+      }
+    } else if (writeState) {
+      writeState(delivery);
+    }
+    if (onDelivered) {
+      try {
+        await onDelivered(full, delivery);
+      } catch {
+        console.log('progress skipped');
+      }
+    }
+  };
+}
+
+export function telegramIo(fetchImpl, token) {
+  const call = async (method, params) => {
+    const response = await fetchImpl('https://api.telegram.org/bot' + token + '/' + method, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...params, disable_notification: method === 'sendMessage' ? true : undefined }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error('admin status http ' + response.status);
+    return data.result;
+  };
+  return {
+    send: async (chatId, text) => call('sendMessage', { chat_id: chatId, text }),
+    edit: async (chatId, messageId, text) => call('editMessageText', { chat_id: chatId, message_id: messageId, text }),
+    delete: async (chatId, messageId) => call('deleteMessage', { chat_id: chatId, message_id: messageId }),
+  };
+}
+
+export async function postProgress(fetchImpl, url, secret, body) {
+  if (!url || !secret || !fetchImpl) return;
+  const response = await fetchImpl(url, {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer ' + secret,
+      'content-type': 'application/json',
+      'user-agent': 'tg2tm-upload',
+    },
+    body: JSON.stringify({ ...body, adminDelivered: true }),
+  });
+  if (!response.ok) throw new Error('progress http ' + response.status);
+}
+
+function readState(path) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+export async function reportRunFailed({
+  fetchImpl = globalThis.fetch,
+  token = process.env.TG2TMBOT_TOKEN || '',
+  statePath = process.env.ADMIN_STATE_PATH || 'logs/admin-last.json',
+  packs = process.env.PACKS || '',
+  requester = process.env.TELEGRAM_CHAT_ID || '',
+  runUrl = process.env.RUN_URL || '',
+} = {}) {
+  if (!token) {
+    console.log('admin status skipped');
+    return;
+  }
+  const stored = readState(statePath);
+  const event = (stored && stored.event) || {};
+  if (event.phase === 'error' || event.phase === 'failed') {
+    console.log('admin status already sent');
+    return;
+  }
+  const step = LABEL[event.phase] || event.phase || '';
+  const io = telegramIo(fetchImpl, token);
+  try {
+    await deliverAdminStatus(io, ADMIN_CHAT_ID, null, {
+      phase: 'failed',
+      pack: event.pack || packs,
+      index: event.index,
+      total: event.total,
+      lastLine: event.lastLine || '',
+      error: event.error || 'Actions завершились с ошибкой',
+      step,
+      runUrl,
+      requester,
+      at: formatClock(),
+    });
+  } catch {
+    console.log('admin status skipped');
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  if (process.argv.includes('--run-failed')) await reportRunFailed();
+}
