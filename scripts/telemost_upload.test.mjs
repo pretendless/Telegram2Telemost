@@ -20,6 +20,9 @@ import {
   lastBotLine,
   planUpload,
   stickerReplyText,
+  newOwnId,
+  ownIds,
+  botRepliesAfterOwn,
   waitLastLine,
   IMAGE_ATTEMPTS,
   STALL_MS,
@@ -249,6 +252,66 @@ test("an existing «Стикер готов» line does not advance until a new 
   // Same id with only a clock change stays pending; a real rewrite to ready
   // after an emoji ask is changed text and advances.
   assert.equal(stickerReplyText(asked, rewritten).kind, "ready");
+});
+
+test("a ready after our outbound bubble advances; the old ready before it does not", () => {
+  const line = "Стикеры Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
+  const baseline = [{ id: "9", text: `${line} 20:08` }];
+  const ownBefore = ["1"];
+  const waiting = [
+    { id: "9", own: false, text: `${line} 20:08` },
+    { id: "12", own: true, text: "фото 20:08" },
+  ];
+  assert.equal(newOwnId(ownBefore, waiting), "12");
+  assert.equal(botRepliesAfterOwn(waiting, "12").length, 0);
+  // Hang case: previous ready still last bot line, our image is on screen, no new bot bubble yet.
+  assert.equal(
+    stickerReplyText(baseline, waiting.filter((r) => !r.own), { thread: waiting, afterOwnId: "12" }).kind,
+    "pending",
+  );
+  const accepted = [
+    { id: "9", own: false, text: `${line} 20:08` },
+    { id: "12", own: true, text: "фото 20:08" },
+    { id: "13", own: false, text: `${line} 20:09` },
+  ];
+  assert.equal(
+    stickerReplyText(baseline, accepted.filter((r) => !r.own), { thread: accepted, afterOwnId: "12" }).kind,
+    "ready",
+  );
+  const askedAfter = [
+    { id: "9", own: false, text: `${line} 20:08` },
+    { id: "12", own: true, text: "фото 20:08" },
+    { id: "13", own: false, text: "Стикеры Отправьте эмодзи для стикера. 20:09" },
+  ];
+  assert.equal(
+    stickerReplyText(baseline, askedAfter.filter((r) => !r.own), { thread: askedAfter, afterOwnId: "12" }).kind,
+    "emoji",
+  );
+  const rejectedAfter = [
+    { id: "9", own: false, text: `${line} 20:08` },
+    { id: "12", own: true, text: "фото 20:08" },
+    { id: "13", own: false, text: "Стикеры Не удалось обработать картинку. 20:09" },
+  ];
+  assert.equal(
+    stickerReplyText(baseline, rejectedAfter.filter((r) => !r.own), { thread: rejectedAfter, afterOwnId: "12" }).kind,
+    "reject",
+  );
+  // Clock tick on the old ready while our send is visible must not race.
+  const tickedOld = [
+    { id: "9", own: false, text: `${line} 20:16` },
+    { id: "12", own: true, text: "фото 20:08" },
+  ];
+  assert.equal(
+    stickerReplyText(baseline, tickedOld.filter((r) => !r.own), { thread: tickedOld, afterOwnId: "12" }).kind,
+    "pending",
+  );
+  assert.deepEqual(ownIds(waiting), ["12"]);
+});
+
+test("stall timer ignores busy flicker in the progress key", () => {
+  assert.equal(stallDue(1000, 0, STALL_MS), false);
+  assert.equal(stallDue(STALL_MS, 0, STALL_MS), true);
+  assert.equal(stallDue(STALL_MS + 1, 1, STALL_MS), true);
 });
 
 test("addsticker continues a short saved pack from pack.json", () => {

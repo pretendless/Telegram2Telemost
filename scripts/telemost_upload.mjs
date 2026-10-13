@@ -85,22 +85,30 @@ class Bot {
     throw new Error('Telemost bot chat did not load');
   }
 
-  botRows() {
+  // Every bubble (ours and the bot's) shares one id space so a reply can be
+  // anchored after the outbound message we just sent.
+  chatRows() {
     return this.c.ev(`(() => {
       const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
       if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight;
       window.__tg2tmNext = window.__tg2tmNext || 1;
-      const rows = [...document.querySelectorAll('article.message')].filter((a) => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
+      const rows = [...document.querySelectorAll('article.message')].filter((a) => a.querySelector('.yamb-message-row'));
       return rows.map((a) => {
         if (!a.dataset.tg2tmId) a.dataset.tg2tmId = String(window.__tg2tmNext++);
         return {
           id: a.dataset.tg2tmId,
+          own: !!a.querySelector('.yamb-message-row_own'),
           text: (a.innerText || '').replace(/\\s+/g, ' ').trim(),
           // «сохранён и доступен по ссылке» keeps the pack URL only on <a href>.
           links: [...a.querySelectorAll('a[href]')].map((x) => x.href),
         };
       });
     })()`);
+  }
+
+  async botRows() {
+    const rows = await this.chatRows();
+    return (rows || []).filter((row) => row && !row.own).map(({ id, text, links }) => ({ id, text, links }));
   }
 
   scrollToBottom() {
@@ -110,12 +118,14 @@ class Bot {
   // A seen flag hides a bubble the bot rewrites in place. Compare text instead.
   // «Отправьте эмодзи» and the following «Стикер готов» are replies, not timeouts.
   // An unchanged «Стикер готов» from the previous sticker is not acceptance of
-  // the image just sent — wait for a real new bot line (or stall and recover).
+  // the image just sent — wait for a real new bot line after our outbound
+  // message (or stall and recover).
   async waitForReply(baseline, {
     onWait,
     until,
     savedTimeoutMs = 20000,
     stallMs = STALL_MS,
+    ownBeforeIds = null,
   } = {}) {
     const started = Date.now();
     let lastSentAt = 0;
@@ -124,16 +134,20 @@ class Bot {
     let savedSeenAt = 0;
     let progressAt = started;
     let progressKey = '';
+    let busySince = 0;
     for (;;) {
-      const rows = await this.botRows();
+      const thread = until === 'sticker' ? await this.chatRows() : null;
+      const rows = thread ? (thread || []).filter((row) => row && !row.own) : await this.botRows();
       const busy = until === 'sticker' ? await this.chatBusy() : false;
       // A sticker wait needs a new bot line that advances or errors.
       // A command wait does not reuse an old «Стикер готов».
       // /done waits for «сохранён» even when an older emoji ask is still in the
       // changed text, and keeps polling until the sticker <a> appears.
       let seen;
-      if (until === 'sticker') seen = stickerReplyText(baseline, rows);
-      else if (until === 'saved') seen = savedReplyText(baseline, rows);
+      if (until === 'sticker') {
+        const afterOwnId = newOwnId(ownBeforeIds, thread);
+        seen = stickerReplyText(baseline, rows, { thread, afterOwnId });
+      } else if (until === 'saved') seen = savedReplyText(baseline, rows);
       else {
         const changed = changedBotText(baseline, rows);
         seen = { text: changed, links: changedBotLinks(baseline, rows), kind: imageReply(changed) };
@@ -142,12 +156,18 @@ class Bot {
       const links = seen.links || [];
       const kind = seen.kind;
       const stickerReply = kind === 'ready' || kind === 'emoji' || kind === 'reject';
-      const key = `${kind}|${replyCore(text)}|${busy ? '1' : '0'}|${replyCore(lastBotLine(rows))}`;
+      // Busy must not sit in this key: page chrome that flickers busy would
+      // reset the stall clock forever while a real «Стикер готов» sits ignored.
+      const key = `${kind}|${replyCore(text)}|${replyCore(lastBotLine(rows))}`;
       if (key !== progressKey) {
         progressKey = key;
         progressAt = Date.now();
-      } else if (busy) {
-        progressAt = Date.now();
+      }
+      if (busy) {
+        if (!busySince) busySince = Date.now();
+        else if (Date.now() - busySince >= 2000) progressAt = Date.now();
+      } else {
+        busySince = 0;
       }
       if (until === 'sticker' && stickerReply) {
         return { text, links, seconds: (Date.now() - started) / 1000, kind };
@@ -197,18 +217,20 @@ class Bot {
     }
   }
 
-  // Spinner / busy chrome means the bot is still working — do not stall-recover yet.
+  // Only spinners on recent bubbles count as "bot working". Page-wide
+  // progress/skeleton chrome used to keep resetting the stall timer.
   chatBusy() {
     return this.c.ev(`(() => {
-      if (document.querySelector('[aria-busy="true"]')) return true;
-      const nodes = document.querySelectorAll('[class], [role="progressbar"]');
-      for (const el of nodes) {
-        const cls = String(el.className || '');
-        if (/spinner|Spinner|loading|Loading|progress|Progress|skeleton|Skeleton/i.test(cls)) {
-          const r = el.getBoundingClientRect();
+      const messages = [...document.querySelectorAll('article.message')].slice(-8);
+      for (const a of messages) {
+        if (a.querySelector('[aria-busy="true"], [role="progressbar"]')) {
+          const hit = a.querySelector('[aria-busy="true"], [role="progressbar"]');
+          const r = hit.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) return true;
         }
-        if (el.getAttribute('role') === 'progressbar') {
+        for (const el of a.querySelectorAll('[class]')) {
+          const cls = String(el.className || '');
+          if (!/(?:^|\\s|_|-)(?:spinner|Spinner|loading|Loading)(?:\\s|_|-|$)/.test(cls)) continue;
           const r = el.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) return true;
         }
@@ -258,11 +280,13 @@ class Bot {
   async say(text, opts) {
     await this.ensureChat();
     await this.scrollToBottom();
-    const baseline = await this.botRows();
+    const thread = await this.chatRows();
+    const baseline = (thread || []).filter((row) => row && !row.own).map(({ id, text, links }) => ({ id, text, links }));
+    const ownBeforeIds = ownIds(thread);
     await this.c.ev(`(() => { const e = document.querySelector('[contenteditable=true]'); e.focus(); })()`);
     await this.c.send('Input.insertText', { text });
     await this.clickSend(false);
-    return this.waitForReply(baseline, opts || {});
+    return this.waitForReply(baseline, { ownBeforeIds, ...(opts || {}) });
   }
 
   async fileInput() {
@@ -278,7 +302,6 @@ class Bot {
   async sendImage(path, opts) {
     await this.ensureChat();
     await this.scrollToBottom();
-    const baseline = await this.botRows();
     const nodeId = await this.fileInput();
     await this.c.send('DOM.setFileInputFiles', { nodeId, files: [path] });
     for (let i = 0; i < 80; i++) {
@@ -286,8 +309,14 @@ class Bot {
       if (open) break;
       await sleep(POLL_MS);
     }
+    // Baseline at click time so a late ready from the previous sticker is not
+    // treated as the reply to this file, and a ready that lands after our send
+    // can still be matched against the outbound bubble.
+    const thread = await this.chatRows();
+    const baseline = (thread || []).filter((row) => row && !row.own).map(({ id, text, links }) => ({ id, text, links }));
+    const ownBeforeIds = ownIds(thread);
     await this.clickSend(true);
-    return this.waitForReply(baseline, { until: 'sticker', ...(opts || {}) });
+    return this.waitForReply(baseline, { until: 'sticker', ownBeforeIds, ...(opts || {}) });
   }
 
   // Scroll the sticker-bot history once and keep every message. A later run
@@ -476,17 +505,63 @@ export function sameBotLine(left, right) {
   return replyCore(left) === replyCore(right);
 }
 
+export function ownIds(rows) {
+  return (rows || []).filter((row) => row && row.own).map((row) => String(row.id));
+}
+
+// Newest outbound bubble that was not present before the send.
+export function newOwnId(beforeIds, rows) {
+  const have = new Set((beforeIds || []).map(String));
+  let found = null;
+  for (const row of rows || []) {
+    if (!row || !row.own) continue;
+    if (!have.has(String(row.id))) found = String(row.id);
+  }
+  return found;
+}
+
+// Bot bubbles that sit after our outbound message in the live thread.
+export function botRepliesAfterOwn(thread, afterOwnId) {
+  if (afterOwnId == null) return [];
+  const list = thread || [];
+  const idx = list.findIndex((row) => row && String(row.id) === String(afterOwnId));
+  if (idx < 0) return [];
+  const out = [];
+  for (let i = idx + 1; i < list.length; i++) {
+    const row = list[i];
+    if (!row || row.own || !row.text) continue;
+    out.push(row);
+  }
+  return out;
+}
+
 // Only a *new* bot line after the send advances the sticker step.
 // An unchanged «Стикер готов» (or its clock tick) from the previous sticker
 // is silence: the image just sent still needs a reply. When that line is
-// replaced by an emoji ask, rejection, or a fresh «Стикер готов», advance.
-export function stickerReplyText(baseline, rows) {
-  const changed = changedBotText(baseline, rows);
+// replaced by an emoji ask, rejection, or a fresh «Стикер готов» after our
+// outbound bubble, advance.
+export function stickerReplyText(baseline, rows, opts = {}) {
+  const thread = Array.isArray(opts.thread) ? opts.thread : null;
+  const bots = thread ? thread.filter((row) => row && !row.own) : (rows || []);
+  const changed = changedBotText(baseline, bots);
   const changedKind = imageReply(changed);
   if (changedKind === 'emoji' || changedKind === 'reject' || changedKind === 'ready') {
     return { text: changed, kind: changedKind };
   }
-  const last = lastBotLine(rows);
+  const afterOwnId = opts.afterOwnId;
+  if (afterOwnId != null && thread) {
+    const after = botRepliesAfterOwn(thread, afterOwnId);
+    for (let i = after.length - 1; i >= 0; i--) {
+      const kind = imageReply(after[i].text);
+      if (kind === 'ready' || kind === 'emoji' || kind === 'reject') {
+        return { text: after[i].text, kind };
+      }
+    }
+    // Our send is on screen; a ready that only exists *before* it is the
+    // previous sticker. Keep waiting (or stall) instead of racing ahead.
+    return { text: changed, kind: 'pending' };
+  }
+  const last = lastBotLine(bots);
   const prev = lastBotLine(baseline);
   // Same bubble / clock-only: still waiting for this send's reply.
   if (!last || sameBotLine(last, prev)) return { text: changed, kind: 'pending' };
