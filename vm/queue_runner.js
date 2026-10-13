@@ -30,7 +30,7 @@ export async function telemostRunActive(fetchImpl, env) {
   return page.status === 200 && page.runs.length > 0;
 }
 
-export async function startPipelineIfIdle(fetchImpl, env, queue) {
+export async function startPipelineIfIdle(fetchImpl, env, queue, { dispatchReason } = {}) {
   if (!shouldStartPipeline(queue, false)) return { started: false, reason: "empty" };
   const token = env && env.GH_DISPATCH_TOKEN;
   if (!token) return { started: false, reason: "no-token" };
@@ -41,6 +41,8 @@ export async function startPipelineIfIdle(fetchImpl, env, queue) {
     return { started: false, reason: page.runs.length ? "busy" : "empty" };
   }
   const chatId = String(env.TELEMOST_ADMIN_CHAT_ID || ADMIN_CHAT_ID);
+  const reason = dispatchReason
+    || "очередь: автозапуск pipeline (есть работа в KV)";
   const dispatched = await dispatchWorkflow(fetchImpl, {
     token,
     repo: env.GH_REPO || DEFAULT_REPO,
@@ -50,6 +52,7 @@ export async function startPipelineIfIdle(fetchImpl, env, queue) {
     account: "default",
     chatId,
     packs: "",
+    dispatchReason: reason,
   });
   return { started: dispatched.ok, reason: dispatched.ok ? "dispatched" : "dispatch", status: dispatched.status };
 }

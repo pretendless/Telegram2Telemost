@@ -11,12 +11,16 @@ import {
   doneNotice,
   normalizeProgress,
   planNotifications,
+  adminQueueOverviewText,
   claimNext,
   emptyQueue,
   enqueueRequest,
   findUploadingReleaseId,
+  formatUserRequestCard,
   queueHasPendingWork,
+  queueItemSlug,
   queueStatusText,
+  userRequestEvent,
   realPackUrl,
   shouldStartPipeline,
   terminalProgress,
@@ -699,8 +703,20 @@ test("an allowlisted /login and /connect dispatch the Telemost workflow", async 
   );
   assert.equal(calls[0].authorization, "Bearer dispatch-token");
   assert.equal(calls[0].body.ref, "main");
-  assert.deepEqual(calls[0].body.inputs, { mode: "login", account: "default", chat_id: "8502935020", packs: "" });
-  assert.deepEqual(calls[1].body.inputs, { mode: "login", account: "work", chat_id: "8502935020", packs: "" });
+  assert.deepEqual(calls[0].body.inputs, {
+    mode: "login",
+    account: "default",
+    chat_id: "8502935020",
+    packs: "",
+    dispatch_reason: "админ: /login или /connect",
+  });
+  assert.deepEqual(calls[1].body.inputs, {
+    mode: "login",
+    account: "work",
+    chat_id: "8502935020",
+    packs: "",
+    dispatch_reason: "админ: /login или /connect",
+  });
   assert.match(sent[0].text, /QR-код Яндекса/);
   assert.match(sent[1].text, /«work»/);
   assert.equal(COMMANDS.find((item) => item.command === "login").description, "Войти в Яндекс");
@@ -732,13 +748,131 @@ test("/restart is only for the admin chat, cancels the running job, and dispatch
   await handle(telegramRequest(8502935020, "/restart"), env, { sendMessage, fetch, sleep: async () => {} });
   const dispatch = calls.find((call) => String(call.url).endsWith("/dispatches"));
   assert.equal(dispatch.body.ref, "main");
-  assert.deepEqual(dispatch.body.inputs, { mode: "restart", account: "default", chat_id: "8502935020", packs: "" });
+  assert.deepEqual(dispatch.body.inputs, {
+    mode: "restart",
+    account: "default",
+    chat_id: "8502935020",
+    packs: "",
+    dispatch_reason: "админ: /restart",
+  });
   const dispatchAt = calls.findIndex((call) => String(call.url).endsWith("/dispatches"));
   const cancelAt = calls.findIndex((call) => String(call.url).endsWith("/38392857620/cancel"));
   assert.equal(dispatchAt < cancelAt, true);
-  assert.match(sent[1].text, /383999/);
+  assert.match(sent[1].text, /отдельным сообщением/);
+  assert.equal(sent[1].text.includes("383999"), false);
   assert.equal(sent[1].text.includes("dispatch-token"), false);
   assert.match(sent[1].text, /\/done/);
+});
+
+test("admin /queue reads queue and one pack key for uploading progress", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  const item = {
+    id: "req-1",
+    chatId: "4242",
+    title: "Запад",
+    links: ["https://t.me/addstickers/zapad"],
+    priority: false,
+    createdAt: "2026-10-13T12:00:00.000Z",
+    status: "uploading",
+    stickers: 10,
+  };
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [item, { ...item, id: "req-2", title: "Восток", status: "queued", chatId: "777" }],
+    }),
+  );
+  env.BOT_KV.store.set(
+    `pack:${queueItemSlug(item)}`,
+    JSON.stringify({ slug: queueItemSlug(item), title: item.title, status: "uploading", uploaded: 3, total: 10 }),
+  );
+  const sent = [];
+  env.BOT_KV.ops.list = 0;
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/queue"), env, {
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+  });
+  assert.match(sent[0], /Запад/);
+  assert.match(sent[0], /стикер 3 из 10/);
+  assert.match(sent[0], /Восток/);
+  assert.equal(env.BOT_KV.ops.list, 0);
+});
+
+test("session-started notifies admin once per run id", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  const sent = [];
+  const body = {
+    runId: "999001",
+    url: "https://github.com/pretendless/tg2tm/actions/runs/999001",
+    reason: "очередь: новый запрос принят",
+  };
+  const req = new Request("https://tg2tmbot.example/session-started", {
+    method: "POST",
+    headers: { authorization: "Bearer uploader-secret", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const first = await handle(req, env, {
+    sendMessage: async (_env, chatId, text) => sent.push({ chatId, text }),
+  });
+  assert.equal(first.status, 200);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /новый запрос принят/);
+  assert.match(sent[0].text, /999001/);
+  sent.length = 0;
+  const second = await handle(
+    new Request("https://tg2tmbot.example/session-started", {
+      method: "POST",
+      headers: { authorization: "Bearer uploader-secret", "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    env,
+    {
+      sendMessage: async (_env, _chatId, text) => sent.push(text),
+    },
+  );
+  assert.equal(second.status, 200);
+  assert.equal(sent.length, 0);
+});
+
+test("accept reply includes queue position and opens a user card", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  const sent = [];
+  const text = "Лис\n\nhttps://t.me/addstickers/fox_one";
+  await handle(packMessage(4242, text), env, {
+    sendMessage: async (_env, chatId, reply) => {
+      sent.push({ chatId, reply });
+      return { message_id: sent.length };
+    },
+    stickerCount: async () => 5,
+  });
+  assert.equal(sent.length, 2);
+  assert.match(sent[0].reply, /перед вами/);
+  assert.match(sent[1].reply, /в очереди/);
+  const queue = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(queue.items[0].notifyMessageId, 2);
+});
+
+test("user request card text follows upload progress", () => {
+  const queue = enqueueRequest(emptyQueue(), {
+    chatId: 42,
+    title: "Лис",
+    links: ["https://t.me/addstickers/fox"],
+    priority: false,
+    createdAt: "1",
+    stickers: 12,
+  }).queue;
+  const item = queue.items[0];
+  assert.match(formatUserRequestCard(userRequestEvent({ item, pack: null, queue })), /перед вами/);
+  const uploading = userRequestEvent({
+    item: { ...item, status: "uploading" },
+    pack: { title: "Лис", status: "uploading", uploaded: 4, total: 12 },
+    queue,
+  });
+  assert.match(formatUserRequestCard(uploading), /стикер 4 из 12/);
+  assert.equal(adminQueueOverviewText(queue, { uploaded: 4, total: 12 }).includes("стикер 4 из 12"), false);
 });
 
 test("login does not dispatch when the GitHub token is missing", async () => {

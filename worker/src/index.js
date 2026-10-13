@@ -10,30 +10,39 @@ import {
 } from "../../scripts/admin_status.mjs";
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
 import { startPipelineIfIdle } from "../../vm/queue_runner.js";
+import { defaultSessionReason, notifySessionStartOnce } from "../../vm/session_notify.js";
 import {
   CHANNEL_CHAT,
   INITIAL_SUBSCRIBER,
   MAX_STICKERS,
   NOT_A_PACK,
+  adminQueueOverviewText,
+  attachQueueNotifyMessage,
   commandOf,
   duplicateRequestReply,
+  deliverUserRequestCard,
+  formatUserRequestCard,
   findUploadingReleaseId,
   normalizeProgress,
   notificationSteps,
   QUEUE_KEY,
   acceptReply,
+  aheadCount,
   claimNext,
   enqueueRequest,
   focusRequest,
   isPriorityChat,
   normalizeQueue,
   parsePackMessage,
+  queueItemByRequestId,
+  queueItemSlug,
   queueStatusText,
   releaseRequest,
   renderPackCheck,
   staticReply,
   statusText,
   terminalProgress,
+  userRequestEvent,
 } from "./logic.js";
 
 export function botToken(env) {
@@ -189,6 +198,42 @@ function sameVisibleProgress(prev, pack) {
   );
 }
 
+async function readPackProgress(kv, item) {
+  if (!item) return null;
+  const raw = await kv.get(`pack:${queueItemSlug(item)}`);
+  return parseStored(raw);
+}
+
+async function deliverRequesterCard(env, pack, prev, deps) {
+  const kv = env.BOT_KV;
+  const queue = await readQueue(kv);
+  const item = queueItemByRequestId(queue, pack.queueRequestId);
+  if (!pack.queueRequestId && !item) return null;
+  const chatRaw = String(pack.requesterChatId || (item && item.chatId) || pack.requester || "").trim();
+  if (!/^[0-9]{1,16}$/.test(chatRaw)) return null;
+  const chatId = Number(chatRaw);
+  const io = adminIo(env, deps);
+  const event = userRequestEvent({ item, pack, queue });
+  let cursor = prev && prev.userCard ? prev.userCard : null;
+  if (item && item.notifyMessageId && !cursor) {
+    cursor = {
+      messageId: item.notifyMessageId,
+      event: userRequestEvent({ item, pack: null, queue }),
+      text: formatUserRequestCard(userRequestEvent({ item, pack: null, queue })),
+    };
+  }
+  try {
+    const delivered = await deliverUserRequestCard(io, chatId, cursor, event);
+    if (delivered.action !== "skip") {
+      return { messageId: delivered.messageId, event: delivered.event, text: delivered.text };
+    }
+    return cursor;
+  } catch {
+    console.log("user request card skipped");
+    return cursor;
+  }
+}
+
 async function applyProgress(env, pack, deps) {
   const send = deps.sendMessage || deps;
   const kv = env.BOT_KV;
@@ -205,7 +250,8 @@ async function applyProgress(env, pack, deps) {
 
   const needsToken = steps.length > 0 && !botToken(env);
   let admin = prev && prev.admin ? prev.admin : null;
-  const writePack = (cursor) => kv.put(packKey, JSON.stringify({ ...pack, notice: cursor, admin }));
+  let userCard = prev && prev.userCard ? prev.userCard : null;
+  const writePack = (cursor) => kv.put(packKey, JSON.stringify({ ...pack, notice: cursor, admin, userCard }));
   if (needsToken) {
     await writePack(notice);
     return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false };
@@ -213,6 +259,8 @@ async function applyProgress(env, pack, deps) {
 
   let subs = [];
   if (steps.some((step) => step.kind !== "channel")) subs = await listSubscribers(kv);
+  const requesterId = pack.requesterChatId ? String(pack.requesterChatId) : "";
+  if (requesterId) subs = subs.filter((id) => String(id) !== requesterId);
 
   let notified = 0;
   let posted = false;
@@ -249,6 +297,12 @@ async function applyProgress(env, pack, deps) {
       console.log("admin status skipped");
     }
   }
+  try {
+    const deliveredUser = await deliverRequesterCard(env, pack, prev, deps);
+    if (deliveredUser) userCard = deliveredUser;
+  } catch {
+    console.log("user request card skipped");
+  }
   await writePack(cursor);
   await finishQueueItem(env, pack, prev, deps);
   return { ok: true, status: 200, notified, posted, waitingForUrl };
@@ -262,9 +316,9 @@ async function writeQueue(kv, queue) {
   await kv.put(QUEUE_KEY, JSON.stringify(queue));
 }
 
-function schedulePipeline(env, queue, deps) {
+function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
   const run = () =>
-    startPipelineIfIdle(deps.fetch || fetch, env, queue).catch((err) => {
+    startPipelineIfIdle(deps.fetch || fetch, env, queue, { dispatchReason }).catch((err) => {
       console.error("pipeline start failed", err && err.message);
     });
   if (deps.waitUntil) deps.waitUntil(run());
@@ -280,7 +334,7 @@ async function finishQueueItem(env, pack, prev, deps) {
   const status = pack.status === "error" ? "error" : "done";
   const released = releaseRequest(queue, id, status);
   if (released.changed) await writeQueue(env.BOT_KV, released.queue);
-  schedulePipeline(env, released.queue, deps);
+  schedulePipeline(env, released.queue, deps, { dispatchReason: "очередь: следующий пак после завершения" });
   return released.queue;
 }
 
@@ -376,6 +430,30 @@ async function handlePlan(request, env) {
   });
 }
 
+async function handleSessionStarted(request, env, deps) {
+  const secret = env.UPLOADER_SECRET || "";
+  if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
+  const raw = await request.text();
+  if (raw.length > 4096) return new Response("too big", { status: 413 });
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ ok: false, error: "bad json" }, 400);
+  }
+  const runId = String(body.runId || body.run_id || "").trim();
+  const url = String(body.url || body.runUrl || "").trim();
+  const reason = String(body.reason || "").trim() || defaultSessionReason(body.mode);
+  const send = deps.sendMessage || defaultSend;
+  const adminId = adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)[0];
+  const result = await notifySessionStartOnce(env.BOT_KV, (target, text) => send(env, target, text), adminId, {
+    runId,
+    url,
+    reason,
+  });
+  return json({ ok: true, sent: result.sent, duplicate: result.reason === "duplicate" });
+}
+
 async function handleProgress(request, env, deps) {
   const secret = env.UPLOADER_SECRET || "";
   if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
@@ -424,10 +502,20 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   const cmd = commandOf(text);
   const known = staticReply(cmd);
   let out;
+  let userCardAfterAccept = null;
   if (known) {
     if (known.subscribe === true) await env.BOT_KV.put(`sub:${chatId}`, "1");
     if (known.subscribe === false) await env.BOT_KV.delete(`sub:${chatId}`);
     out = known.text;
+  } else if (cmd === "/queue") {
+    if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
+      out = "Эта команда только для администратора.";
+    } else {
+      const queue = await readQueue(env.BOT_KV);
+      const uploading = queue.items.find((item) => item.status === "uploading");
+      const activePack = uploading ? await readPackProgress(env.BOT_KV, uploading) : null;
+      out = adminQueueOverviewText(queue, activePack);
+    }
   } else if (cmd === "/status") {
     if (isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       const queue = await readQueue(env.BOT_KV);
@@ -483,13 +571,35 @@ async function answer(env, update, send, stickerCount, deps = {}) {
             priority,
           });
         } else {
-          out = acceptReply({ title: parsed.title, rows, total, priority });
+          const item = stored.item;
+          const ahead = item ? aheadCount(stored.created ? stored.queue : queue, item) : 0;
+          out = acceptReply({ title: parsed.title, rows, total, priority, ahead });
         }
-        if (stored.duplicate !== "done") schedulePipeline(env, queueAfter, deps);
+        if (stored.created && stored.item) {
+          userCardAfterAccept = { item: stored.item, queue: stored.queue };
+        }
+        if (stored.duplicate !== "done") {
+          schedulePipeline(env, queueAfter, deps, { dispatchReason: "очередь: новый запрос принят" });
+        }
       }
     }
   }
-  await send(env, chatId, out);
+  if (out) await send(env, chatId, out);
+  if (userCardAfterAccept) {
+    try {
+      const cardText = formatUserRequestCard(
+        userRequestEvent({ item: userCardAfterAccept.item, pack: null, queue: userCardAfterAccept.queue }),
+      );
+      const card = await send(env, chatId, cardText);
+      const messageId = card && card.message_id;
+      if (messageId) {
+        const attached = attachQueueNotifyMessage(userCardAfterAccept.queue, userCardAfterAccept.item.id, messageId);
+        if (attached.changed) await writeQueue(env.BOT_KV, attached.queue);
+      }
+    } catch {
+      console.log("user queue card skipped");
+    }
+  }
 }
 
 async function handleTelegram(request, env, send, stickerCount, deps) {
@@ -518,6 +628,9 @@ export async function handle(request, env, deps = {}) {
   if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) return json({ ok: true });
   if (request.method === "POST" && url.pathname === "/progress") {
     return handleProgress(request, env, deps);
+  }
+  if (request.method === "POST" && url.pathname === "/session-started") {
+    return handleSessionStarted(request, env, deps);
   }
   if (request.method === "POST" && url.pathname === "/queue/claim") return handleClaim(request, env);
   if (request.method === "GET" && url.pathname === "/queue/plan") return handlePlan(request, env);

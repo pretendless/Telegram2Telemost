@@ -221,6 +221,11 @@ export function normalizeProgress(body) {
     lastLine: body.lastLine ? String(body.lastLine).slice(0, 300) : null,
     phase: typeof body.phase === "string" ? body.phase.slice(0, 40) : null,
     requester: body.requester ? String(body.requester).slice(0, 32) : null,
+    requesterChatId: body.requesterChatId
+      ? String(body.requesterChatId).slice(0, 16)
+      : body.requester && /^[0-9]{1,16}$/.test(String(body.requester))
+        ? String(body.requester)
+        : null,
     queueRequestId: body.queueRequestId ? String(body.queueRequestId).slice(0, 64) : null,
   };
 }
@@ -289,7 +294,7 @@ export function normalizeQueue(raw) {
     const status = ["queued", "uploading", "done", "error"].includes(item.status) ? item.status : "";
     const createdAt = String(item.createdAt || "");
     if (!id || !/^[0-9]{1,16}$/.test(chatId) || !title || !links.length || !status || !createdAt) continue;
-    items.push({
+    const row = {
       id,
       chatId,
       title,
@@ -298,7 +303,11 @@ export function normalizeQueue(raw) {
       createdAt,
       status,
       stickers: Number.isFinite(Number(item.stickers)) ? Number(item.stickers) : links.length,
-    });
+    };
+    if (item.notifyMessageId && /^[0-9]{1,16}$/.test(String(item.notifyMessageId))) {
+      row.notifyMessageId = Number(item.notifyMessageId);
+    }
+    items.push(row);
   }
   return { priority, items };
 }
@@ -427,7 +436,7 @@ export function releaseRequest(queue, id, status) {
   return { queue: changed ? { priority: queue.priority.slice(), items } : queue, changed };
 }
 
-function aheadCount(queue, item) {
+export function aheadCount(queue, item) {
   if (item.status !== "queued") return 0;
   let ahead = queue.items.some((other) => other.status === "uploading") ? 1 : 0;
   for (const other of queue.items) {
@@ -462,11 +471,193 @@ export function alreadyQueuedReply({ title, priority }) {
   return head;
 }
 
-export function acceptReply({ title, rows, total, priority }) {
+export function acceptReply({ title, rows, total, priority, ahead }) {
   const head = priority
     ? `Запрос принят с приоритетом. «${title}» встанет в очередь сразу после набора, который уже загружается.`
     : `Запрос принят. «${title}» в очереди.`;
-  return `${head}\n\n${rows.join("\n")}\n\nВсего ${total} стикеров.`;
+  const position =
+    typeof ahead === "number"
+      ? ahead === 0
+        ? "\n\nСейчас перед вами никого — ждём свободный запуск Actions."
+        : `\n\nПеред вами в очереди: ${ahead}.`
+      : "";
+  return `${head}${position}\n\n${rows.join("\n")}\n\nВсего ${total} стикеров.`;
+}
+
+export function queueItemSlug(item) {
+  const id = String((item && item.id) || "next").replace(/[^A-Za-z0-9_-]/g, "");
+  return (`request-${id}`).slice(0, 48);
+}
+
+export function adminQueueOverviewText(queue, activePack) {
+  const items = (queue && queue.items) || [];
+  const lines = ["Очередь переноса:", ""];
+  const uploading = items.find((item) => item.status === "uploading");
+  if (uploading) {
+    let line = `Сейчас загружается: «${uploading.title}»`;
+    if (uploading.chatId) line += ` (chat ${uploading.chatId})`;
+    if (activePack && Number.isFinite(activePack.uploaded) && Number.isFinite(activePack.total)) {
+      line += ` — стикер ${activePack.uploaded} из ${activePack.total}`;
+    } else if (uploading.stickers) {
+      line += ` — всего ${uploading.stickers} стикеров`;
+    }
+    lines.push(line);
+  } else {
+    lines.push("Сейчас никто не загружается.");
+  }
+  const waiting = items
+    .filter((item) => item.status === "queued")
+    .sort((left, right) => byTime(left, right));
+  lines.push("");
+  if (!waiting.length) {
+    lines.push("В очереди: пусто.");
+  } else {
+    lines.push("В очереди:");
+    waiting.forEach((item, index) => {
+      const pri = item.priority ? ", приоритет" : "";
+      const who = item.chatId ? `, chat ${item.chatId}` : "";
+      lines.push(`${index + 1}. «${item.title}»${pri}${who}`);
+    });
+  }
+  const recent = items
+    .filter((item) => item.status === "done" || item.status === "error")
+    .sort((left, right) => -byTime(left, right))
+    .slice(0, 5);
+  lines.push("");
+  if (!recent.length) {
+    lines.push("Недавно: записей нет.");
+  } else {
+    lines.push("Недавно:");
+    for (const item of recent) {
+      const mark = item.status === "done" ? "готово" : "ошибка";
+      lines.push(`• ${mark}: «${item.title}»`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function userCardKey(event) {
+  return [
+    event.phase || "",
+    event.pack || "",
+    Number(event.index),
+    Number(event.total),
+    Number(event.ahead),
+    event.url || "",
+    event.error || "",
+  ].join("\0");
+}
+
+export function userRequestEvent({ item, pack, queue }) {
+  const title = (pack && pack.title) || (item && item.title) || "";
+  if (pack && pack.status === "error") {
+    return {
+      phase: "error",
+      pack: title,
+      index: pack.uploaded,
+      total: pack.total,
+      error: pack.error || "ошибка загрузки",
+    };
+  }
+  if (pack && pack.status === "done" && pack.url) {
+    return { phase: "done", pack: title, index: pack.total, total: pack.total, url: pack.url };
+  }
+  if (pack && (pack.status === "uploading" || pack.status === "done")) {
+    return { phase: "uploading", pack: title, index: pack.uploaded, total: pack.total };
+  }
+  if (item && item.status === "uploading") {
+    return { phase: "starting", pack: title, index: 0, total: item.stickers || null };
+  }
+  if (item && item.status === "queued" && queue) {
+    return { phase: "queued", pack: title, ahead: aheadCount(queue, item) };
+  }
+  return { phase: "queued", pack: title, ahead: 0 };
+}
+
+export function formatUserRequestCard(event) {
+  const title = event.pack || "пак";
+  if (event.phase === "queued") {
+    const ahead = Number(event.ahead) || 0;
+    if (ahead === 0) return `«${title}»: в очереди, перед вами никого.`;
+    return `«${title}»: в очереди, перед вами ${ahead}.`;
+  }
+  if (event.phase === "starting") {
+    const total = Number(event.total);
+    return Number.isFinite(total) && total > 0
+      ? `«${title}»: загрузка в Телемост началась (0 из ${total}).`
+      : `«${title}»: загрузка в Телемост началась.`;
+  }
+  if (event.phase === "uploading") {
+    const index = Number(event.index) || 0;
+    const total = Number(event.total) || 0;
+    if (total) return `«${title}»: стикер ${index} из ${total}.`;
+    return `«${title}»: загрузка идёт (${index}).`;
+  }
+  if (event.phase === "done" && event.url) {
+    return `«${title}»: готово.\n${event.url}`;
+  }
+  if (event.phase === "error") {
+    const index = Number(event.index) || 0;
+    const total = Number(event.total) || 0;
+    const where = total ? ` на ${index}/${total}` : "";
+    return `«${title}»: ошибка${where}: ${event.error || "загрузка остановлена"}.`;
+  }
+  return `«${title}»: ${event.phase || "статус"}.`;
+}
+
+export function userRequestDelivery(prev, next) {
+  if (!prev) return { action: "send" };
+  if ((prev.pack || "") !== (next.pack || "")) return { action: "send" };
+  if (userCardKey(prev) === userCardKey(next)) return { action: "skip" };
+  return { action: "edit" };
+}
+
+export async function deliverUserRequestCard(io, chatId, prev, event) {
+  const decision = userRequestDelivery(prev && prev.event, event);
+  const text = formatUserRequestCard(event);
+  if (decision.action === "skip") {
+    return { action: "skip", messageId: prev && prev.messageId, event: prev.event, text: prev && prev.text };
+  }
+  if (decision.action === "edit" && prev && prev.messageId) {
+    try {
+      await io.edit(chatId, prev.messageId, text);
+      return { action: "edit", messageId: prev.messageId, event, text };
+    } catch {
+      try {
+        await io.delete(chatId, prev.messageId);
+      } catch {
+        // stale card
+      }
+      const messageId = messageIdOf(await io.send(chatId, text));
+      return { action: "replace", messageId, event, text };
+    }
+  }
+  const messageId = messageIdOf(await io.send(chatId, text));
+  return { action: "send", messageId, event, text };
+}
+
+function messageIdOf(result) {
+  if (result && typeof result === "object" && result.message_id) return result.message_id;
+  if (typeof result === "number") return result;
+  return null;
+}
+
+export function attachQueueNotifyMessage(queue, itemId, messageId) {
+  const id = String(itemId || "");
+  if (!id || !messageId) return { queue, changed: false };
+  let changed = false;
+  const items = queue.items.map((item) => {
+    if (item.id !== id || item.notifyMessageId === messageId) return item;
+    changed = true;
+    return { ...item, notifyMessageId: messageId };
+  });
+  return { queue: changed ? { priority: queue.priority.slice(), items } : queue, changed };
+}
+
+export function queueItemByRequestId(queue, requestId) {
+  const id = String(requestId || "");
+  if (!id) return null;
+  return ((queue && queue.items) || []).find((item) => item.id === id) || null;
 }
 
 export function statusText(packs) {

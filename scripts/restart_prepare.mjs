@@ -81,6 +81,7 @@ function writeRequestPack(target) {
     title: target.title,
     slug,
     queueRequestId: target.requestId || '',
+    requesterChatId: target.chatId || '',
     stickerLinks: target.links,
     stickerSets: sets,
     telemost: { status: 'pending', uploaded: 0, packUrl: null, error: null },
