@@ -205,6 +205,21 @@ test("an open pack is continued, not restarted with /newpack", () => {
   assert.equal(title.length > 0, true);
 });
 
+test("an existing «Стикер готов» line sends the next image", () => {
+  const line = "Стикеры Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
+  const baseline = [{ id: "9", text: `${line} 11:48` }];
+  const same = [{ id: "9", text: `${line} 11:48` }];
+  const ticked = [{ id: "9", text: `${line} 11:49` }];
+  assert.equal(stickerReplyText(baseline, same).kind, "ready");
+  assert.equal(stickerReplyText(baseline, ticked).kind, "ready");
+  assert.equal(stickerReplyText(baseline, ticked).text, ticked[0].text);
+  assert.equal(afterSendReply(stickerReplyText(baseline, ticked).kind), "next");
+  const asked = [{ id: "9", text: "Стикеры Отправьте эмодзи для стикера. 11:49" }];
+  assert.equal(stickerReplyText(baseline, asked).kind, "emoji");
+  const rejected = [{ id: "9", text: "Стикеры Не удалось обработать картинку. 11:49" }];
+  assert.equal(stickerReplyText(baseline, rejected).kind, "reject");
+});
+
 test("a clock tick is not a reply, and the last new line is", () => {
   const baseline = [{ id: "7", text: "Стикеры Отправьте картинку для следующего стикера. 11:00" }];
   const ticked = [{ id: "7", text: "Стикеры Отправьте картинку для следующего стикера. 11:10" }];
