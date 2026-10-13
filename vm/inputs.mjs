@@ -4,7 +4,7 @@ import { ACCOUNT_RE } from "./dispatch.js";
 
 export function checkInputs(env) {
   const mode = env.MODE || "login";
-  if (mode !== "login" && mode !== "upload" && mode !== "finalize") return { ok: false, error: "mode" };
+  if (mode !== "login" && mode !== "upload" && mode !== "finalize" && mode !== "restart") return { ok: false, error: "mode" };
   const account = String(env.ACCOUNT || "default").trim();
   if (!ACCOUNT_RE.test(account)) return { ok: false, error: "account" };
   const chat = String(env.CHAT_ID || env.TELEGRAM_CHAT_ID || "").trim();

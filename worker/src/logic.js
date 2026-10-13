@@ -59,6 +59,7 @@ export const COMMANDS = [
   { command: "login", description: "Войти в Яндекс" },
   { command: "connect", description: "Войти в аккаунт с меткой" },
   { command: "upload", description: "Загрузить паки этой сессией" },
+  { command: "restart", description: "Перезапустить загрузку" },
 ];
 
 const STATUS_RU = { pending: "ждёт", uploading: "загружается", done: "готов", error: "ошибка" };
@@ -347,6 +348,23 @@ export function claimNext(queue) {
     claimed: { ...next, status: "uploading" },
     changed: true,
     busy: false,
+  };
+}
+
+// Mark one stored request as the upload in progress. Another uploading row goes back to the queue.
+export function focusRequest(queue, id) {
+  const found = queue.items.find((item) => item.id === id);
+  if (!found) return { queue, changed: false, item: null };
+  const items = queue.items.map((item) => {
+    if (item.id === id) return { ...item, status: "uploading" };
+    if (item.status === "uploading") return { ...item, status: "queued" };
+    return item;
+  });
+  const changed = items.some((item, index) => item.status !== queue.items[index].status);
+  return {
+    queue: changed ? { priority: queue.priority.slice(), items } : queue,
+    changed,
+    item: { ...found, status: "uploading" },
   };
 }
 

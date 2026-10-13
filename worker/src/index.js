@@ -8,7 +8,7 @@ import {
   eventFromProgress,
   isAdminChat,
 } from "../../scripts/admin_status.mjs";
-import { handleVmCommand } from "../../vm/worker_login.js";
+import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
 import {
   CHANNEL_CHAT,
   INITIAL_SUBSCRIBER,
@@ -21,6 +21,7 @@ import {
   acceptReply,
   claimNext,
   enqueueRequest,
+  focusRequest,
   isPriorityChat,
   normalizeQueue,
   parsePackMessage,
@@ -275,6 +276,27 @@ async function handleClaim(request, env) {
   }
   let queue = await readQueue(env.BOT_KV);
   let changed = false;
+  const focus = body && body.focus;
+  if (focus) {
+    const focused = focusRequest(queue, String(focus));
+    if (focused.changed) await writeQueue(env.BOT_KV, focused.queue);
+    const item = focused.item;
+    return json({
+      ok: true,
+      claimed: item
+        ? {
+            id: item.id,
+            chatId: item.chatId,
+            title: item.title,
+            links: item.links,
+            priority: item.priority,
+            createdAt: item.createdAt,
+            status: item.status,
+            stickers: item.stickers,
+          }
+        : null,
+    });
+  }
   const release = body && body.release;
   if (release && release.id) {
     const released = releaseRequest(queue, String(release.id), release.status);
@@ -305,6 +327,25 @@ async function handleClaim(request, env) {
       : null,
     active: Boolean(claimed.busy),
     queued: queue.items.filter((entry) => entry.status === "queued").length,
+  });
+}
+
+async function handlePlan(request, env) {
+  const secret = env.UPLOADER_SECRET || "";
+  if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
+  const queue = await readQueue(env.BOT_KV);
+  return json({
+    ok: true,
+    items: queue.items.map((item) => ({
+      id: item.id,
+      chatId: item.chatId,
+      title: item.title,
+      links: item.links,
+      priority: item.priority,
+      createdAt: item.createdAt,
+      status: item.status,
+      stickers: item.stickers,
+    })),
   });
 }
 
@@ -362,6 +403,9 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       const queue = await readQueue(env.BOT_KV);
       out = queueStatusText(queue, chatId) || statusText(await listPacks(env.BOT_KV));
     }
+  } else if (cmd === "/restart") {
+    await handleRestart(env, message, { send, fetch: deps.fetch, sleep: deps.sleep });
+    return;
   } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
     await handleVmCommand(env, message, { send, fetch: deps.fetch });
     return;
@@ -431,6 +475,7 @@ export async function handle(request, env, deps = {}) {
   if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) return json({ ok: true });
   if (request.method === "POST" && url.pathname === "/progress") return handleProgress(request, env, deps);
   if (request.method === "POST" && url.pathname === "/queue/claim") return handleClaim(request, env);
+  if (request.method === "GET" && url.pathname === "/queue/plan") return handlePlan(request, env);
   if (request.method === "POST" && url.pathname === "/telegram") return handleTelegram(request, env, send, stickerCount, deps);
   return new Response("not found", { status: 404 });
 }

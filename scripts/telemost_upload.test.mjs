@@ -29,6 +29,10 @@ import {
   packDialogOpen,
   resetForNewPack,
   wantsPicture,
+  openPackTitle,
+  restartTarget,
+  restartAfterClose,
+  stickerSetName,
 } from "./telemost_upload.mjs";
 
 const partial = {
@@ -278,4 +282,50 @@ test("a reply that is still asking for an emoji does not continue", async () => 
   assert.equal(abandonReplyOk("Отправьте эмодзи для стикера."), false);
   assert.equal(abandonReplyOk("Стикер готов"), false);
   assert.equal(abandonReplyOk("Набор сохранён https://messenger.360.yandex.ru/#/stickers/8387"), false);
+});
+
+test("restart follows the open pack, or the next stored request", () => {
+  const messages = [
+    { own: false, text: "Создан набор стикеров «Север».", links: [] },
+    { own: false, text: "Набор «Север» сохранён.", links: [] },
+    { own: false, text: "Создан набор стикеров «Юг». Отправьте картинку.", links: [] },
+    { own: false, text: "Отправьте эмодзи для стикера.", links: [] },
+  ];
+  assert.equal(openPackTitle(messages), "Юг");
+  assert.equal(openPackTitle(messages.slice(0, 2)), "");
+  const catalogs = [
+    { title: "Север", dir: "01-sever" },
+    { title: "Юг", dir: "02-yug" },
+  ];
+  const requests = [
+    { id: "a", title: "Запад", status: "uploading", links: ["https://t.me/addstickers/zapad"], createdAt: "1", priority: false },
+    { id: "b", title: "Восток", status: "queued", links: ["https://t.me/addstickers/vostok"], createdAt: "2", priority: true },
+  ];
+  const open = restartTarget({ unfinished: true, title: "Юг", catalogs, requests });
+  assert.equal(open.action, "restart");
+  assert.equal(open.dir, "02-yug");
+  assert.equal(open.title, "Юг");
+  const named = restartTarget({
+    unfinished: true,
+    title: "Запад",
+    catalogs,
+    requests,
+  });
+  assert.equal(named.requestId, "a");
+  assert.deepEqual(named.links, ["https://t.me/addstickers/zapad"]);
+  const idle = restartTarget({ unfinished: false, title: "", catalogs, requests });
+  assert.equal(idle.action, "upload");
+  assert.equal(idle.title, "Запад");
+  const next = restartTarget({
+    unfinished: false,
+    title: "",
+    catalogs,
+    requests: requests.filter((item) => item.status === "queued"),
+  });
+  assert.equal(next.title, "Восток");
+  assert.equal(restartTarget({ unfinished: false, title: "", catalogs, requests: [] }).action, "idle");
+  assert.equal(restartAfterClose("Отправьте эмодзи для стикера.").action, "stop");
+  assert.equal(restartAfterClose("Набор «Юг» сохранён.").action, "newpack");
+  assert.equal(restartAfterClose("Набор «Юг» сохранён.").uploaded, 0);
+  assert.equal(stickerSetName("https://t.me/addstickers/vostok"), "vostok");
 });

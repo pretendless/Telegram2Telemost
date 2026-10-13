@@ -46,6 +46,7 @@ test("inputs reject shell metacharacters and require packs for upload", () => {
   assert.equal(checkInputs({ MODE: "upload", ACCOUNT: "work", PACKS: "03;rm" }).ok, false);
   assert.equal(checkInputs({ MODE: "upload", ACCOUNT: "work", PACKS: "" }).error, "packs");
   assert.equal(checkInputs({ MODE: "login", REQUIRE_CHAT: "1" }).error, "chat_id");
+  assert.equal(checkInputs({ MODE: "restart", ACCOUNT: "default", CHAT_ID: "8502935020", PACKS: "" }).ok, true);
   const ok = checkInputs({ MODE: "upload", ACCOUNT: "work", PACKS: "03 04", CHAT_ID: "-100" });
   assert.deepEqual(ok, { ok: true, mode: "upload", account: "work", chat_id: "-100", packs: "03 04" });
 });

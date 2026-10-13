@@ -14,6 +14,7 @@ on:
           - login
           - upload
           - finalize
+          - restart
         default: login
       account:
         description: Account label, for example default or work
@@ -63,7 +64,7 @@ jobs:
 
       - name: Restore encrypted session
         id: session
-        if: steps.in.outputs.mode == 'upload' || steps.in.outputs.mode == 'finalize'
+        if: steps.in.outputs.mode == 'upload' || steps.in.outputs.mode == 'finalize' || steps.in.outputs.mode == 'restart'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -80,7 +81,7 @@ jobs:
           fi
 
       - name: Tell Telegram there is no session
-        if: (steps.in.outputs.mode == 'upload' || steps.in.outputs.mode == 'finalize') && steps.session.outputs.present != 'yes'
+        if: (steps.in.outputs.mode == 'upload' || steps.in.outputs.mode == 'finalize' || steps.in.outputs.mode == 'restart') && steps.session.outputs.present != 'yes'
         env:
           MODE: upload
           ACCOUNT: ${{ steps.in.outputs.account }}
@@ -118,8 +119,51 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Read the open dialog
+        if: steps.in.outputs.mode == 'restart' && steps.session.outputs.present == 'yes'
+        env:
+          MODE: restart-peek
+          ACCOUNT: ${{ steps.in.outputs.account }}
+          PACKS: ""
+          CHAT_ID: ${{ steps.in.outputs.chat_id }}
+          TELEMOST_SESSION_KEY: ${{ secrets.TELEMOST_SESSION_KEY }}
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          PROXY_HOST: ${{ secrets.PROXY_HOST }}
+        run: |
+          mkdir -p sessions logs
+          chmod a+rwx logs
+          ENABLE_TUNNEL=0
+          export ENABLE_TUNNEL
+          docker run --rm --shm-size=1g \
+            --user "$(id -u):$(id -g)" \
+            -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
+            -e GITHUB_ACTIONS \
+            -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
+            -e TELEGRAM_CHAT_ID="$CHAT_ID" \
+            -e HOME=/tmp \
+            -e SESSION_DIR=/var/lib/tg2tm/sessions \
+            -v "$PWD/sessions:/var/lib/tg2tm/sessions" \
+            -v "$PWD/packs:/opt/tg2tm/packs" \
+            -v "$PWD/logs:/opt/tg2tm/logs" \
+            tg2tm-browser
+
+      - name: Prepare the pack this restart will upload
+        id: prepare
+        if: steps.in.outputs.mode == 'restart' && steps.session.outputs.present == 'yes'
+        env:
+          UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
+          TG2TM_PROGRESS_URL: https://tg2tmbot.prtndz.workers.dev/progress
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          node scripts/restart_prepare.mjs --github-output >> "$GITHUB_OUTPUT"
+          if [ -f logs/restart-fetch.txt ]; then
+            python3 scripts/fetch_and_convert.py --dir "$(cat logs/restart-fetch.txt)"
+          fi
+
       - name: Run browser
-        if: steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes'
+        if: steps.in.outputs.mode == 'login' || (steps.session.outputs.present == 'yes' && steps.prepare.outputs.action != 'idle')
         env:
           MODE: ${{ steps.in.outputs.mode }}
           ACCOUNT: ${{ steps.in.outputs.account }}
