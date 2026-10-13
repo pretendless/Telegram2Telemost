@@ -4,6 +4,8 @@ import {
   abandonReplyOk,
   afterNewpack,
   draftNeedsAbandon,
+  extractPackUrl,
+  finalizeDecision,
   leaveUnpublishedDraft,
   mustOpenNewPack,
   packDialogOpen,
@@ -61,6 +63,18 @@ test("a stopped draft is opened with /newpack, not resumed and not /start", () =
   assert.equal(wantsPicture("Отправьте эмодзи для стикера."), false);
   assert.equal(packDialogOpen("Это не эмодзи :)"), true);
   assert.equal(afterNewpack("Это не эмодзи :)"), "open");
+});
+
+test("finalize sends /done only after a sticker is ready and the pack is still open", () => {
+  assert.equal(finalizeDecision("Стикер готов. Отправьте следующую картинку.").action, "done");
+  assert.equal(finalizeDecision("/start — показать команды\n/newpack — создать набор\n/done — завершить действие").action, "stop");
+  assert.equal(finalizeDecision("Отправьте картинку для стикера.\n/done — завершить действие").action, "stop");
+  assert.equal(finalizeDecision("Набор «Сэт, Рэдж и Летти» сохранён и доступен по ссылке.\n/done — завершить действие").reason, "draft-gone");
+  assert.equal(finalizeDecision("Отправьте эмодзи для стикера.\n/done — завершить действие").reason, "waiting-emoji");
+  assert.equal(
+    extractPackUrl("Набор «Сэт» сохранён", ["https://t.me/addstickers/x", "https://messenger.360.yandex.ru/#/stickers/9999"]),
+    "https://messenger.360.yandex.ru/#/stickers/9999",
+  );
 });
 
 test("a reply that is still asking for an emoji does not continue", async () => {

@@ -164,10 +164,16 @@ if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
 fi
 
 status=0
+read -r -a pack_args <<<"$PACKS"
 if [ "$MODE" = "login" ]; then
   node vm/login.mjs login || status=$?
+elif [ "$MODE" = "finalize" ]; then
+  node vm/login.mjs restore || status=$?
+  if [ "$status" -eq 0 ]; then
+    node scripts/telemost_upload.mjs --finalize "${pack_args[@]}" || status=$?
+    node vm/login.mjs save || true
+  fi
 else
-  read -r -a pack_args <<<"$PACKS"
   node vm/login.mjs restore || status=$?
   if [ "$status" -eq 0 ]; then
     node scripts/telemost_upload.mjs "${pack_args[@]}" || status=$?
