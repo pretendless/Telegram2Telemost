@@ -273,13 +273,26 @@ const IMAGE_FAIL = /Не удалось обработать|не подходи
 
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|\uFE0F|\u200D|\s)+$/u;
 
+// The live bubble is "Стикеры <text> HH:MM". The phrase has to match that whole
+// line. A 32-character cap hid «Отправьте эмодзи для стикера.» and the sender waited.
+function replyCore(text) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^Стикеры\s+/, '')
+    .replace(/\s+\d{1,2}:\d{2}$/, '')
+    .trim();
+}
+
 // «Отправьте эмодзи» or a bare emoji such as 🫣 asks for the sticker emoji.
 // «Стикер готов» means that sticker is accepted.
 export function isEmojiRequest(text) {
-  const body = String(text || '').trim();
-  if (!body || body.length > 32) return false;
+  const body = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!body) return false;
   if (ASK_EMOJI.test(body) || NOT_EMOJI.test(body)) return true;
-  return EMOJI_ONLY.test(body);
+  const core = replyCore(body);
+  if (!core || core.length > 32) return false;
+  return EMOJI_ONLY.test(core);
 }
 
 export function imageReply(text) {
@@ -293,8 +306,8 @@ export function imageReply(text) {
 
 // The emoji phrase gets the sticker's emoji. A bare emoji is sent back as itself.
 export function emojiAnswer(replyText, stickerEmoji) {
-  const body = String(replyText || '').trim();
-  if (EMOJI_ONLY.test(body)) return body;
+  const core = replyCore(replyText);
+  if (core && EMOJI_ONLY.test(core)) return core;
   return stickerEmoji || '🙂';
 }
 

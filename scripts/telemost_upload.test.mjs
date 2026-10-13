@@ -193,6 +193,13 @@ test("an open pack is saved with /done before /newpack", () => {
 test("a ready sticker does not wait for an emoji", () => {
   assert.equal(imageReply("Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done"), "ready");
   assert.equal(imageReply("Отправьте эмодзи для стикера."), "emoji");
+  const live = "Стикеры Отправьте эмодзи для стикера. 10:46";
+  assert.equal(isEmojiRequest(live), true);
+  assert.equal(imageReply(live), "emoji");
+  assert.equal(emojiAnswer(live, "😉"), "😉");
+  assert.equal(isEmojiRequest("Стикеры 🫣 10:46"), true);
+  assert.equal(emojiAnswer("Стикеры 🫣 10:46", "😉"), "🫣");
+  assert.equal(imageReply("Стикеры Это не картинка :) 10:33"), "pending");
   assert.equal(imageReply("Стикеры"), "pending");
   assert.equal(settledImageReply("Стикеры", 0), "pending");
   assert.equal(settledImageReply("Стикеры", 400), "reject");
