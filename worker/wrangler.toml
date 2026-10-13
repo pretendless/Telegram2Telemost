@@ -1,0 +1,15 @@
+name = "tg2tmbot"
+main = "src/index.js"
+compatibility_date = "2026-10-12"
+workers_dev = true
+
+# CLOUDFLARE_ACCOUNT_ID comes from the environment. Do not commit it.
+# BOT_KV id is filled in after `wrangler kv namespace create BOT_KV`.
+
+[[kv_namespaces]]
+binding = "BOT_KV"
+id = "69c9d9f3572a48469a312e5914e8a233"
+
+# Chat ids allowed to run /login, /connect and /upload. Not a credential.
+[vars]
+LOGIN_CHAT_IDS = "8502935020"

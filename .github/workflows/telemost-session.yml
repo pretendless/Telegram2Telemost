@@ -128,6 +128,8 @@ jobs:
           TELEMOST_SESSION_KEY: ${{ secrets.TELEMOST_SESSION_KEY }}
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
           PROXY_HOST: ${{ secrets.PROXY_HOST }}
+          UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
+          TG2TM_PROGRESS_URL: https://tg2tmbot.prtndz.workers.dev/progress
         run: |
           mkdir -p sessions logs
           chmod a+rwx logs
@@ -141,6 +143,7 @@ jobs:
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
             -e GITHUB_ACTIONS \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
+            -e UPLOADER_SECRET -e TG2TM_PROGRESS_URL \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
             -e HOME=/tmp \
             -e SESSION_DIR=/var/lib/tg2tm/sessions \
@@ -175,3 +178,12 @@ jobs:
           path: packs/08-maf-izis-i-agnes/pack.json
           if-no-files-found: warn
           retention-days: 90
+
+      - name: Tell admin the run failed
+        if: failure()
+        env:
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          PACKS: ${{ steps.in.outputs.packs }}
+          TELEGRAM_CHAT_ID: ${{ steps.in.outputs.chat_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/admin_status.mjs --run-failed
