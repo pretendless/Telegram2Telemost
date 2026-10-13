@@ -195,13 +195,7 @@ class Bot {
   // must not send an image the bot already accepted.
   async surveyChat() {
     await this.ensureChat();
-    const scrollBy = (direction) => this.c.ev(`(() => {
-      const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
-      if (!s || !('scrollTop' in s)) return -1;
-      const step = Math.max(240, Math.floor(s.clientHeight * 0.5));
-      s.scrollTop = direction < 0 ? Math.max(0, s.scrollTop - step) : Math.min(s.scrollHeight, s.scrollTop + step);
-      return s.scrollTop;
-    })()`);
+    const scrollBy = (direction) => this.c.ev(scrollPageScript(direction));
     let top = -1;
     let idle = 0;
     let last = null;
@@ -286,6 +280,20 @@ export function settledImageReply(text, sameForMs) {
   if (kind !== 'pending') return kind;
   if (String(text || '').trim() && sameForMs >= 400) return 'reject';
   return 'pending';
+}
+
+// The page script cannot see the Node variable. The direction has to be a
+// number inside the script, or the chat survey throws and sends nothing.
+export function scrollPageScript(direction) {
+  const way = direction < 0 ? -1 : 1;
+  return `(() => {
+    const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
+    if (!s || !('scrollTop' in s)) return -1;
+    const step = Math.max(240, Math.floor(s.clientHeight * 0.5));
+    const direction = ${way};
+    s.scrollTop = direction < 0 ? Math.max(0, s.scrollTop - step) : Math.min(s.scrollHeight, s.scrollTop + step);
+    return s.scrollTop;
+  })()`;
 }
 
 function mentionsPack(text, title, kind) {
