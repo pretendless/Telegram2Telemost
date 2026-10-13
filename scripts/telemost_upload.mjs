@@ -282,6 +282,16 @@ export function settledImageReply(text, sameForMs) {
   return 'pending';
 }
 
+// One image gets five tries. A rejection or a timeout then skips that file.
+// The pack keeps going and can still be saved.
+export const IMAGE_ATTEMPTS = 5;
+
+export function afterImageAttempts(attempt, accepted) {
+  if (accepted) return 'next';
+  if (attempt < IMAGE_ATTEMPTS) return 'retry';
+  return 'skip';
+}
+
 // The page script cannot see the Node variable. The direction has to be a
 // number inside the script, or the chat survey throws and sends nothing.
 export function scrollPageScript(direction) {
@@ -534,7 +544,9 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     const file = join(PACKS, dir, img.file);
     console.log(dir, 'send', img.file);
     let ok = false;
-    for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+    let attempt = 0;
+    while (afterImageAttempts(attempt, ok) === 'retry') {
+      attempt += 1;
       try {
         const r = await bot.sendImage(file);
         if (r.kind === 'ready') { ok = true; lastText = r.text; break; }
@@ -551,10 +563,10 @@ async function uploadPack(bot, dir, { close = false } = {}) {
       }
     }
     if (!ok) {
-      tm.status = 'error';
-      tm.error = `stopped at ${img.file}`;
+      tm.skipped = [...(tm.skipped || []), img.file];
+      log(m.title, img.file, 'пропуск', `не принято за ${IMAGE_ATTEMPTS} попыток`);
       savePack(p);
-      throw new Error(`${dir}: ${img.file} failed 3 times`);
+      continue;
     }
     tm.uploaded = i + 1;
     if (tm.uploaded % 10 === 0 || tm.uploaded === m.images.length) {

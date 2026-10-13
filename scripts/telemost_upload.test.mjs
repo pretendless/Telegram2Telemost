@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   abandonReplyOk,
@@ -7,6 +8,8 @@ import {
   dirsForRun,
   extractPackUrl,
   finalizeDecision,
+  afterImageAttempts,
+  IMAGE_ATTEMPTS,
   imageReply,
   resumeFromChat,
   scrollPageScript,
@@ -115,6 +118,28 @@ test("resume does not resend stickers the bot already accepted", () => {
   ]), title, 144);
   assert.equal(saved.action, "saved");
   assert.equal(saved.url, "https://messenger.360.yandex.ru/#/stickers/8400");
+});
+
+test("five failures skip that image and the pack continues", () => {
+  assert.equal(IMAGE_ATTEMPTS, 5);
+  assert.equal(afterImageAttempts(0, false), "retry");
+  assert.equal(afterImageAttempts(4, false), "retry");
+  assert.equal(afterImageAttempts(5, false), "skip");
+  assert.equal(afterImageAttempts(3, true), "next");
+});
+
+test("eighteen accepted stickers continue at 019", () => {
+  const title = "Маф, Изис и Агнес";
+  const ready = { own: false, text: "Стикер готов. Отправьте картинку для следующего стикера.", links: [] };
+  const plan = resumeFromChat([
+    { own: false, text: "Создан набор стикеров «Маф, Изис и Агнес». Отправьте картинку.", links: [] },
+    ...Array.from({ length: 18 }, () => ready),
+  ], title, 144);
+  const pack = JSON.parse(readFileSync(new URL("../packs/08-maf-izis-i-agnes/pack.json", import.meta.url), "utf8"));
+  assert.equal(plan.action, "continue");
+  assert.equal(plan.uploaded, 18);
+  assert.equal(pack.images[plan.uploaded].file, "019.png");
+  assert.equal(pack.images[17].file, "018.png");
 });
 
 test("a ready sticker does not wait for an emoji", () => {
