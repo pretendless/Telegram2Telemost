@@ -9,6 +9,7 @@ import {
   deliverAdminStatus,
   formatAdminStatus,
   isAdminChat,
+  failurePackName,
   reportRunFailed,
 } from './admin_status.mjs';
 
@@ -223,4 +224,44 @@ test('a failed Actions run sends one forwardable card and skips when the error w
   rmSync(dir, { recursive: true });
   await reportRunFailed({ fetchImpl, token: '', statePath: path });
   assert.equal(sent.length, 1);
+});
+
+test('a restart failure names the open pack, or says перезапуск when the title is still unknown', async () => {
+  assert.equal(failurePackName({ mode: 'restart', packs: '' }), 'перезапуск');
+  assert.equal(failurePackName({ mode: 'restart-peek', packs: '' }), 'перезапуск');
+  assert.equal(failurePackName({ mode: 'restart', title: 'Север' }), 'Север');
+  const sent = [];
+  const fetchImpl = async (_url, options) => {
+    sent.push(JSON.parse(options.body).text);
+    return { ok: true, json: async () => ({ ok: true, result: { message_id: 4 } }) };
+  };
+  await reportRunFailed({
+    fetchImpl,
+    token: 'bot-token',
+    statePath: 'logs/does-not-exist-admin.json',
+    packs: '',
+    mode: 'restart',
+    logsDir: 'logs/does-not-exist-restart',
+    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/38402599932',
+  });
+  assert.match(sent[0], /«перезапуск»/);
+  assert.equal(sent[0].includes('«пак»'), false);
+
+  const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'restart-fail-'));
+  writeFileSync(join(dir, 'restart-choice.json'), JSON.stringify({ unfinished: true, title: 'Север' }));
+  await reportRunFailed({
+    fetchImpl,
+    token: 'bot-token',
+    statePath: join(dir, 'missing-admin.json'),
+    packs: '',
+    mode: 'restart',
+    logsDir: dir,
+    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/38402599932',
+  });
+  assert.match(sent[1], /«Север»/);
+  assert.equal(sent[1].includes('«пак»'), false);
+  rmSync(dir, { recursive: true });
 });
