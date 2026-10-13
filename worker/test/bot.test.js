@@ -167,7 +167,7 @@ test("progress endpoint waits for packUrl, then notifies and does not repeat", a
   assert.match(sent[0].text, /Начата загрузка/);
   assert.equal(sent[0].chatId, INITIAL_SUBSCRIBER);
   assert.equal(String(sent[1].chatId), String(INITIAL_SUBSCRIBER));
-  assert.match(sent[1].text, /«Джек и Бевка» \| старт/);
+  assert.match(sent[1].text, /«Джек и Бевка» \| стикер 144 из 144 \| старт/);
 
   sent.length = 0;
   const done = await handle(progressRequest({ ...body, packUrl: PACK_URL }), env, { sendMessage });
@@ -256,14 +256,14 @@ test("admin chat gets another user's upload, edits the sticker count, and /statu
   await handle(progressRequest({ ...body, uploaded: 3 }), env, { sendMessage, editMessage });
   assert.equal(edited.length, 2);
   assert.equal(sent.length, 0);
-  assert.match(edited[1].text, /отправка 3\/144/);
+  assert.match(edited[1].text, /стикер 3 из 144/);
   assert.equal(String(edited[0].chatId), "8502935020");
 
   const idle = [];
   await handle(packMessage(8502935020, "/status"), env, {
     sendMessage: async (_env, _chatId, text) => idle.push(text),
   });
-  assert.match(idle[0], /идёт \| «Маф, Изис и Агнес» \| отправка 3\/144/);
+  assert.match(idle[0], /идёт \| «Маф, Изис и Агнес» \| стикер 3 из 144/);
 
   env.BOT_KV.store.delete("pack:08-maf-izis-i-agnes");
   idle.length = 0;
@@ -287,7 +287,7 @@ test("progress that the uploader already told the admin does not send a second c
   }), env, {
     sendMessage: async (_env, _chatId, text) => sent.push(text),
   });
-  assert.equal(sent.some((text) => text.includes("отправка 1/144")), false);
+  assert.equal(sent.some((text) => text.includes("стикер 1 из 144")), false);
   assert.equal(sent.some((text) => text.includes("Начата загрузка")), true);
 });
 

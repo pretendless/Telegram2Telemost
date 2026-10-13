@@ -703,6 +703,7 @@ async function uploadPack(bot, dir, { close = false, note = async () => {}, dirR
       let reply = await bot.say(emojiAnswer('', img.emoji), { onWait, until: 'sticker' });
       if (reply.kind === 'emoji') reply = await bot.say('🙂', { onWait, until: 'sticker' });
       if (reply.kind !== 'ready') throw new Error(`emoji: ${String(reply.text || '').slice(0, 200)}`);
+      await note({ phase: 'ready', pack: m.title, index: plan.uploaded + 1, total: m.images.length, lastLine: reply.text });
       tm.uploaded += 1;
       lastText = reply.text;
     }
@@ -806,6 +807,7 @@ async function uploadPack(bot, dir, { close = false, note = async () => {}, dirR
       }
       if (done.kind !== 'ready') continue;
       lastText = done.text;
+      await note({ phase: 'ready', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
       accepted = true;
     }
     if (!accepted) continue;

@@ -1,12 +1,14 @@
-// Status cards for the admin chat. One pack run keeps one message and edits it
-// for every step. If the edit is rejected, the old message is deleted and one
-// replacement is sent.
+// Status cards for the admin chat. One pack run keeps one message. Every step
+// edits it and names the sticker as «стикер N из TOTAL»: send, emoji,
+// «Стикер готов», the wait, and a retry. If the edit is rejected, the old
+// message is deleted and one replacement is sent. A failed run writes the
+// error and the run URL into that same message.
 import { readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 export const ADMIN_CHAT_ID = '8502935020';
 
-const PHASES = new Set(['start', 'newpack', 'sending', 'waiting', 'retry', 'emoji', 'done', 'saved', 'link', 'error', 'failed']);
+const PHASES = new Set(['start', 'newpack', 'sending', 'waiting', 'retry', 'emoji', 'ready', 'done', 'saved', 'link', 'error', 'failed']);
 
 const LABEL = {
   start: 'старт',
@@ -15,6 +17,7 @@ const LABEL = {
   waiting: 'жду бота',
   retry: 'повтор',
   emoji: 'эмодзи',
+  ready: 'Стикер готов',
   done: '/done',
   saved: 'сохранён',
   link: 'ссылка',
@@ -47,18 +50,24 @@ export function isAdminChat(chatId, raw) {
   return adminChatIds(raw).includes(String(chatId));
 }
 
+function stickerMark(index, total) {
+  const n = num(index);
+  const all = num(total);
+  if (n == null || all == null) return '';
+  return `стикер ${n} из ${all}`;
+}
+
 export function formatAdminStatus(event, now = new Date()) {
   const phase = PHASES.has(event && event.phase) ? event.phase : 'error';
   let step = LABEL[phase];
-  const index = num(event.index);
-  const total = num(event.total);
-  const count = index != null && total != null ? `${index}/${total}` : '';
-  if (phase === 'sending' && count) step = `отправка ${count}`;
-  if (phase === 'emoji' && count) step = `эмодзи ${count}`;
   if (phase === 'waiting') step = `жду бота ${num(event.seconds) || 0} с`;
   if (phase === 'retry') step = `повтор ${num(event.attempt) || 0}`;
   if (phase === 'failed' && event.step) step = `сбой Actions | ${oneLine(event.step)}`;
-  const lines = [`${event.at || formatClock(now)} | «${oneLine(event.pack) || 'пак'}» | ${step}`];
+  const head = [event.at || formatClock(now), `«${oneLine(event.pack) || 'пак'}»`];
+  const sticker = stickerMark(event.index, event.total);
+  if (sticker) head.push(sticker);
+  head.push(step);
+  const lines = [head.join(' | ')];
   const lastLine = oneLine(event.lastLine);
   if (lastLine) lines.push('бот: ' + lastLine);
   const error = oneLine(event.error);
@@ -83,13 +92,14 @@ function cardKey(event) {
     oneLine(event.lastLine),
     oneLine(event.error),
     oneLine(event.link),
+    oneLine(event.runUrl),
     oneLine(event.step),
     String(event.requester || ''),
   ].join('\0');
 }
 
-// One pack keeps one card. Emoji, the next send, a wait, a retry, an error,
-// and the saved link all edit that card. A different pack starts a new one.
+// One pack keeps one card. Send, emoji, «Стикер готов», a wait, a retry,
+// an error, and the saved link all edit that card. A different pack starts a new one.
 export function adminDelivery(prev, next) {
   if (!prev) return { action: 'send' };
   if ((prev.pack || '') !== (next.pack || '')) return { action: 'send' };
@@ -101,7 +111,8 @@ export function adminJobText(job) {
   if (!job || !job.running) return 'простаивает';
   const index = num(job.index);
   const total = num(job.total);
-  if (job.pack && index != null && total != null) return `идёт | «${oneLine(job.pack)}» | отправка ${index}/${total}`;
+  const sticker = stickerMark(index, total);
+  if (job.pack && sticker) return `идёт | «${oneLine(job.pack)}» | ${sticker}`;
   if (job.pack) return `идёт | «${oneLine(job.pack)}»`;
   return 'идёт';
 }
@@ -164,10 +175,19 @@ export async function deliverAdminStatus(io, chatId, prev, event, now) {
   return { action: 'send', messageId, event, text };
 }
 
+function withSticker(event, previous) {
+  const prev = previous && previous.event;
+  const samePack = Boolean(prev) && (prev.pack || '') === ((event && event.pack) || '');
+  const index = num(event && event.index) != null ? event.index : (samePack ? prev.index : event && event.index);
+  const total = num(event && event.total) != null ? event.total : (samePack ? prev.total : event && event.total);
+  return { ...event, index, total };
+}
+
 export function createAdminFeed({ io, requester, writeState, onDelivered, now } = {}) {
   let cursor = null;
   return async function notify(event) {
-    const full = { ...event, requester: event.requester || requester || '' };
+    const carried = withSticker(event, cursor);
+    const full = { ...carried, requester: carried.requester || requester || '' };
     let delivery = { action: 'record', event: full };
     if (io) {
       try {
@@ -244,7 +264,9 @@ export async function reportRunFailed({
   }
   const stored = readState(statePath);
   const event = (stored && stored.event) || {};
-  if (event.phase === 'error' || event.phase === 'failed') {
+  const already = event.phase === 'error' || event.phase === 'failed';
+  const urlLanded = Boolean(runUrl) && oneLine(event.runUrl) === oneLine(runUrl);
+  if (already && (!runUrl || urlLanded || !(stored && stored.messageId))) {
     console.log('admin status already sent');
     return;
   }
