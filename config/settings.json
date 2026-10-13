@@ -7,6 +7,10 @@
   "telemost": {
     "site": "https://telemost.yandex.ru",
     "botName": "Стикеры",
+    "botUrl": "https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d",
+    "stagingUrl": "https://telemost.yandex.ru/join#87de7b40-0e2e-0557-537a-fa84858fd189",
+    "staging": true,
+    "stagingWindow": 5,
     "formats": [
       "png",
       "jpeg"

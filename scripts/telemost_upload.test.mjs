@@ -23,6 +23,8 @@ import {
   newOwnId,
   ownIds,
   botRepliesAfterOwn,
+  loadTelemostUrls,
+  stagingFillTo,
   waitLastLine,
   IMAGE_ATTEMPTS,
   STALL_MS,
@@ -312,6 +314,29 @@ test("stall timer ignores busy flicker in the progress key", () => {
   assert.equal(stallDue(1000, 0, STALL_MS), false);
   assert.equal(stallDue(STALL_MS, 0, STALL_MS), true);
   assert.equal(stallDue(STALL_MS + 1, 1, STALL_MS), true);
+});
+
+test("staging URLs come from settings or env, and the fill window stays ahead of the bot", () => {
+  const fromFile = loadTelemostUrls({ TELEMOST_STAGING: undefined });
+  assert.match(fromFile.botUrl, /telemost\.yandex\.ru\/user\//);
+  assert.match(fromFile.stagingUrl, /telemost\.yandex\.ru\/join#/);
+  assert.equal(fromFile.stagingEnabled, true);
+  assert.equal(fromFile.stagingWindow, 5);
+  const off = loadTelemostUrls({ TELEMOST_STAGING: '0' });
+  assert.equal(off.stagingEnabled, false);
+  const custom = loadTelemostUrls({
+    TELEMOST_BOT_URL: 'https://telemost.yandex.ru/user/abc',
+    TELEMOST_STAGING_URL: 'https://telemost.yandex.ru/join#buffer',
+    TELEMOST_STAGING_WINDOW: '3',
+  });
+  assert.equal(custom.botUrl, 'https://telemost.yandex.ru/user/abc');
+  assert.equal(custom.stagingUrl, 'https://telemost.yandex.ru/join#buffer');
+  assert.equal(custom.stagingWindow, 3);
+  assert.deepEqual(stagingFillTo(0, 0, 144, 5), [0, 1, 2, 3, 4]);
+  assert.deepEqual(stagingFillTo(2, 5, 144, 5), [5, 6]);
+  assert.deepEqual(stagingFillTo(2, 7, 144, 5), []);
+  assert.deepEqual(stagingFillTo(2, 3, 144, 5), [3, 4, 5, 6]);
+  assert.deepEqual(stagingFillTo(140, 140, 144, 5), [140, 141, 142, 143]);
 });
 
 test("addsticker continues a short saved pack from pack.json", () => {
