@@ -260,13 +260,19 @@ function readPackTitle(path) {
   }
 }
 
+function notClockName(value) {
+  const named = oneLine(value);
+  return /^\d{1,2}:\d{2}$/.test(named) ? '' : named;
+}
+
 // A restart has no pack number. Use the title the run already found, or
-// «перезапуск» so the failure card does not say «пак».
+// «перезапуск» so the failure card does not say «пак». A Telemost clock
+// stamp such as 11:57 is not a pack title.
 export function failurePackName({ pack = '', packs = '', mode = '', title = '' } = {}) {
-  const named = oneLine(pack) || oneLine(title);
+  const named = notClockName(pack) || notClockName(title);
   if (named) return named;
   if (mode === 'restart' || mode === 'restart-peek') return 'перезапуск';
-  return oneLine(packs);
+  return notClockName(packs);
 }
 
 function titleFromRestartLogs(dir) {

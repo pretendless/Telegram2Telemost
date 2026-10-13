@@ -33,8 +33,12 @@ import {
   packTitleKey,
   restartTarget,
   restartAfterClose,
+  isClockLine,
+  savedPackTitle,
   screenLine,
+  statusPackName,
   stickerSetName,
+  typedPackTitle,
 } from "./telemost_upload.mjs";
 
 const partial = {
@@ -334,6 +338,21 @@ test("restart follows the open pack, or the next stored request", () => {
   ];
   assert.equal(openPackTitle(quoted), "Юг");
   assert.equal(screenLine("Стикеры\nОтправьте эмодзи для стикера."), "Отправьте эмодзи для стикера.");
+  assert.equal(screenLine("Стикер готов. Отправьте картинку.\n\n11:57"), "Стикер готов. Отправьте картинку.");
+  assert.equal(isClockLine("11:57"), true);
+  assert.equal(isClockLine("Стикер готов"), false);
+  assert.equal(statusPackName("11:57"), "");
+  assert.equal(statusPackName("Маф, Изис и Агнес"), "Маф, Изис и Агнес");
+  assert.equal(savedPackTitle("Набор «Маф, Изис и Агнес» сохранён и доступен по ссылке."), "Маф, Изис и Агнес");
+  assert.equal(
+    typedPackTitle([
+      { own: true, text: "/newpack" },
+      { own: false, text: "Напишите название набора" },
+      { own: true, text: "Маф, Изис и Агнес" },
+      { own: false, text: "Отправьте эмодзи для стикера." },
+    ]),
+    "Маф, Изис и Агнес",
+  );
   const unmatched = restartTarget({
     unfinished: true,
     title: "Нет такого",
@@ -352,6 +371,24 @@ test("restart follows the open pack, or the next stored request", () => {
   });
   assert.equal(several.action, "seen");
   assert.deepEqual(several.matches, ["Юг", "юг"]);
+  const clockOnly = restartTarget({
+    unfinished: true,
+    title: "11:57",
+    liveText: "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done\n\n11:57",
+    catalogs,
+    requests: [],
+  });
+  assert.equal(clockOnly.action, "close");
+  assert.equal(clockOnly.title, "");
+  const emptyThenQueue = restartTarget({
+    unfinished: true,
+    title: "",
+    liveText: "11:57",
+    catalogs,
+    requests: requests.filter((item) => item.status === "queued"),
+  });
+  assert.equal(emptyThenQueue.action, "upload");
+  assert.equal(emptyThenQueue.title, "Восток");
   assert.equal(restartAfterClose("Отправьте эмодзи для стикера.").action, "stop");
   assert.equal(restartAfterClose("Набор «Юг» сохранён.").action, "newpack");
   assert.equal(restartAfterClose("Набор «Юг» сохранён.").uploaded, 0);

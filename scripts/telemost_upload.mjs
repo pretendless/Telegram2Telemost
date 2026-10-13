@@ -547,9 +547,58 @@ export function openPackTitle(messages) {
   return open ? title : '';
 }
 
+// Telemost stamps each bubble with HH:MM. That clock is not a pack title and
+// must not become the admin-card name or a hard "на экране" error.
+export function isClockLine(text) {
+  return /^\d{1,2}:\d{2}$/.test(String(text || '').replace(/\s+/g, ' ').trim());
+}
+
 export function screenLine(text) {
-  const lines = String(text || '').split('\n').map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
-  return lines.length ? lines[lines.length - 1] : '';
+  const lines = String(text || '')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!isClockLine(lines[i])) return lines[i];
+  }
+  return '';
+}
+
+// Admin cards and restart errors: a real pack name, never a bare clock.
+export function statusPackName(value) {
+  const named = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!named || isClockLine(named)) return '';
+  return named;
+}
+
+// After /done the bot says «Набор «…» сохранён». Use that when peek missed the title.
+export function savedPackTitle(text) {
+  const body = String(text || '');
+  const match = body.match(/Набор\s*[\u00AB"\u201C\u201E']([^»"\u201D']+)[\u00BB"\u201D']\s*сохранён/i);
+  return match ? match[1].trim() : '';
+}
+
+// The create-title bot line can scroll away. The title the uploader typed after
+// /newpack often remains and is enough to match a folder or stored request.
+export function typedPackTitle(messages) {
+  let afterNewpack = false;
+  let typed = '';
+  for (const message of messages || []) {
+    if (!message) continue;
+    const text = String(message.text || '').replace(/\s+/g, ' ').trim();
+    if (message.own && /^\/newpack\b/i.test(text)) {
+      afterNewpack = true;
+      typed = '';
+      continue;
+    }
+    if (!message.own && (CREATED.test(text) || SAVED.test(text))) {
+      afterNewpack = false;
+      if (SAVED.test(text)) typed = '';
+      continue;
+    }
+    if (afterNewpack && message.own && text && !text.startsWith('/')) typed = text;
+  }
+  return typed;
 }
 
 // Folder and request titles match without case, quotes, or emoji.
@@ -584,11 +633,14 @@ function byRequestTime(left, right) {
 
 // An open dialog restarts that pack from its first image. An idle dialog
 // takes the stored request that is already uploading, or the next queued one.
+// A missing title (or a bare Telemost clock) is not a hard stop: close the
+// open dialog, then restart via the active request or the next queued one.
 export function restartTarget({ unfinished, title, liveText, catalogs, requests } = {}) {
   const stored = requests || [];
+  const namedTitle = statusPackName(title);
   if (unfinished) {
-    const catalogsHit = (catalogs || []).filter((pack) => pack && samePackTitle(pack.title, title));
-    const requestsHit = stored.filter((item) => item && samePackTitle(item.title, title));
+    const catalogsHit = (catalogs || []).filter((pack) => pack && samePackTitle(pack.title, namedTitle));
+    const requestsHit = stored.filter((item) => item && samePackTitle(item.title, namedTitle));
     if (catalogsHit.length === 1) {
       const named = requestsHit.length === 1 ? requestsHit[0] : null;
       return {
@@ -604,18 +656,22 @@ export function restartTarget({ unfinished, title, liveText, catalogs, requests 
       return { action: 'restart', title: named.title, dir: '', requestId: named.id || '', links: named.links || [] };
     }
     const active = stored.filter((item) => item && item.status === 'uploading');
-    if (!packTitleKey(title) && catalogsHit.length === 0 && requestsHit.length === 0 && active.length === 1) {
+    if (!packTitleKey(namedTitle) && catalogsHit.length === 0 && requestsHit.length === 0 && active.length === 1) {
       return { action: 'restart', title: active[0].title, dir: '', requestId: active[0].id || '', links: active[0].links || [] };
     }
-    const matches = [...catalogsHit.map((pack) => pack.title), ...requestsHit.map((item) => item.title)];
-    return { action: 'seen', title: title || '', liveText: liveText || '', matches };
+    // Real unmatched / ambiguous title still surfaces as "seen". An empty or
+    // clock-only title falls through so /done can run and the queue can continue.
+    if (packTitleKey(namedTitle)) {
+      const matches = [...catalogsHit.map((pack) => pack.title), ...requestsHit.map((item) => item.title)];
+      return { action: 'seen', title: namedTitle, liveText: liveText || '', matches };
+    }
   }
   const active = stored.find((item) => item && item.status === 'uploading');
   if (active) return { action: 'upload', title: active.title, dir: '', requestId: active.id || '', links: active.links || [] };
   const waiting = stored.filter((item) => item && item.status === 'queued').sort(byRequestTime);
   const priority = waiting.filter((item) => item.priority);
   const next = (priority.length ? priority : waiting)[0];
-  if (!next) return { action: 'idle' };
+  if (!next) return unfinished ? { action: 'close', title: '', liveText: liveText || '' } : { action: 'idle' };
   return { action: 'upload', title: next.title, dir: '', requestId: next.id || '', links: next.links || [] };
 }
 
@@ -1025,9 +1081,12 @@ async function peekRestart(bot) {
   const live = await bot.recentIncoming(4);
   const liveText = String(live.text || '').replace(/[ \t]+/g, ' ').trim().slice(0, 500);
   const liveMessages = liveText.split('\n').map((text) => ({ own: false, text }));
+  const title = statusPackName(
+    openPackTitle(history.messages) || openPackTitle(liveMessages) || typedPackTitle(history.messages),
+  );
   const choice = {
     unfinished: unfinishedPack(live.text),
-    title: openPackTitle(history.messages) || openPackTitle(liveMessages),
+    title,
     liveText,
     lastLine: screenLine(liveText),
   };
@@ -1036,9 +1095,9 @@ async function peekRestart(bot) {
   console.log('restart-seen', JSON.stringify({ title: choice.title, lastLine: choice.lastLine, liveText: choice.liveText }));
 }
 
-function seenPackError(selected, title, line) {
-  const shown = title || line || 'без названия';
-  const many = (selected.matches || []).map((name) => String(name || '').trim()).filter(Boolean);
+function seenPackError(selected, title) {
+  const shown = statusPackName(title) || 'без названия';
+  const many = (selected.matches || []).map((name) => statusPackName(name)).filter(Boolean);
   if (many.length > 1) return `на экране «${shown}». несколько папок: ${many.join(', ')}`;
   return `на экране «${shown}»`;
 }
@@ -1050,27 +1109,53 @@ async function restartRun(bot, note, dirRef) {
     await note({ phase: 'error', pack: 'очередь', error: 'нет запроса в очереди' });
     return;
   }
-  const seenTitle = selected.title || choice.title || '';
+  let seenTitle = statusPackName(selected.title || choice.title || '');
   if (dirRef) dirRef.title = seenTitle;
   const live = await bot.recentIncoming(2);
   const open = choice.unfinished || unfinishedPack(live.text);
+  let closedText = '';
   if (open) {
-    await note({ phase: 'done', pack: seenTitle || 'перезапуск', lastLine: screenLine(live.text) || choice.lastLine || '' });
+    await note({
+      phase: 'done',
+      pack: seenTitle || 'перезапуск',
+      lastLine: screenLine(live.text) || choice.lastLine || '',
+    });
     const closed = await withRetry('restart-done', () => bot.say('/done'));
-    const closedText = String(closed.text || '');
+    closedText = String(closed.text || '');
     console.log('restart-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
     if (restartAfterClose(closedText).action === 'stop') {
       throw new Error(`refusing /newpack while a pack is still open: ${closedText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
     }
+    const recovered = statusPackName(savedPackTitle(closedText));
+    if (recovered) seenTitle = recovered;
+    if (dirRef && recovered) dirRef.title = recovered;
+  }
+  if (selected.action === 'close') {
+    console.log('restart-closed', JSON.stringify({ title: seenTitle, lastLine: screenLine(closedText) || choice.lastLine || '' }));
+    await note({
+      phase: 'done',
+      pack: seenTitle || 'перезапуск',
+      lastLine: screenLine(closedText) || choice.lastLine || '',
+    });
+    return;
   }
   if (selected.action === 'seen' || !selected.dir) {
-    const line = choice.lastLine || screenLine(choice.liveText || live.text);
+    const line = screenLine(choice.liveText || live.text) || choice.lastLine || '';
     console.log('restart-seen', JSON.stringify({ title: seenTitle, lastLine: line, matches: selected.matches || [] }));
+    // A clock or empty peek must not become the pack name or a fatal card.
+    if (!statusPackName(seenTitle)) {
+      await note({
+        phase: 'done',
+        pack: 'перезапуск',
+        lastLine: line,
+      });
+      return;
+    }
     await note({
       phase: 'error',
-      pack: seenTitle || line || 'перезапуск',
+      pack: seenTitle,
       lastLine: line,
-      error: seenPackError(selected, seenTitle, line),
+      error: seenPackError(selected, seenTitle),
     });
     return;
   }
