@@ -190,6 +190,74 @@ class Bot {
     await this.clickSend(true);
     return this.waitImageReply();
   }
+
+  // Scroll the sticker-bot history once and keep every message. A later run
+  // must not send an image the bot already accepted.
+  async surveyChat() {
+    await this.ensureChat();
+    const scrollBy = (direction) => this.c.ev(`(() => {
+      const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
+      if (!s || !('scrollTop' in s)) return -1;
+      const step = Math.max(240, Math.floor(s.clientHeight * 0.5));
+      s.scrollTop = direction < 0 ? Math.max(0, s.scrollTop - step) : Math.min(s.scrollHeight, s.scrollTop + step);
+      return s.scrollTop;
+    })()`);
+    let top = -1;
+    let idle = 0;
+    let last = null;
+    for (let i = 0; i < 400 && idle < 2; i++) {
+      top = await scrollBy(-1);
+      if (top < 0) break;
+      if (top === 0 || top === last) idle++;
+      else idle = 0;
+      last = top;
+      await sleep(POLL_MS);
+    }
+    const reachedTop = top <= 0;
+    await this.c.ev(`(() => {
+      window.__tg2tmLog = [];
+      window.__tg2tmNext = 1;
+      document.querySelectorAll('article.message').forEach(a => delete a.dataset.tg2tmId);
+    })()`);
+    const stamp = `(() => {
+      const log = window.__tg2tmLog || (window.__tg2tmLog = []);
+      let n = window.__tg2tmNext || 1;
+      const have = new Set(log.map(m => m.id));
+      for (const a of document.querySelectorAll('article.message')) {
+        if (!a.dataset.tg2tmId) a.dataset.tg2tmId = String(n++);
+        const id = a.dataset.tg2tmId;
+        if (have.has(id)) continue;
+        have.add(id);
+        log.push({
+          id,
+          own: !!a.querySelector('.yamb-message-row_own'),
+          text: (a.innerText || '').replace(/\\s+/g, ' ').trim(),
+          links: [...a.querySelectorAll('a[href]')].map(x => x.href),
+        });
+      }
+      window.__tg2tmNext = n;
+      return log.length;
+    })()`;
+    idle = 0;
+    let prevCount = -1;
+    for (let i = 0; i < 400 && idle < 2; i++) {
+      const count = await this.c.ev(stamp);
+      const pos = await scrollBy(1);
+      if (pos < 0) break;
+      const atBottom = await this.c.ev(`(() => {
+        const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
+        if (!s || !('scrollTop' in s)) return true;
+        return s.scrollTop + s.clientHeight >= s.scrollHeight - 2;
+      })()`);
+      if (atBottom && count === prevCount) idle++;
+      else idle = 0;
+      prevCount = count;
+      await sleep(POLL_MS);
+    }
+    await this.c.ev(stamp);
+    const messages = await this.c.ev(`window.__tg2tmLog || []`);
+    return { messages: messages || [], reachedTop };
+  }
 }
 
 const READY = /Стикер готов/;
@@ -218,6 +286,47 @@ export function settledImageReply(text, sameForMs) {
   if (kind !== 'pending') return kind;
   if (String(text || '').trim() && sameForMs >= 400) return 'reject';
   return 'pending';
+}
+
+function mentionsPack(text, title, kind) {
+  const body = String(text || '');
+  if (!body.includes('«' + title + '»')) return false;
+  if (kind === 'saved') return SAVED.test(body);
+  return /Создан набор/.test(body);
+}
+
+// Count only «Стикер готов» after this pack was created. Older packs in the
+// same chat do not count. A saved pack is not continued.
+export function resumeFromChat(messages, title, imageCount) {
+  const incoming = (messages || []).filter((message) => message && !message.own);
+  let createdAt = -1;
+  let saved = null;
+  let savedAt = -1;
+  incoming.forEach((message, index) => {
+    if (mentionsPack(message.text, title, 'created')) createdAt = index;
+    if (mentionsPack(message.text, title, 'saved')) {
+      saved = message;
+      savedAt = index;
+    }
+  });
+  if (saved && savedAt > createdAt) {
+    return {
+      action: 'saved',
+      uploaded: imageCount,
+      url: extractPackUrl(saved.text, saved.links),
+      lastText: saved.text || '',
+    };
+  }
+  if (createdAt < 0) return { action: 'newpack', uploaded: 0, lastText: '' };
+  const after = incoming.slice(createdAt + 1);
+  const accepted = after.filter((message) => READY.test(message.text)).length;
+  const last = after.length ? after[after.length - 1] : null;
+  const lastText = last ? last.text : '';
+  if (accepted >= imageCount) return { action: 'finish', uploaded: imageCount, lastText };
+  if (last && (ASK_EMOJI.test(lastText) || NOT_EMOJI.test(lastText))) {
+    return { action: 'emoji', uploaded: accepted, lastText };
+  }
+  return { action: 'continue', uploaded: accepted, lastText };
 }
 
 // A dialog already waiting for an emoji or rejecting text must not receive /start or /done.
@@ -353,7 +462,34 @@ async function uploadPack(bot, dir, { close = false } = {}) {
   if (tm.status === 'done') { console.log(dir, 'already done'); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
 
-  if (mustOpenNewPack(tm)) {
+  const history = await bot.surveyChat();
+  const plan = resumeFromChat(history.messages, m.title, m.images.length);
+  console.log(dir, 'chat-plan', plan.action, plan.uploaded, history.reachedTop ? 'top' : 'partial');
+  if (plan.action === 'newpack' && !history.reachedTop) {
+    throw new Error('chat history did not load; not sending images');
+  }
+  if (plan.action === 'saved') {
+    if (!plan.url) throw new Error('pack already saved but the link was not in the chat');
+    await rememberAndPost(p, dir, plan.url, plan.lastText);
+    return;
+  }
+
+  let lastText = plan.lastText || '';
+  if (plan.action !== 'newpack') {
+    tm.created = true;
+    tm.uploaded = plan.uploaded;
+    tm.pendingFile = null;
+    tm.status = 'uploading';
+    if (plan.action === 'emoji') {
+      const img = m.images[plan.uploaded];
+      let reply = await bot.say(img.emoji || '🙂');
+      if (imageReply(reply.text) === 'emoji') reply = await bot.say('🙂');
+      if (imageReply(reply.text) !== 'ready') throw new Error(`emoji: ${String(reply.text || '').slice(0, 200)}`);
+      tm.uploaded += 1;
+      lastText = reply.text;
+    }
+    savePack(p);
+  } else if (mustOpenNewPack(tm)) {
     const opened = await withRetry('newpack', () => bot.say('/newpack'));
     const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'newpack-reply', openedText.slice(0, 400));
@@ -385,7 +521,6 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     log(m.title, '', 'набор создан', 'без /start и без /done');
   }
 
-  let lastText = '';
   for (let i = tm.uploaded; i < m.images.length; i++) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
@@ -439,6 +574,21 @@ async function uploadPack(bot, dir, { close = false } = {}) {
   }
   const saved = await publishSavedPack(bot, p, dir);
   if (!saved) throw new Error('done did not save the pack');
+}
+
+async function rememberAndPost(p, dir, url, replyText) {
+  const m = p.meta;
+  const tm = m.telemost;
+  tm.status = 'done';
+  tm.packUrl = url;
+  tm.error = null;
+  tm.uploaded = m.images.length;
+  tm.pendingFile = null;
+  tm.botReply = String(replyText || '').slice(0, 300);
+  savePack(p);
+  console.log(dir, 'pack-url', url);
+  await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, url);
+  console.log(dir, 'channel-posted', '@tg2tm');
 }
 
 async function publishSavedPack(bot, p, dir) {
