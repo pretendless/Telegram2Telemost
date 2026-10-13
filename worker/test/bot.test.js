@@ -402,7 +402,10 @@ test("progress done releases the uploading row and dispatches the next restart",
   );
   const calls = [];
   const fetch = async (url, init) => {
-    calls.push(String(url));
+    calls.push({
+      url: String(url),
+      body: init && init.body ? JSON.parse(init.body) : null,
+    });
     if (String(url).includes("/runs?")) {
       return { status: 200, json: async () => ({ workflow_runs: [] }) };
     }
@@ -422,7 +425,9 @@ test("progress done releases the uploading row and dispatches the next restart",
   await handle(progressRequest(body), env, { sendMessage, fetch, waitUntil: (promise) => promise });
   const stored = JSON.parse(env.BOT_KV.store.get("queue"));
   assert.equal(stored.items[0].status, "done");
-  assert.equal(calls.some((url) => url.endsWith("/dispatches")), true);
+  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
+  assert.ok(dispatch);
+  assert.match(dispatch.body.inputs.dispatch_reason, /Восток/);
 });
 
 test("an accepted pack dispatches restart when Actions is idle", async () => {
@@ -430,8 +435,11 @@ test("an accepted pack dispatches restart when Actions is idle", async () => {
   env.GH_DISPATCH_TOKEN = "dispatch-token";
   env.BOT_KV.store.set("meta:seeded", "1");
   const calls = [];
-  const fetch = async (url) => {
-    calls.push(String(url));
+  const fetch = async (url, init) => {
+    calls.push({
+      url: String(url),
+      body: init && init.body ? JSON.parse(init.body) : null,
+    });
     if (String(url).includes("/runs?")) {
       return { status: 200, json: async () => ({ workflow_runs: [] }) };
     }
@@ -444,7 +452,9 @@ test("an accepted pack dispatches restart when Actions is idle", async () => {
     fetch,
     waitUntil: (promise) => promise,
   });
-  assert.equal(calls.some((url) => url.endsWith("/dispatches")), true);
+  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
+  assert.ok(dispatch);
+  assert.match(dispatch.body.inputs.dispatch_reason, /Запад/);
 });
 
 test("pipeline start waits while a Telemost run is already active", () => {
@@ -745,6 +755,24 @@ test("/restart is only for the admin chat, cancels the running job, and dispatch
   assert.equal(refused.status, 200);
   assert.equal(calls.length, 0);
   assert.equal(sent[0].text, "Эта команда только для администратора.");
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-1",
+          chatId: "99",
+          title: "Запад",
+          links: ["https://t.me/addstickers/zapad"],
+          priority: false,
+          createdAt: "2026-10-13T12:00:00.000Z",
+          status: "uploading",
+          stickers: 10,
+        },
+      ],
+    }),
+  );
   await handle(telegramRequest(8502935020, "/restart"), env, { sendMessage, fetch, sleep: async () => {} });
   const dispatch = calls.find((call) => String(call.url).endsWith("/dispatches"));
   assert.equal(dispatch.body.ref, "main");
@@ -753,7 +781,7 @@ test("/restart is only for the admin chat, cancels the running job, and dispatch
     account: "default",
     chat_id: "8502935020",
     packs: "",
-    dispatch_reason: "админ: /restart",
+    dispatch_reason: "админ: /restart — «Запад»",
   });
   const dispatchAt = calls.findIndex((call) => String(call.url).endsWith("/dispatches"));
   const cancelAt = calls.findIndex((call) => String(call.url).endsWith("/38392857620/cancel"));
@@ -806,7 +834,7 @@ test("session-started notifies admin once per run id", async () => {
   const body = {
     runId: "999001",
     url: "https://github.com/pretendless/tg2tm/actions/runs/999001",
-    reason: "очередь: новый запрос принят",
+    reason: "очередь: новый запрос принят — «Лис»",
   };
   const req = new Request("https://tg2tmbot.example/session-started", {
     method: "POST",
