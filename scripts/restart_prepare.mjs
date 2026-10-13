@@ -80,6 +80,7 @@ function writeRequestPack(target) {
   writeFileSync(join(folder, 'pack.json'), JSON.stringify({
     title: target.title,
     slug,
+    queueRequestId: target.requestId || '',
     stickerLinks: target.links,
     stickerSets: sets,
     telemost: { status: 'pending', uploaded: 0, packUrl: null, error: null },

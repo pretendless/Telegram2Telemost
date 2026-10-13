@@ -221,6 +221,7 @@ export function normalizeProgress(body) {
     lastLine: body.lastLine ? String(body.lastLine).slice(0, 300) : null,
     phase: typeof body.phase === "string" ? body.phase.slice(0, 40) : null,
     requester: body.requester ? String(body.requester).slice(0, 32) : null,
+    queueRequestId: body.queueRequestId ? String(body.queueRequestId).slice(0, 64) : null,
   };
 }
 
@@ -306,16 +307,24 @@ export function isPriorityChat(queue, chatId) {
   return queue.priority.includes(String(chatId));
 }
 
-// One document, so accepting a request is one KV write. Identical open requests are not written again.
+function sameRequest(left, right) {
+  return (
+    left.chatId === String(right.chatId) &&
+    left.title === right.title &&
+    sameLinks(left.links, right.links)
+  );
+}
+
+// One document, so accepting a request is one KV write. Identical open or finished requests are not written again.
 export function enqueueRequest(queue, request) {
   const open = queue.items.find(
     (item) =>
-      item.chatId === String(request.chatId) &&
-      item.title === request.title &&
-      (item.status === "queued" || item.status === "uploading") &&
-      sameLinks(item.links, request.links),
+      sameRequest(item, request) &&
+      (item.status === "queued" || item.status === "uploading"),
   );
-  if (open) return { queue, item: open, created: false };
+  if (open) return { queue, item: open, created: false, duplicate: "open" };
+  const done = queue.items.find((item) => sameRequest(item, request) && item.status === "done");
+  if (done) return { queue, item: done, created: false, duplicate: "done" };
   const createdAt = request.createdAt;
   const item = {
     id: `${createdAt}-${queue.items.length}`,
@@ -327,7 +336,46 @@ export function enqueueRequest(queue, request) {
     status: "queued",
     stickers: request.stickers,
   };
-  return { queue: { priority: queue.priority.slice(), items: queue.items.concat(item) }, item, created: true };
+  return {
+    queue: { priority: queue.priority.slice(), items: queue.items.concat(item) },
+    item,
+    created: true,
+    duplicate: null,
+  };
+}
+
+export function queueHasPendingWork(queue) {
+  return queue.items.some((item) => item.status === "queued" || item.status === "uploading");
+}
+
+// Start Actions only when nothing is running and the KV queue still has work.
+export function shouldStartPipeline(queue, activeRun) {
+  if (activeRun) return false;
+  return queueHasPendingWork(queue);
+}
+
+export function duplicateRequestReply({ title, duplicate, priority }) {
+  if (duplicate === "done") {
+    return `Набор «${title}» уже переносился. Чтобы отправить снова, измените название или список ссылок.`;
+  }
+  return alreadyQueuedReply({ title, priority: Boolean(priority) });
+}
+
+export function findUploadingReleaseId(queue, pack) {
+  const explicit = pack.queueRequestId ? String(pack.queueRequestId) : "";
+  if (explicit) {
+    const hit = queue.items.find((item) => item.id === explicit);
+    if (hit && hit.status === "uploading") return hit.id;
+  }
+  const byTitle = queue.items.filter(
+    (item) => item.status === "uploading" && item.title === pack.title,
+  );
+  if (byTitle.length === 1) return byTitle[0].id;
+  return null;
+}
+
+export function terminalProgress(pack) {
+  return (pack.status === "done" && Boolean(pack.url)) || pack.status === "error";
 }
 
 function byTime(left, right) {
@@ -405,6 +453,13 @@ export function queueStatusText(queue, chatId) {
     return `«${item.title}»${priority}: в очереди, перед ним ${ahead}`;
   });
   return `Ваши запросы:\n\n${lines.join("\n")}`;
+}
+
+export function alreadyQueuedReply({ title, priority }) {
+  const head = priority
+    ? `Запрос «${title}» уже в очереди с приоритетом.`
+    : `Запрос «${title}» уже в очереди.`;
+  return head;
 }
 
 export function acceptReply({ title, rows, total, priority }) {

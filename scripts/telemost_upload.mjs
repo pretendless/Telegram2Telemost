@@ -968,6 +968,7 @@ function openAdminFeed(dirRef) {
         lastLine: event.lastLine || null,
         phase: event.phase,
         requester: event.requester || null,
+        queueRequestId: dirRef.queueRequestId || null,
       });
     },
   });
@@ -1060,7 +1061,10 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   if (restart) tm = m.telemost = resetForNewPack(tm);
   else if (tm.status === 'done') { console.log(dir, 'already done'); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
-  if (dirRef) dirRef.title = m.title;
+  if (dirRef) {
+    dirRef.title = m.title;
+    dirRef.queueRequestId = m.queueRequestId || '';
+  }
   await note({ phase: 'start', pack: m.title, total: m.images.length });
 
   const history = await bot.surveyChat();
@@ -1399,7 +1403,10 @@ async function publishSavedPack(bot, p, dir, note = async () => {}) {
 async function finalizePack(bot, dir, note = async () => {}, dirRef = null) {
   const p = loadPack(dir);
   const m = p.meta;
-  if (dirRef) dirRef.title = m.title;
+  if (dirRef) {
+    dirRef.title = m.title;
+    dirRef.queueRequestId = m.queueRequestId || '';
+  }
   const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
   if (tm.status === 'done' && tm.packUrl) {
     console.log(dir, 'draft-gone', tm.packUrl);

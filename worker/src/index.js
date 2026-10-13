@@ -9,12 +9,15 @@ import {
   isAdminChat,
 } from "../../scripts/admin_status.mjs";
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
+import { startPipelineIfIdle } from "../../vm/queue_runner.js";
 import {
   CHANNEL_CHAT,
   INITIAL_SUBSCRIBER,
   MAX_STICKERS,
   NOT_A_PACK,
   commandOf,
+  duplicateRequestReply,
+  findUploadingReleaseId,
   normalizeProgress,
   notificationSteps,
   QUEUE_KEY,
@@ -30,6 +33,7 @@ import {
   renderPackCheck,
   staticReply,
   statusText,
+  terminalProgress,
 } from "./logic.js";
 
 export function botToken(env) {
@@ -246,6 +250,7 @@ async function applyProgress(env, pack, deps) {
     }
   }
   await writePack(cursor);
+  await finishQueueItem(env, pack, prev, deps);
   return { ok: true, status: 200, notified, posted, waitingForUrl };
 }
 
@@ -255,6 +260,28 @@ async function readQueue(kv) {
 
 async function writeQueue(kv, queue) {
   await kv.put(QUEUE_KEY, JSON.stringify(queue));
+}
+
+function schedulePipeline(env, queue, deps) {
+  const run = () =>
+    startPipelineIfIdle(deps.fetch || fetch, env, queue).catch((err) => {
+      console.error("pipeline start failed", err && err.message);
+    });
+  if (deps.waitUntil) deps.waitUntil(run());
+  else run();
+}
+
+async function finishQueueItem(env, pack, prev, deps) {
+  if (!terminalProgress(pack)) return null;
+  if (prev && terminalProgress(prev)) return null;
+  let queue = await readQueue(env.BOT_KV);
+  const id = findUploadingReleaseId(queue, pack);
+  if (!id) return queue;
+  const status = pack.status === "error" ? "error" : "done";
+  const released = releaseRequest(queue, id, status);
+  if (released.changed) await writeQueue(env.BOT_KV, released.queue);
+  schedulePipeline(env, released.queue, deps);
+  return released.queue;
 }
 
 function stickerLinks(names) {
@@ -367,7 +394,13 @@ async function handleProgress(request, env, deps) {
     return json({ ok: false, error: err.message }, 400);
   }
   const sendMessage = deps.sendMessage || defaultSend;
-  const result = await applyProgress(env, pack, { sendMessage, editMessage: deps.editMessage, deleteMessage: deps.deleteMessage });
+  const result = await applyProgress(env, pack, {
+    sendMessage,
+    editMessage: deps.editMessage,
+    deleteMessage: deps.deleteMessage,
+    waitUntil: deps.waitUntil,
+    fetch: deps.fetch,
+  });
   return json(
     {
       ok: result.ok,
@@ -442,7 +475,17 @@ async function answer(env, update, send, stickerCount, deps = {}) {
           stickers: total,
         });
         if (stored.created) await writeQueue(env.BOT_KV, stored.queue);
-        out = acceptReply({ title: parsed.title, rows, total, priority });
+        const queueAfter = stored.created ? stored.queue : queue;
+        if (stored.duplicate) {
+          out = duplicateRequestReply({
+            title: parsed.title,
+            duplicate: stored.duplicate,
+            priority,
+          });
+        } else {
+          out = acceptReply({ title: parsed.title, rows, total, priority });
+        }
+        if (stored.duplicate !== "done") schedulePipeline(env, queueAfter, deps);
       }
     }
   }
@@ -473,7 +516,9 @@ export async function handle(request, env, deps = {}) {
   const url = new URL(request.url);
   // Probes must not read or list KV. The free daily quota is mostly spent by /progress.
   if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) return json({ ok: true });
-  if (request.method === "POST" && url.pathname === "/progress") return handleProgress(request, env, deps);
+  if (request.method === "POST" && url.pathname === "/progress") {
+    return handleProgress(request, env, deps);
+  }
   if (request.method === "POST" && url.pathname === "/queue/claim") return handleClaim(request, env);
   if (request.method === "GET" && url.pathname === "/queue/plan") return handlePlan(request, env);
   if (request.method === "POST" && url.pathname === "/telegram") return handleTelegram(request, env, send, stickerCount, deps);
@@ -481,7 +526,8 @@ export async function handle(request, env, deps = {}) {
 }
 
 export default {
-  fetch(request, env) {
-    return handle(request, env);
+  fetch(request, env, ctx) {
+    const waitUntil = ctx && typeof ctx.waitUntil === "function" ? (promise) => ctx.waitUntil(promise) : null;
+    return handle(request, env, waitUntil ? { waitUntil } : {});
   },
 };
