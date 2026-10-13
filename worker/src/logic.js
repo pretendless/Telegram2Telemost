@@ -221,11 +221,7 @@ export function normalizeProgress(body) {
     lastLine: body.lastLine ? String(body.lastLine).slice(0, 300) : null,
     phase: typeof body.phase === "string" ? body.phase.slice(0, 40) : null,
     requester: body.requester ? String(body.requester).slice(0, 32) : null,
-    requesterChatId: body.requesterChatId
-      ? String(body.requesterChatId).slice(0, 16)
-      : body.requester && /^[0-9]{1,16}$/.test(String(body.requester))
-        ? String(body.requester)
-        : null,
+    requesterChatId: body.requesterChatId ? String(body.requesterChatId).slice(0, 16) : null,
     queueRequestId: body.queueRequestId ? String(body.queueRequestId).slice(0, 64) : null,
   };
 }
@@ -709,6 +705,22 @@ export function queueItemByRequestId(queue, requestId) {
   const id = String(requestId || "");
   if (!id) return null;
   return ((queue && queue.items) || []).find((item) => item.id === id) || null;
+}
+
+export function queueItemBySlug(queue, slug) {
+  const key = String(slug || "").trim();
+  if (!key.startsWith("request-")) return null;
+  return ((queue && queue.items) || []).find((item) => queueItemSlug(item) === key) || null;
+}
+
+// Queue KV is authoritative for who submitted the request. Progress may carry the
+// admin chat id in `requester` when pack.json omitted requesterChatId.
+export function resolveRequesterChatId(pack, item) {
+  const fromItem = item && item.chatId != null ? String(item.chatId).trim() : "";
+  if (/^[0-9]{1,16}$/.test(fromItem)) return fromItem;
+  const explicit = pack && pack.requesterChatId != null ? String(pack.requesterChatId).trim() : "";
+  if (/^[0-9]{1,16}$/.test(explicit)) return explicit;
+  return null;
 }
 
 export function statusText(packs) {
