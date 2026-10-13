@@ -530,7 +530,10 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       } else {
         const queue = await readQueue(env.BOT_KV);
         const unstuck = unstickUploadingQueue(queue);
-        if (unstuck.changed) await writeQueue(env.BOT_KV, unstuck.queue);
+        if (unstuck.changed) {
+          await writeQueue(env.BOT_KV, unstuck.queue);
+          schedulePipeline(env, unstuck.queue, deps, { dispatchReason: QUEUE_REASON.afterUnstick });
+        }
         out = unstickReply({
           reason: unstuck.reason,
           released: unstuck.released,
