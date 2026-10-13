@@ -1,6 +1,7 @@
 # Start the Telemost browser from a phone or from @tg2tmbot.
 # The Run workflow button appears only after this file is on the repository default branch.
 # Secrets used here: TELEMOST_SESSION_KEY, TG2TMBOT_TOKEN. GITHUB_TOKEN is automatic.
+# PROXY_HOST is optional. Leave it unset to reach Telemost directly.
 name: Telemost session
 
 on:
@@ -115,18 +116,18 @@ jobs:
           CHAT_ID: ${{ steps.in.outputs.chat_id }}
           TELEMOST_SESSION_KEY: ${{ secrets.TELEMOST_SESSION_KEY }}
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          PROXY_HOST: ${{ secrets.PROXY_HOST }}
         run: |
           mkdir -p sessions logs
           chmod a+rwx logs
-          if [ "$MODE" = "finalize" ]; then
-            ENABLE_TUNNEL=0
-          else
-            ENABLE_TUNNEL=1
-          fi
+          # Main turns the noVNC tunnel on for upload. This pack reached Telemost
+          # without it. Keep that off. A browser proxy is used only when PROXY_HOST
+          # is set. PROXY_LOGIN and PROXY_PASSWORD are not required.
+          ENABLE_TUNNEL=0
           export ENABLE_TUNNEL
           docker run --rm --shm-size=1g \
             --user "$(id -u):$(id -g)" \
-            -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL \
+            -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
             -e GITHUB_ACTIONS \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
@@ -152,5 +153,14 @@ jobs:
         with:
           name: pack-07-record
           path: packs/07-set-redzh-i-letti/pack.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Record pack 08
+        if: always() && steps.in.outputs.packs == '08'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-08-record
+          path: packs/08-maf-izis-i-agnes/pack.json
           if-no-files-found: warn
           retention-days: 90

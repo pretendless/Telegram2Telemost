@@ -65,23 +65,32 @@ PROFILE="$PROFILE_DIR/$ACCOUNT"
 rm -rf "$PROFILE"
 mkdir -p "$PROFILE"
 
-"$CHROME" \
-  --no-sandbox \
-  --disable-setuid-sandbox \
-  --disable-dev-shm-usage \
-  --disable-gpu \
-  --window-size=1280,800 \
-  --window-position=0,0 \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-debugging-port=9222 \
-  --user-data-dir="$PROFILE" \
-  --lang=ru-RU \
-  --accept-lang=ru-RU,ru \
-  --no-first-run \
-  --no-default-browser-check \
-  --disable-blink-features=AutomationControlled \
-  --remote-allow-origins=* \
-  about:blank >/tmp/tg2tm-chrome.log 2>&1 &
+chrome_args=(
+  --no-sandbox
+  --disable-setuid-sandbox
+  --disable-dev-shm-usage
+  --disable-gpu
+  --window-size=1280,800
+  --window-position=0,0
+  --remote-debugging-address=127.0.0.1
+  --remote-debugging-port=9222
+  --user-data-dir="$PROFILE"
+  --lang=ru-RU
+  --accept-lang=ru-RU,ru
+  --no-first-run
+  --no-default-browser-check
+  --disable-blink-features=AutomationControlled
+  --remote-allow-origins=*
+)
+proxy_flag="$(node vm/proxy.mjs)"
+if [ -n "$proxy_flag" ]; then
+  echo "::add-mask::${PROXY_HOST}"
+  echo "proxy on"
+  chrome_args+=("$proxy_flag")
+else
+  echo "proxy off"
+fi
+"$CHROME" "${chrome_args[@]}" about:blank >/tmp/tg2tm-chrome.log 2>&1 &
 pids+=("$!")
 
 ready=0
@@ -176,7 +185,11 @@ elif [ "$MODE" = "finalize" ]; then
 else
   node vm/login.mjs restore || status=$?
   if [ "$status" -eq 0 ]; then
-    node scripts/telemost_upload.mjs "${pack_args[@]}" || status=$?
+    if [ "$PACKS" = "08" ]; then
+      node scripts/telemost_upload.mjs --close "${pack_args[@]}" || status=$?
+    else
+      node scripts/telemost_upload.mjs "${pack_args[@]}" || status=$?
+    fi
     node vm/login.mjs save || true
   fi
 fi
