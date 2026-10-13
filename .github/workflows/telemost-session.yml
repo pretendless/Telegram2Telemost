@@ -205,23 +205,11 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Record pack file
-        if: always() && steps.in.outputs.mode == 'finalize'
-        uses: actions/upload-artifact@v4
+      - name: Record the chosen pack
+        if: always() && steps.in.outputs.mode != 'login'
+        uses: ./.github/actions/record-chosen-pack
         with:
-          name: pack-07-record
-          path: packs/07-set-redzh-i-letti/pack.json
-          if-no-files-found: warn
-          retention-days: 90
-
-      - name: Record pack 08
-        if: always() && steps.in.outputs.packs == '08'
-        uses: actions/upload-artifact@v4
-        with:
-          name: pack-08-record
-          path: packs/08-maf-izis-i-agnes/pack.json
-          if-no-files-found: warn
-          retention-days: 90
+          packs: ${{ steps.in.outputs.packs }}
 
       - name: Tell admin the run failed
         if: failure()
