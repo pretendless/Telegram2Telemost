@@ -227,6 +227,7 @@ jobs:
         if: failure()
         env:
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          MODE: ${{ steps.in.outputs.mode }}
           PACKS: ${{ steps.in.outputs.packs }}
           TELEGRAM_CHAT_ID: ${{ steps.in.outputs.chat_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

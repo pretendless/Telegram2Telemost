@@ -4,6 +4,7 @@
 // message is deleted and one replacement is sent. A failed run writes the
 // error and the run URL into that same message.
 import { readFileSync } from 'fs';
+import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 export const ADMIN_CHAT_ID = '8502935020';
@@ -250,11 +251,35 @@ function readState(path) {
   }
 }
 
+function readPackTitle(path) {
+  try {
+    const data = JSON.parse(readFileSync(path, 'utf8'));
+    return oneLine(data && data.title);
+  } catch {
+    return '';
+  }
+}
+
+// A restart has no pack number. Use the title the run already found, or
+// «перезапуск» so the failure card does not say «пак».
+export function failurePackName({ pack = '', packs = '', mode = '', title = '' } = {}) {
+  const named = oneLine(pack) || oneLine(title);
+  if (named) return named;
+  if (mode === 'restart' || mode === 'restart-peek') return 'перезапуск';
+  return oneLine(packs);
+}
+
+function titleFromRestartLogs(dir) {
+  return readPackTitle(join(dir, 'restart-pack.json')) || readPackTitle(join(dir, 'restart-choice.json'));
+}
+
 export async function reportRunFailed({
   fetchImpl = globalThis.fetch,
   token = process.env.TG2TMBOT_TOKEN || '',
   statePath = process.env.ADMIN_STATE_PATH || 'logs/admin-last.json',
   packs = process.env.PACKS || '',
+  mode = process.env.MODE || '',
+  logsDir = process.env.RESTART_LOG_DIR || 'logs',
   requester = process.env.TELEGRAM_CHAT_ID || '',
   runUrl = process.env.RUN_URL || '',
 } = {}) {
@@ -276,7 +301,7 @@ export async function reportRunFailed({
   try {
     await deliverAdminStatus(io, ADMIN_CHAT_ID, prev, {
       phase: 'failed',
-      pack: event.pack || packs,
+      pack: failurePackName({ pack: event.pack, packs, mode, title: titleFromRestartLogs(logsDir) }),
       index: event.index,
       total: event.total,
       lastLine: event.lastLine || '',
