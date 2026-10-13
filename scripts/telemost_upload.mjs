@@ -528,6 +528,8 @@ export function unfinishedPack(text) {
   return false;
 }
 
+const CREATED_TITLE = /Создан набор(?: стикеров)?\s*[\u00AB"\u201C\u201E']([^»"\u201D']+)[\u00BB"\u201D']/;
+
 // The last created title that has not been saved. Any pack, not one fixed name.
 export function openPackTitle(messages) {
   let title = '';
@@ -535,14 +537,36 @@ export function openPackTitle(messages) {
   for (const message of messages || []) {
     if (!message || message.own) continue;
     const text = String(message.text || '');
-    const created = text.match(/Создан набор(?: стикеров)? «([^»]+)»/);
+    const created = text.match(CREATED_TITLE);
     if (created) {
-      title = created[1];
+      title = created[1].trim();
       open = true;
     }
-    if (title && text.includes('«' + title + '»') && SAVED.test(text)) open = false;
+    if (title && text.includes(title) && SAVED.test(text)) open = false;
   }
   return open ? title : '';
+}
+
+export function screenLine(text) {
+  const lines = String(text || '').split('\n').map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return lines.length ? lines[lines.length - 1] : '';
+}
+
+// Folder and request titles match without case, quotes, or emoji.
+export function packTitleKey(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/[\u200d\uFE0F\u200b]/g, '')
+    .replace(/[\u00AB\u00BB"'\u201C\u201D\u201E\u2018\u2019\u2039\u203A`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function samePackTitle(left, right) {
+  const key = packTitleKey(left);
+  return Boolean(key) && key === packTitleKey(right);
 }
 
 export function stickerSetName(link) {
@@ -560,24 +584,31 @@ function byRequestTime(left, right) {
 
 // An open dialog restarts that pack from its first image. An idle dialog
 // takes the stored request that is already uploading, or the next queued one.
-export function restartTarget({ unfinished, title, catalogs, requests } = {}) {
+export function restartTarget({ unfinished, title, liveText, catalogs, requests } = {}) {
   const stored = requests || [];
   if (unfinished) {
-    const catalog = (catalogs || []).find((pack) => pack && pack.title === title);
-    const named = stored.find((item) => item && item.title === title);
-    if (catalog) {
+    const catalogsHit = (catalogs || []).filter((pack) => pack && samePackTitle(pack.title, title));
+    const requestsHit = stored.filter((item) => item && samePackTitle(item.title, title));
+    if (catalogsHit.length === 1) {
+      const named = requestsHit.length === 1 ? requestsHit[0] : null;
       return {
         action: 'restart',
-        title: catalog.title,
-        dir: catalog.dir || '',
-        requestId: named ? named.id : '',
+        title: catalogsHit[0].title,
+        dir: catalogsHit[0].dir || '',
+        requestId: named ? named.id || '' : '',
         links: named && named.links ? named.links : [],
       };
     }
-    if (named) return { action: 'restart', title: named.title, dir: '', requestId: named.id || '', links: named.links || [] };
-    const active = stored.find((item) => item && item.status === 'uploading');
-    if (!title && active) return { action: 'restart', title: active.title, dir: '', requestId: active.id || '', links: active.links || [] };
-    return { action: 'missing', title: title || '' };
+    if (catalogsHit.length === 0 && requestsHit.length === 1) {
+      const named = requestsHit[0];
+      return { action: 'restart', title: named.title, dir: '', requestId: named.id || '', links: named.links || [] };
+    }
+    const active = stored.filter((item) => item && item.status === 'uploading');
+    if (!packTitleKey(title) && catalogsHit.length === 0 && requestsHit.length === 0 && active.length === 1) {
+      return { action: 'restart', title: active[0].title, dir: '', requestId: active[0].id || '', links: active[0].links || [] };
+    }
+    const matches = [...catalogsHit.map((pack) => pack.title), ...requestsHit.map((item) => item.title)];
+    return { action: 'seen', title: title || '', liveText: liveText || '', matches };
   }
   const active = stored.find((item) => item && item.status === 'uploading');
   if (active) return { action: 'upload', title: active.title, dir: '', requestId: active.id || '', links: active.links || [] };
@@ -992,14 +1023,24 @@ async function finalizePack(bot, dir, note = async () => {}, dirRef = null) {
 async function peekRestart(bot) {
   const history = await bot.surveyChat();
   const live = await bot.recentIncoming(4);
+  const liveText = String(live.text || '').replace(/[ \t]+/g, ' ').trim().slice(0, 500);
+  const liveMessages = liveText.split('\n').map((text) => ({ own: false, text }));
   const choice = {
     unfinished: unfinishedPack(live.text),
-    title: openPackTitle(history.messages),
-    liveText: String(live.text || '').replace(/\s+/g, ' ').trim().slice(0, 500),
+    title: openPackTitle(history.messages) || openPackTitle(liveMessages),
+    liveText,
+    lastLine: screenLine(liveText),
   };
   mkdirSync(join(ROOT, 'logs'), { recursive: true });
   writeFileSync(join(ROOT, 'logs', 'restart-choice.json'), JSON.stringify(choice));
-  console.log('restart-choice', choice.unfinished ? 'open' : 'idle', choice.title);
+  console.log('restart-seen', JSON.stringify({ title: choice.title, lastLine: choice.lastLine, liveText: choice.liveText }));
+}
+
+function seenPackError(selected, title, line) {
+  const shown = title || line || 'без названия';
+  const many = (selected.matches || []).map((name) => String(name || '').trim()).filter(Boolean);
+  if (many.length > 1) return `на экране «${shown}». несколько папок: ${many.join(', ')}`;
+  return `на экране «${shown}»`;
 }
 
 async function restartRun(bot, note, dirRef) {
@@ -1009,19 +1050,32 @@ async function restartRun(bot, note, dirRef) {
     await note({ phase: 'error', pack: 'очередь', error: 'нет запроса в очереди' });
     return;
   }
-  if (selected.action === 'missing' || !selected.dir) throw new Error('restart pack was not prepared');
-  const pack = loadPack(selected.dir);
-  if (dirRef) dirRef.title = pack.meta.title;
+  const seenTitle = selected.title || choice.title || '';
+  if (dirRef) dirRef.title = seenTitle;
   const live = await bot.recentIncoming(2);
-  if (choice.unfinished || unfinishedPack(live.text)) {
-    await note({ phase: 'done', pack: pack.meta.title, total: pack.meta.images.length, lastLine: live.text });
+  const open = choice.unfinished || unfinishedPack(live.text);
+  if (open) {
+    await note({ phase: 'done', pack: seenTitle || 'перезапуск', lastLine: screenLine(live.text) || choice.lastLine || '' });
     const closed = await withRetry('restart-done', () => bot.say('/done'));
     const closedText = String(closed.text || '');
-    console.log(selected.dir, 'restart-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
+    console.log('restart-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
     if (restartAfterClose(closedText).action === 'stop') {
       throw new Error(`refusing /newpack while a pack is still open: ${closedText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
     }
   }
+  if (selected.action === 'seen' || !selected.dir) {
+    const line = choice.lastLine || screenLine(choice.liveText || live.text);
+    console.log('restart-seen', JSON.stringify({ title: seenTitle, lastLine: line, matches: selected.matches || [] }));
+    await note({
+      phase: 'error',
+      pack: seenTitle || line || 'перезапуск',
+      lastLine: line,
+      error: seenPackError(selected, seenTitle, line),
+    });
+    return;
+  }
+  const pack = loadPack(selected.dir);
+  if (dirRef) dirRef.title = pack.meta.title;
   await uploadPack(bot, selected.dir, { close: true, restart: true, note, dirRef });
 }
 
