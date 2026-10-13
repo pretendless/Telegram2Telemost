@@ -77,6 +77,8 @@ export function formatAdminStatus(event, now = new Date()) {
   if (link) lines.push(link);
   const runUrl = oneLine(event.runUrl);
   if (runUrl) lines.push(runUrl);
+  const next = oneLine(event.next);
+  if (next) lines.push('дальше: ' + next);
   const requester = String(event.requester || '');
   if (requester && requester !== ADMIN_CHAT_ID) lines.push('запрос: ' + requester);
   return lines.join('\n');
@@ -94,6 +96,7 @@ function cardKey(event) {
     oneLine(event.error),
     oneLine(event.link),
     oneLine(event.runUrl),
+    oneLine(event.next),
     oneLine(event.step),
     String(event.requester || ''),
   ].join('\0');
@@ -279,6 +282,72 @@ function titleFromRestartLogs(dir) {
   return readPackTitle(join(dir, 'restart-pack.json')) || readPackTitle(join(dir, 'restart-choice.json'));
 }
 
+function readRestartPack(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, 'restart-pack.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+// Prepare stopped without an upload (usually action=idle). Say why, and what
+// to do next, so /restart is never a silent green Actions run.
+export function restartNoUploadCopy({ reason = '', lastLine = '', title = '' } = {}) {
+  const pack = failurePackName({ mode: 'restart', title });
+  if (reason === 'no-uploader-secret' || reason === 'no-progress-url') {
+    return {
+      pack,
+      lastLine,
+      error: 'очередь недоступна: нет UPLOADER_SECRET или TG2TM_PROGRESS_URL',
+      next: 'проверьте секреты Actions и повторите /restart',
+    };
+  }
+  return {
+    pack,
+    lastLine,
+    error: 'нечего загружать: диалог свободен, очередь пуста',
+    next: 'пришлите пак боту, затем /restart',
+  };
+}
+
+export async function reportRestartNoUpload({
+  fetchImpl = globalThis.fetch,
+  token = process.env.TG2TMBOT_TOKEN || '',
+  statePath = process.env.ADMIN_STATE_PATH || 'logs/admin-last.json',
+  logsDir = process.env.RESTART_LOG_DIR || 'logs',
+  requester = process.env.TELEGRAM_CHAT_ID || '',
+  runUrl = process.env.RUN_URL || '',
+  reason = process.env.RESTART_REASON || '',
+} = {}) {
+  if (!token) {
+    console.log('admin status skipped');
+    return;
+  }
+  const packMeta = readRestartPack(logsDir);
+  const copy = restartNoUploadCopy({
+    reason: reason || packMeta.reason || 'empty-queue',
+    lastLine: packMeta.lastLine || '',
+    title: packMeta.title || titleFromRestartLogs(logsDir),
+  });
+  const io = telegramIo(fetchImpl, token);
+  const stored = readState(statePath);
+  const prev = stored && stored.messageId ? { messageId: stored.messageId, event: stored.event } : null;
+  try {
+    await deliverAdminStatus(io, ADMIN_CHAT_ID, prev, {
+      phase: 'error',
+      pack: copy.pack,
+      lastLine: copy.lastLine,
+      error: copy.error,
+      next: copy.next,
+      runUrl,
+      requester,
+      at: formatClock(),
+    });
+  } catch {
+    console.log('admin status skipped');
+  }
+}
+
 export async function reportRunFailed({
   fetchImpl = globalThis.fetch,
   token = process.env.TG2TMBOT_TOKEN || '',
@@ -324,4 +393,5 @@ export async function reportRunFailed({
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (process.argv.includes('--run-failed')) await reportRunFailed();
+  if (process.argv.includes('--restart-no-upload')) await reportRestartNoUpload();
 }
