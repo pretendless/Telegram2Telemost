@@ -110,14 +110,10 @@ jobs:
 
       - name: Build browser image
         if: steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: vm/Dockerfile
-          tags: tg2tm-browser
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        timeout-minutes: 8
+        env:
+          BUILD_STALL_MS: "240000"
+        run: node scripts/build_browser_image.mjs
 
       - name: Read the open dialog
         if: steps.in.outputs.mode == 'restart' && steps.session.outputs.present == 'yes'
