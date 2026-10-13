@@ -3,7 +3,7 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { restartTarget, stickerSetName } from './telemost_upload.mjs';
+import { restartTarget, screenLine, stickerSetName } from './telemost_upload.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -59,20 +59,22 @@ function writeRequestPack(target) {
 }
 
 const choice = JSON.parse(readFileSync(join(ROOT, 'logs', 'restart-choice.json'), 'utf8'));
+const seen = {
+  title: choice.title || '',
+  lastLine: choice.lastLine || screenLine(choice.liveText),
+};
+console.log('restart-seen', JSON.stringify(seen));
 const target = restartTarget({
   unfinished: Boolean(choice.unfinished),
   title: choice.title || '',
+  liveText: choice.liveText || '',
   catalogs: catalogs(),
   requests: await storedRequests(),
 });
 mkdirSync(join(ROOT, 'logs'), { recursive: true });
-if (target.action === 'idle' || target.action === 'missing') {
-  writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify(target));
+if (target.action === 'idle' || target.action === 'seen') {
+  writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify({ ...target, ...seen, liveText: choice.liveText || '' }));
   if (process.argv.includes('--github-output')) process.stdout.write(`action=${target.action}\n`);
-  if (target.action === 'missing') {
-    console.error('open pack was not matched');
-    process.exit(1);
-  }
   process.exit(0);
 }
 const dir = target.dir || writeRequestPack(target);

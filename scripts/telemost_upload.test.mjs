@@ -30,8 +30,10 @@ import {
   resetForNewPack,
   wantsPicture,
   openPackTitle,
+  packTitleKey,
   restartTarget,
   restartAfterClose,
+  screenLine,
   stickerSetName,
 } from "./telemost_upload.mjs";
 
@@ -324,6 +326,32 @@ test("restart follows the open pack, or the next stored request", () => {
   });
   assert.equal(next.title, "Восток");
   assert.equal(restartTarget({ unfinished: false, title: "", catalogs, requests: [] }).action, "idle");
+  const loose = restartTarget({ unfinished: true, title: "«юг» 🎉", catalogs, requests });
+  assert.equal(loose.dir, "02-yug");
+  assert.equal(packTitleKey("«Юг» 🎉"), "юг");
+  const quoted = [
+    { own: false, text: 'Создан набор стикеров "Юг". Отправьте картинку.', links: [] },
+  ];
+  assert.equal(openPackTitle(quoted), "Юг");
+  assert.equal(screenLine("Стикеры\nОтправьте эмодзи для стикера."), "Отправьте эмодзи для стикера.");
+  const unmatched = restartTarget({
+    unfinished: true,
+    title: "Нет такого",
+    liveText: "Отправьте эмодзи для стикера.",
+    catalogs,
+    requests,
+  });
+  assert.equal(unmatched.action, "seen");
+  assert.equal(unmatched.title, "Нет такого");
+  assert.deepEqual(unmatched.matches, []);
+  const several = restartTarget({
+    unfinished: true,
+    title: "Юг",
+    catalogs: [...catalogs, { title: "юг", dir: "03-yug-2" }],
+    requests: [],
+  });
+  assert.equal(several.action, "seen");
+  assert.deepEqual(several.matches, ["Юг", "юг"]);
   assert.equal(restartAfterClose("Отправьте эмодзи для стикера.").action, "stop");
   assert.equal(restartAfterClose("Набор «Юг» сохранён.").action, "newpack");
   assert.equal(restartAfterClose("Набор «Юг» сохранён.").uploaded, 0);
