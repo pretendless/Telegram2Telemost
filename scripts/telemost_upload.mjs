@@ -295,7 +295,7 @@ async function withRetry(label, fn, tries = 4) {
   throw err;
 }
 
-async function uploadPack(bot, dir) {
+async function uploadPack(bot, dir, { close = false } = {}) {
   const p = loadPack(dir);
   const m = p.meta;
   const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
@@ -334,6 +334,7 @@ async function uploadPack(bot, dir) {
     log(m.title, '', 'набор создан', 'без /start и без /done');
   }
 
+  let lastText = '';
   for (let i = tm.uploaded; i < m.images.length; i++) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
@@ -342,12 +343,13 @@ async function uploadPack(bot, dir) {
     for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
       try {
         const r = await bot.sendImage(file);
-        if (READY.test(r.text)) { ok = true; break; }
+        if (READY.test(r.text)) { ok = true; lastText = r.text; break; }
         if (!ASK_EMOJI.test(r.text)) throw new Error(`image rejected: ${r.text.slice(0, 200)}`);
         let e = await bot.say(img.emoji || '🙂');
         if (!READY.test(e.text) && ASK_EMOJI.test(e.text)) e = await bot.say('🙂');
         if (!READY.test(e.text)) throw new Error(`emoji: ${e.text.slice(0, 200)}`);
         ok = true;
+        lastText = e.text;
         if (r.seconds + e.seconds > 60) log(m.title, img.file, 'медленно', `${(r.seconds + e.seconds).toFixed(0)} с`);
       } catch (err) {
         log(m.title, img.file, `ошибка, попытка ${attempt}`, err.message);
@@ -370,7 +372,46 @@ async function uploadPack(bot, dir) {
   tm.status = 'uploading';
   tm.error = null;
   savePack(p);
-  log(m.title, '', `отправлены ${m.images.length} стикеров`, 'без /done');
+  if (!close) {
+    log(m.title, '', `отправлены ${m.images.length} стикеров`, 'без /done');
+    return;
+  }
+  let readyText = lastText;
+  if (finalizeDecision(readyText).action !== 'done') {
+    const seen = await bot.recentIncoming(1);
+    readyText = seen.text;
+    const shown = String(readyText || '').replace(/\s+/g, ' ').trim();
+    console.log(dir, 'last-reply', shown.slice(0, 400));
+  }
+  if (finalizeDecision(readyText).action !== 'done') {
+    throw new Error(`not ready to save: ${String(readyText || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+  }
+  const saved = await publishSavedPack(bot, p, dir);
+  if (!saved) throw new Error('done did not save the pack');
+}
+
+async function publishSavedPack(bot, p, dir) {
+  const m = p.meta;
+  const tm = m.telemost;
+  const done = await bot.say('/done');
+  const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
+  console.log(dir, 'done-reply', doneText.slice(0, 400));
+  const url = extractPackUrl(done.text, done.links);
+  if (!SAVED.test(done.text) || !url) {
+    console.log(dir, 'draft-gone', 'done did not save the pack');
+    return false;
+  }
+  tm.status = 'done';
+  tm.packUrl = url;
+  tm.error = null;
+  tm.uploaded = m.images.length;
+  tm.pendingFile = null;
+  tm.botReply = doneText.slice(0, 300);
+  savePack(p);
+  console.log(dir, 'pack-url', url);
+  await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, url);
+  console.log(dir, 'channel-posted', '@tg2tm');
+  return true;
 }
 
 async function finalizePack(bot, dir) {
@@ -389,40 +430,31 @@ async function finalizePack(bot, dir) {
     console.log(dir, 'draft-gone', decision.reason);
     return;
   }
-  const done = await bot.say('/done');
-  const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
-  console.log(dir, 'done-reply', doneText.slice(0, 400));
-  const url = extractPackUrl(done.text, done.links);
-  if (!SAVED.test(done.text) || !url) {
-    console.log(dir, 'draft-gone', 'done did not save the pack');
-    return;
-  }
-  tm.status = 'done';
-  tm.packUrl = url;
-  tm.error = null;
-  tm.uploaded = m.images.length;
-  tm.pendingFile = null;
-  tm.botReply = doneText.slice(0, 300);
-  savePack(p);
-  console.log(dir, 'pack-url', url);
-  await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, url);
-  console.log(dir, 'channel-posted', '@tg2tm');
+  const saved = await publishSavedPack(bot, p, dir);
+  if (!saved) return;
+}
+
+export function dirsForRun(dirs, { finalize = false, close = false } = {}) {
+  const list = [...dirs];
+  if (finalize) return list.filter((dir) => dir.startsWith('07'));
+  if (close) return list.filter((dir) => dir.startsWith('08'));
+  return list;
 }
 
 async function main() {
   const finalize = process.argv.includes('--finalize');
-  const wanted = process.argv.slice(2).filter((arg) => arg !== '--finalize');
+  const close = process.argv.includes('--close');
+  const wanted = process.argv.slice(2).filter((arg) => arg !== '--finalize' && arg !== '--close');
   let dirs = readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort().filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
-  if (finalize) {
-    if (dirs.some((dir) => !dir.startsWith('07'))) console.log('skip pack 08');
-    dirs = dirs.filter((dir) => dir.startsWith('07'));
-  }
+  const skipped = dirs.filter((dir) => !dirsForRun([dir], { finalize, close }).length);
+  if (skipped.length) console.log('skip', skipped.join(' '));
+  dirs = dirsForRun(dirs, { finalize, close });
   const c = await connect();
   const bot = new Bot(c);
   for (const d of dirs) {
     try {
       if (finalize) await finalizePack(bot, d);
-      else await uploadPack(bot, d);
+      else await uploadPack(bot, d, { close });
     } catch (e) {
       log(d, '', 'остановлено', e.message);
       process.exitCode = 1;

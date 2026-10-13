@@ -4,6 +4,7 @@ import {
   abandonReplyOk,
   afterNewpack,
   draftNeedsAbandon,
+  dirsForRun,
   extractPackUrl,
   finalizeDecision,
   leaveUnpublishedDraft,
@@ -63,6 +64,12 @@ test("a stopped draft is opened with /newpack, not resumed and not /start", () =
   assert.equal(wantsPicture("Отправьте эмодзи для стикера."), false);
   assert.equal(packDialogOpen("Это не эмодзи :)"), true);
   assert.equal(afterNewpack("Это не эмодзи :)"), "open");
+});
+
+test("pack 08 is the only pack closed after upload", () => {
+  const dirs = ["07-set-redzh-i-letti", "08-maf-izis-i-agnes", "09-later"];
+  assert.deepEqual(dirsForRun(dirs, { close: true }), ["08-maf-izis-i-agnes"]);
+  assert.deepEqual(dirsForRun(dirs, { finalize: true }), ["07-set-redzh-i-letti"]);
 });
 
 test("finalize sends /done only after a sticker is ready and the pack is still open", () => {

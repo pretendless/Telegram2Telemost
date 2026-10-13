@@ -176,7 +176,11 @@ elif [ "$MODE" = "finalize" ]; then
 else
   node vm/login.mjs restore || status=$?
   if [ "$status" -eq 0 ]; then
-    node scripts/telemost_upload.mjs "${pack_args[@]}" || status=$?
+    if [ "$PACKS" = "08" ]; then
+      node scripts/telemost_upload.mjs --close "${pack_args[@]}" || status=$?
+    else
+      node scripts/telemost_upload.mjs "${pack_args[@]}" || status=$?
+    fi
     node vm/login.mjs save || true
   fi
 fi
