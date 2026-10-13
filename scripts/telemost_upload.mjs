@@ -13,6 +13,7 @@ const LOG = join(ROOT, 'logs', 'transfer-log.md');
 const BOT_URL = process.env.TELEMOST_BOT_URL || 'https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d';
 const DEVTOOLS = process.env.DEVTOOLS || 'http://127.0.0.1:9222';
 const REPLY_TIMEOUT_S = Number(process.env.REPLY_TIMEOUT_S || 600);
+const POLL_MS = 100;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -88,19 +89,45 @@ class Bot {
     return this.c.ev(`document.querySelectorAll('article.message').forEach(a => a.dataset.tg2tmSeen = '1')`);
   }
 
-  // Wait for a new incoming (bot) message that appeared after markSeen().
+  readFresh() {
+    return this.c.ev(`(() => {
+      const fresh = [...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen && a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
+      return {
+        text: fresh.length ? fresh.map(a => (a.innerText || '').trim()).join('\\n') : '',
+        links: fresh.flatMap(a => [...a.querySelectorAll('a[href]')].map(x => x.href)),
+      };
+    })()`);
+  }
+
+  // Poll the new bot messages. The first look happens immediately.
   async waitReply() {
     const t0 = Date.now();
     while ((Date.now() - t0) / 1000 < REPLY_TIMEOUT_S) {
-      await sleep(1000);
-      const txt = await this.c.ev(`(() => {
-        const fresh = [...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen && a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
-        return fresh.length ? fresh.map(a => (a.innerText || '').trim()).join('\\n') : null;
-      })()`);
-      if (txt) {
-        const links = await this.c.ev(`[...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen).flatMap(a => [...a.querySelectorAll('a[href]')].map(x => x.href))`);
-        return { text: txt, links, seconds: (Date.now() - t0) / 1000 };
+      const snap = await this.readFresh();
+      if (snap && snap.text) return { text: snap.text, links: snap.links || [], seconds: (Date.now() - t0) / 1000 };
+      await sleep(POLL_MS);
+    }
+    throw new Error(`no bot reply in ${REPLY_TIMEOUT_S}s`);
+  }
+
+  // Keep polling until the bot has accepted the sticker or asked for an emoji.
+  // A half-drawn bubble is not a rejection, and a spinner is not a 90s timeout.
+  async waitImageReply() {
+    const t0 = Date.now();
+    let stable = '';
+    let stableAt = 0;
+    while ((Date.now() - t0) / 1000 < REPLY_TIMEOUT_S) {
+      const snap = await this.readFresh();
+      const text = snap && snap.text ? snap.text : '';
+      const kind = settledImageReply(text, text && text === stable ? Date.now() - stableAt : 0);
+      if (kind !== 'pending') {
+        return { text, links: (snap && snap.links) || [], seconds: (Date.now() - t0) / 1000, kind };
       }
+      if (text !== stable) {
+        stable = text;
+        stableAt = Date.now();
+      }
+      await sleep(POLL_MS);
     }
     throw new Error(`no bot reply in ${REPLY_TIMEOUT_S}s`);
   }
@@ -108,7 +135,6 @@ class Bot {
   async recentIncoming(limit = 4) {
     await this.ensureChat();
     await this.c.ev(`(() => { const s = document.querySelector('.ui-InfiniteList-ScrollContainer'); if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight; })()`);
-    await sleep(700);
     const text = await this.c.ev(`(() => {
       const rows = [...document.querySelectorAll('article.message')].filter(a => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
       return rows.slice(-${Number(limit) || 4}).map(a => (a.innerText || '').trim()).filter(Boolean).join('\\n');
@@ -127,7 +153,7 @@ class Bot {
       : `[...document.querySelectorAll('[aria-label="Отправить сообщение"]')].filter(e => e.getBoundingClientRect().width > 0).pop()`;
     for (let i = 0; i < 40; i++) {
       if (await this.c.ev(pressJs(sel))) return;
-      await sleep(250);
+      await sleep(POLL_MS);
     }
     throw new Error('send button not found');
   }
@@ -137,26 +163,32 @@ class Bot {
     await this.markSeen();
     await this.c.ev(`(() => { const e = document.querySelector('[contenteditable=true]'); e.focus(); })()`);
     await this.c.send('Input.insertText', { text });
-    await sleep(250);
     await this.clickSend(false);
     return this.waitReply();
+  }
+
+  async fileInput() {
+    const doc = await this.c.send('DOM.getDocument', { depth: 2 });
+    const one = await this.c.send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: 'input[type=file]' });
+    if (one.nodeId) return one.nodeId;
+    const deep = await this.c.send('DOM.getDocument', { depth: -1, pierce: true });
+    const q = await this.c.send('DOM.querySelectorAll', { nodeId: deep.root.nodeId, selector: 'input[type=file]' });
+    if (!q.nodeIds.length) throw new Error('file input not found');
+    return q.nodeIds[0];
   }
 
   async sendImage(path) {
     await this.ensureChat();
     await this.markSeen();
-    const doc = await this.c.send('DOM.getDocument', { depth: -1, pierce: true });
-    const q = await this.c.send('DOM.querySelectorAll', { nodeId: doc.root.nodeId, selector: 'input[type=file]' });
-    if (!q.nodeIds.length) throw new Error('file input not found');
-    await this.c.send('DOM.setFileInputFiles', { nodeId: q.nodeIds[0], files: [path] });
-    for (let i = 0; i < 40; i++) {
-      await sleep(250);
+    const nodeId = await this.fileInput();
+    await this.c.send('DOM.setFileInputFiles', { nodeId, files: [path] });
+    for (let i = 0; i < 80; i++) {
       const open = await this.c.ev(`[...document.querySelectorAll('[aria-label="Отправить сообщение"]')].filter(e => e.getBoundingClientRect().width > 0).length > 1`);
       if (open) break;
+      await sleep(POLL_MS);
     }
-    await sleep(400);
     await this.clickSend(true);
-    return this.waitReply();
+    return this.waitImageReply();
   }
 }
 
@@ -168,6 +200,25 @@ const CREATED = /Создан набор/;
 const PUBLISHED = /сохранён|\/stickers\//;
 const COMMAND_MENU = /\/newpack/;
 const ASK_PICTURE = /картинк|изображен|фото|Отправьте стикер|Пришлите стикер|отправьте файл/i;
+const IMAGE_FAIL = /Не удалось обработать|не подходит|слишком больш|отклон/i;
+
+// «Стикер готов» means the next image can go now. An emoji is sent only when
+// the bot asked for one. A short or still-growing bubble stays pending.
+export function imageReply(text) {
+  const body = String(text || '');
+  if (!body.trim()) return 'pending';
+  if (READY.test(body)) return 'ready';
+  if (ASK_EMOJI.test(body) || NOT_EMOJI.test(body)) return 'emoji';
+  if (IMAGE_FAIL.test(body)) return 'reject';
+  return 'pending';
+}
+
+export function settledImageReply(text, sameForMs) {
+  const kind = imageReply(text);
+  if (kind !== 'pending') return kind;
+  if (String(text || '').trim() && sameForMs >= 400) return 'reject';
+  return 'pending';
+}
 
 // A dialog already waiting for an emoji or rejecting text must not receive /start or /done.
 export function packDialogOpen(text) {
@@ -343,17 +394,17 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
       try {
         const r = await bot.sendImage(file);
-        if (READY.test(r.text)) { ok = true; lastText = r.text; break; }
-        if (!ASK_EMOJI.test(r.text)) throw new Error(`image rejected: ${r.text.slice(0, 200)}`);
+        if (r.kind === 'ready') { ok = true; lastText = r.text; break; }
+        if (r.kind !== 'emoji') throw new Error(`image rejected: ${String(r.text || '').slice(0, 200)}`);
         let e = await bot.say(img.emoji || '🙂');
-        if (!READY.test(e.text) && ASK_EMOJI.test(e.text)) e = await bot.say('🙂');
-        if (!READY.test(e.text)) throw new Error(`emoji: ${e.text.slice(0, 200)}`);
+        if (imageReply(e.text) === 'emoji') e = await bot.say('🙂');
+        if (imageReply(e.text) !== 'ready') throw new Error(`emoji: ${String(e.text || '').slice(0, 200)}`);
         ok = true;
         lastText = e.text;
         if (r.seconds + e.seconds > 60) log(m.title, img.file, 'медленно', `${(r.seconds + e.seconds).toFixed(0)} с`);
       } catch (err) {
         log(m.title, img.file, `ошибка, попытка ${attempt}`, err.message);
-        await sleep(10000 * attempt);
+        await sleep(1000);
       }
     }
     if (!ok) {
