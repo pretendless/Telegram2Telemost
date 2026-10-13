@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   abandonReplyOk,
   afterNewpack,
+  afterAddsticker,
   draftNeedsAbandon,
   dirsForRun,
   extractPackUrl,
@@ -21,6 +22,9 @@ import {
   stickerReplyText,
   waitLastLine,
   IMAGE_ATTEMPTS,
+  STALL_MS,
+  stallDue,
+  needsAddSticker,
   imageReply,
   isEmojiRequest,
   resumeFromChat,
@@ -98,10 +102,11 @@ test("a stopped draft is opened with /newpack, not resumed and not /start", () =
   assert.equal(afterNewpack("Это не эмодзи :)"), "open");
 });
 
-test("pack 08 is the only pack closed after upload", () => {
+test("close and finalize keep every requested pack folder", () => {
   const dirs = ["07-set-redzh-i-letti", "08-maf-izis-i-agnes", "09-later"];
-  assert.deepEqual(dirsForRun(dirs, { close: true }), ["08-maf-izis-i-agnes"]);
-  assert.deepEqual(dirsForRun(dirs, { finalize: true }), ["07-set-redzh-i-letti"]);
+  assert.deepEqual(dirsForRun(dirs, { close: true }), dirs);
+  assert.deepEqual(dirsForRun(dirs, { finalize: true }), dirs);
+  assert.deepEqual(dirsForRun(dirs, {}), dirs);
 });
 
 test("the chat scroll script defines direction inside the page", () => {
@@ -150,8 +155,12 @@ test("a wait after send is not a failed attempt", () => {
   assert.equal(afterSendReply("emoji"), "emoji");
   assert.equal(afterSendReply("ready"), "next");
   assert.equal(afterSendReply("reject"), "retry");
+  assert.equal(afterSendReply("stall"), "recover");
   assert.equal(afterImageAttempts(4, false), "retry");
   assert.equal(IMAGE_ATTEMPTS, 5);
+  assert.equal(STALL_MS, 120000);
+  assert.equal(stallDue(120000, 0, 120000), true);
+  assert.equal(stallDue(119999, 0, 120000), false);
   assert.equal(waitStatusDue(20000, 0, 0), true);
   assert.equal(waitStatusDue(19999, 0, 0), false);
   assert.equal(waitStatusDue(30000, 0, 20000), false);
@@ -219,19 +228,50 @@ test("an open pack is continued, not restarted with /newpack", () => {
   assert.equal(title.length > 0, true);
 });
 
-test("an existing «Стикер готов» line sends the next image", () => {
+test("an existing «Стикер готов» line does not advance until a new bot reply", () => {
   const line = "Стикеры Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
   const baseline = [{ id: "9", text: `${line} 11:48` }];
   const same = [{ id: "9", text: `${line} 11:48` }];
   const ticked = [{ id: "9", text: `${line} 11:49` }];
-  assert.equal(stickerReplyText(baseline, same).kind, "ready");
-  assert.equal(stickerReplyText(baseline, ticked).kind, "ready");
-  assert.equal(stickerReplyText(baseline, ticked).text, ticked[0].text);
-  assert.equal(afterSendReply(stickerReplyText(baseline, ticked).kind), "next");
+  // Run 38421357861 raced here: same ready line → next image in ~300ms.
+  assert.equal(stickerReplyText(baseline, same).kind, "pending");
+  assert.equal(stickerReplyText(baseline, ticked).kind, "pending");
+  assert.equal(afterSendReply(stickerReplyText(baseline, ticked).kind), "wait");
   const asked = [{ id: "9", text: "Стикеры Отправьте эмодзи для стикера. 11:49" }];
   assert.equal(stickerReplyText(baseline, asked).kind, "emoji");
+  assert.equal(afterSendReply("emoji"), "emoji");
   const rejected = [{ id: "9", text: "Стикеры Не удалось обработать картинку. 11:49" }];
   assert.equal(stickerReplyText(baseline, rejected).kind, "reject");
+  const freshReady = [{ id: "10", text: `${line} 11:50` }];
+  assert.equal(stickerReplyText(baseline, freshReady).kind, "ready");
+  assert.equal(afterSendReply("ready"), "next");
+  const rewritten = [{ id: "9", text: `${line} 11:50` }];
+  // Same id with only a clock change stays pending; a real rewrite to ready
+  // after an emoji ask is changed text and advances.
+  assert.equal(stickerReplyText(asked, rewritten).kind, "ready");
+});
+
+test("addsticker continues a short saved pack from pack.json", () => {
+  assert.equal(afterAddsticker("Отправьте ссылку на набор"), "link");
+  assert.equal(afterAddsticker("Отправьте картинку для стикера."), "picture");
+  assert.equal(afterAddsticker("Отправьте эмодзи для стикера."), "open");
+  assert.equal(
+    needsAddSticker({
+      status: "incomplete",
+      uploaded: 52,
+      packUrl: "https://messenger.360.yandex.ru/#/stickers/8427",
+    }, 144),
+    true,
+  );
+  assert.equal(
+    needsAddSticker({
+      status: "done",
+      uploaded: 144,
+      packUrl: "https://messenger.360.yandex.ru/#/stickers/8427",
+    }, 144),
+    false,
+  );
+  assert.equal(needsAddSticker({ status: "pending", uploaded: 0, packUrl: null }, 144), false);
 });
 
 test("a clock tick is not a reply, and the last new line is", () => {

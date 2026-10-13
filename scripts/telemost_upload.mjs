@@ -109,16 +109,26 @@ class Bot {
 
   // A seen flag hides a bubble the bot rewrites in place. Compare text instead.
   // «Отправьте эмодзи» and the following «Стикер готов» are replies, not timeouts.
-  async waitForReply(baseline, { onWait, until, savedTimeoutMs = 20000 } = {}) {
+  // An unchanged «Стикер готов» from the previous sticker is not acceptance of
+  // the image just sent — wait for a real new bot line (or stall and recover).
+  async waitForReply(baseline, {
+    onWait,
+    until,
+    savedTimeoutMs = 20000,
+    stallMs = STALL_MS,
+  } = {}) {
     const started = Date.now();
     let lastSentAt = 0;
     let stable = '';
     let stableAt = 0;
     let savedSeenAt = 0;
+    let progressAt = started;
+    let progressKey = '';
     for (;;) {
       const rows = await this.botRows();
-      // A sticker wait treats an existing «Стикер готов» line as acceptance.
-      // A command wait does not: /newpack and a title need a new bot line.
+      const busy = until === 'sticker' ? await this.chatBusy() : false;
+      // A sticker wait needs a new bot line that advances or errors.
+      // A command wait does not reuse an old «Стикер готов».
       // /done waits for «сохранён» even when an older emoji ask is still in the
       // changed text, and keeps polling until the sticker <a> appears.
       let seen;
@@ -132,8 +142,23 @@ class Bot {
       const links = seen.links || [];
       const kind = seen.kind;
       const stickerReply = kind === 'ready' || kind === 'emoji' || kind === 'reject';
+      const key = `${kind}|${replyCore(text)}|${busy ? '1' : '0'}|${replyCore(lastBotLine(rows))}`;
+      if (key !== progressKey) {
+        progressKey = key;
+        progressAt = Date.now();
+      } else if (busy) {
+        progressAt = Date.now();
+      }
       if (until === 'sticker' && stickerReply) {
         return { text, links, seconds: (Date.now() - started) / 1000, kind };
+      }
+      if (until === 'sticker' && stallDue(Date.now(), progressAt, stallMs)) {
+        return {
+          text: text || lastBotLine(rows),
+          links,
+          seconds: (Date.now() - started) / 1000,
+          kind: 'stall',
+        };
       }
       if (until === 'saved') {
         if (SAVED.test(text)) {
@@ -170,6 +195,36 @@ class Bot {
       }
       await sleep(POLL_MS);
     }
+  }
+
+  // Spinner / busy chrome means the bot is still working — do not stall-recover yet.
+  chatBusy() {
+    return this.c.ev(`(() => {
+      if (document.querySelector('[aria-busy="true"]')) return true;
+      const nodes = document.querySelectorAll('[class], [role="progressbar"]');
+      for (const el of nodes) {
+        const cls = String(el.className || '');
+        if (/spinner|Spinner|loading|Loading|progress|Progress|skeleton|Skeleton/i.test(cls)) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) return true;
+        }
+        if (el.getAttribute('role') === 'progressbar') {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) return true;
+        }
+      }
+      return false;
+    })()`);
+  }
+
+  async recoverChat() {
+    await this.c.send('Page.reload', { ignoreCache: false });
+    for (let i = 0; i < 80; i++) {
+      if (await this.c.ev(`!!document.querySelector('[contenteditable=true]')`)) break;
+      await sleep(500);
+    }
+    await this.ensureChat();
+    await this.scrollToBottom();
   }
 
   async recentIncoming(limit = 4) {
@@ -421,28 +476,32 @@ export function sameBotLine(left, right) {
   return replyCore(left) === replyCore(right);
 }
 
-// «Стикер готов» already means this sticker is in the pack, so the next
-// image is sent. A clock tick on that bubble is the same acceptance, not a
-// new wait. The same clock can still be replaced by an emoji ask or a
-// rejection. A picture-request clock tick is not a reply.
+// Only a *new* bot line after the send advances the sticker step.
+// An unchanged «Стикер готов» (or its clock tick) from the previous sticker
+// is silence: the image just sent still needs a reply. When that line is
+// replaced by an emoji ask, rejection, or a fresh «Стикер готов», advance.
 export function stickerReplyText(baseline, rows) {
   const changed = changedBotText(baseline, rows);
   const changedKind = imageReply(changed);
-  if (changedKind === 'emoji' || changedKind === 'reject') {
+  if (changedKind === 'emoji' || changedKind === 'reject' || changedKind === 'ready') {
     return { text: changed, kind: changedKind };
   }
-  if (changedKind === 'ready') return { text: changed, kind: 'ready' };
   const last = lastBotLine(rows);
   const prev = lastBotLine(baseline);
-  // The line is already «Стикер готов». The same words, or only a new clock,
-  // are that acceptance. Send the next image. Do not open another wait.
-  if (imageReply(last) === 'ready' && imageReply(prev) === 'ready' && sameBotLine(last, prev)) {
-    return { text: last, kind: 'ready' };
-  }
+  // Same bubble / clock-only: still waiting for this send's reply.
   if (!last || sameBotLine(last, prev)) return { text: changed, kind: 'pending' };
   const lastKind = imageReply(last);
-  if (lastKind === 'ready' || lastKind === 'emoji' || lastKind === 'reject') return { text: last, kind: lastKind };
+  if (lastKind === 'ready' || lastKind === 'emoji' || lastKind === 'reject') {
+    return { text: last, kind: lastKind };
+  }
   return { text: changed, kind: 'pending' };
+}
+
+// No new bubble and no busy spinner for this long → reload and resend.
+export const STALL_MS = 120000;
+
+export function stallDue(now, progressAt, stallMs = STALL_MS) {
+  return Number(now) - Number(progressAt) >= Number(stallMs);
 }
 
 // The first notices can be short. After 30s the card shows the line the bot is actually showing.
@@ -451,12 +510,13 @@ export function waitLastLine(seconds, lastLine) {
   return String(lastLine || '').replace(/\s+/g, ' ').trim();
 }
 
-// After send: answer an emoji request, accept «Стикер готов», or retry a real
-// rejection. Silence is a wait, not one of those.
+// After send: answer an emoji request, accept «Стикер готов», retry a real
+// rejection, or recover from a stall. Silence is a wait, not one of those.
 export function afterSendReply(kind) {
   if (kind === 'ready') return 'next';
   if (kind === 'emoji') return 'emoji';
   if (kind === 'reject') return 'retry';
+  if (kind === 'stall') return 'recover';
   return 'wait';
 }
 
@@ -582,6 +642,28 @@ export function afterNewpack(text) {
   if (ASK_TITLE.test(body)) return 'title';
   if (wantsPicture(body)) return 'picture';
   return 'other';
+}
+
+// /addsticker opens an existing saved pack. The bot asks for the pack link,
+// then for pictures the same way as /newpack.
+export function afterAddsticker(text) {
+  const body = String(text || '');
+  if (packDialogOpen(body)) return 'open';
+  if (wantsPicture(body)) return 'picture';
+  if (/ссылк|stickers\/|набор/i.test(body)) return 'link';
+  return 'other';
+}
+
+// A saved pack that is short of its images can take more stickers via /addsticker.
+// uploaded must be the accurate accepted count (not a raced counter).
+export function needsAddSticker(tm, imageCount) {
+  if (!tm || !tm.packUrl) return false;
+  const uploaded = Number(tm.uploaded) || 0;
+  const total = Number(imageCount) || 0;
+  if (total <= 0 || uploaded >= total) return false;
+  if (tm.status === 'incomplete') return true;
+  if (tm.status === 'done' && uploaded < total) return true;
+  return false;
 }
 
 export function wantsPicture(text) {
@@ -921,12 +1003,53 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   }
   if (plan.action === 'saved') {
     if (!plan.url) throw new Error('pack already saved but the link was not in the chat');
-    await rememberAndPost(p, dir, plan.url, plan.lastText, note);
-    return;
+    tm.packUrl = plan.url;
+    // Short saved pack: keep going with /addsticker when pack.json says so.
+    // A full save (or unknown short pack without incomplete + uploaded) posts the link.
+    if (restart || !needsAddSticker(tm, m.images.length)) {
+      await rememberAndPost(p, dir, plan.url, plan.lastText, note);
+      return;
+    }
+    console.log(dir, 'chat-plan', 'addsticker', tm.uploaded, plan.url);
   }
 
   let lastText = plan.lastText || '';
-  if (plan.action !== 'newpack') {
+  const addMore = !restart && needsAddSticker(tm, m.images.length);
+  if (addMore) {
+    // Saved but short: /addsticker + pack URL, then continue from tm.uploaded.
+    // Only when uploaded is the real accepted count (set by a wait that did not race).
+    const before = await bot.recentIncoming(1);
+    if (unfinishedPack(before.text)) {
+      throw new Error(`refusing /addsticker while a pack is still open: ${String(before.text || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+    }
+    await note({ phase: 'newpack', pack: m.title, lastLine: before.text });
+    const opened = await withRetry('addsticker', () => bot.say('/addsticker'));
+    const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
+    console.log(dir, 'addsticker-reply', openedText.slice(0, 400));
+    let step = afterAddsticker(opened.text);
+    if (step === 'open') {
+      throw new Error(`pack dialog already open; not sending /addsticker: ${openedText.slice(0, 200)}`);
+    }
+    let picture = opened;
+    if (step === 'link') {
+      const linked = await withRetry('addsticker-link', () => bot.say(tm.packUrl));
+      const linkedText = String(linked.text || '').replace(/\s+/g, ' ').trim();
+      console.log(dir, 'addsticker-link-reply', linkedText.slice(0, 400));
+      picture = linked;
+      step = afterAddsticker(linked.text);
+    }
+    if (!wantsPicture(picture.text) && step !== 'picture') {
+      const shown = String(picture.text || '').replace(/\s+/g, ' ').trim();
+      throw new Error(`bot has not asked for a picture after /addsticker: ${shown.slice(0, 200)}`);
+    }
+    tm.created = true;
+    tm.status = 'uploading';
+    tm.pendingFile = null;
+    tm.botReply = String(picture.text || '').slice(0, 300);
+    lastText = picture.text || lastText;
+    savePack(p);
+    log(m.title, '', 'добор в сохранённый набор', tm.packUrl);
+  } else if (plan.action !== 'newpack') {
     tm.created = true;
     tm.uploaded = plan.uploaded;
     tm.pendingFile = null;
@@ -943,7 +1066,15 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       });
       await note({ phase: 'emoji', pack: m.title, index: plan.uploaded + 1, total: m.images.length, lastLine: lastText });
       let reply = await bot.say(emojiAnswer('', img.emoji), { onWait, until: 'sticker' });
+      if (reply.kind === 'stall') {
+        await bot.recoverChat();
+        reply = await bot.say(emojiAnswer('', img.emoji), { onWait, until: 'sticker' });
+      }
       if (reply.kind === 'emoji') reply = await bot.say('🙂', { onWait, until: 'sticker' });
+      if (reply.kind === 'stall') {
+        await bot.recoverChat();
+        reply = await bot.say('🙂', { onWait, until: 'sticker' });
+      }
       if (reply.kind !== 'ready') throw new Error(`emoji: ${String(reply.text || '').slice(0, 200)}`);
       await note({ phase: 'ready', pack: m.title, index: plan.uploaded + 1, total: m.images.length, lastLine: reply.text });
       tm.uploaded += 1;
@@ -1002,10 +1133,25 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     });
     let accepted = false;
     let rejects = 0;
+    let stalls = 0;
     while (!accepted) {
       const reply = await bot.sendImage(file, { onWait });
       const shown = String(reply.text || '').replace(/\s+/g, ' ').trim();
       console.log(dir, 'bot', reply.kind, shown.slice(0, 180));
+      if (reply.kind === 'stall' || afterSendReply(reply.kind) === 'recover') {
+        stalls += 1;
+        log(m.title, img.file, `зависание, перезагрузка ${stalls}`, shown);
+        await note({
+          phase: 'waiting',
+          pack: m.title,
+          index: i + 1,
+          total: m.images.length,
+          seconds: Math.round(reply.seconds || 0),
+          lastLine: waitLastLine(30, shown || 'нет ответа, перезагрузка'),
+        });
+        await bot.recoverChat();
+        continue;
+      }
       if (reply.kind === 'reject') {
         rejects += 1;
         log(m.title, img.file, `ошибка, попытка ${rejects}`, shown);
@@ -1025,10 +1171,26 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
         console.log(dir, 'emoji', img.file);
         await note({ phase: 'emoji', pack: m.title, index: i + 1, total: m.images.length, lastLine: shown });
         done = await bot.say(emojiAnswer(reply.text, img.emoji), { onWait, until: 'sticker' });
+        if (done.kind === 'stall') {
+          stalls += 1;
+          log(m.title, img.file, `зависание после эмодзи ${stalls}`, String(done.text || ''));
+          await bot.recoverChat();
+          continue;
+        }
         if (done.kind === 'emoji') done = await bot.say('🙂', { onWait, until: 'sticker' });
+        if (done.kind === 'stall') {
+          stalls += 1;
+          await bot.recoverChat();
+          continue;
+        }
         if (done.kind === 'emoji') {
           const baseline = await bot.botRows();
           done = await bot.waitForReply(baseline, { onWait, until: 'sticker' });
+        }
+        if (done.kind === 'stall') {
+          stalls += 1;
+          await bot.recoverChat();
+          continue;
         }
         const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
         console.log(dir, 'bot', done.kind, doneText.slice(0, 180));
@@ -1047,8 +1209,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
           continue;
         }
       }
-      // «Стикер готов» is already on screen, including when only its clock moved.
-      // That sticker is in the pack. Send the next image. Do not wait again.
+      // Only a new «Стикер готов» for this send advances. Never race on an old line.
       if (done.kind !== 'ready') continue;
       lastText = done.text;
       await note({ phase: 'ready', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
@@ -1269,11 +1430,12 @@ async function restartRun(bot, note, dirRef) {
   await uploadPack(bot, selected.dir, { close: true, restart: true, note, dirRef });
 }
 
+// Upload / finalize / close use the pack list from the queue or CLI, not a
+// hard-coded folder number.
 export function dirsForRun(dirs, { finalize = false, close = false } = {}) {
-  const list = [...dirs];
-  if (finalize) return list.filter((dir) => dir.startsWith('07'));
-  if (close) return list.filter((dir) => dir.startsWith('08'));
-  return list;
+  void finalize;
+  void close;
+  return [...dirs];
 }
 
 async function main() {
