@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/tg2tm
 
-COPY scripts/chrome_cdp.mjs scripts/telemost_upload.mjs scripts/telemost_links.mjs scripts/
+COPY scripts/chrome_cdp.mjs scripts/telemost_upload.mjs scripts/telemost_links.mjs scripts/admin_status.mjs scripts/
 COPY vm/ vm/
 COPY config/settings.json config/settings.json
 
