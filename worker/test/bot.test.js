@@ -24,7 +24,9 @@ import {
   userRequestEvent,
   realPackUrl,
   shouldStartPipeline,
+  sortQueuedItems,
   terminalProgress,
+  unstickUploadingQueue,
 } from "../src/logic.js";
 
 const PACK_URL = "https://messenger.360.yandex.ru/#/stickers/8377";
@@ -814,6 +816,106 @@ test("/restart is only for the admin chat, cancels the running job, and dispatch
   assert.equal(sent[1].text.includes("383999"), false);
   assert.equal(sent[1].text.includes("dispatch-token"), false);
   assert.match(sent[1].text, /\/done/);
+});
+
+test("/queue lists priority queued rows before normal ones", () => {
+  let queue = emptyQueue();
+  queue = enqueueRequest(queue, {
+    chatId: 1,
+    title: "Дьяволица",
+    links: ["https://t.me/addstickers/dev"],
+    priority: false,
+    createdAt: "2026-10-13T10:00:00.000Z",
+    stickers: 5,
+  }).queue;
+  queue = enqueueRequest(queue, {
+    chatId: 2,
+    title: "Tom & Jerry",
+    links: ["https://t.me/addstickers/tj"],
+    priority: false,
+    createdAt: "2026-10-13T10:01:00.000Z",
+    stickers: 5,
+  }).queue;
+  queue = enqueueRequest(queue, {
+    chatId: 3,
+    title: "ВолнаСветa",
+    links: ["https://t.me/addstickers/wave"],
+    priority: true,
+    createdAt: "2026-10-13T10:02:00.000Z",
+    stickers: 5,
+  }).queue;
+  const ordered = sortQueuedItems(queue.items).map((item) => item.title);
+  assert.deepEqual(ordered, ["ВолнаСветa", "Дьяволица", "Tom & Jerry"]);
+  const text = adminQueueOverviewText(queue, null);
+  const block = text.split("В очереди:")[1].split("Недавно:")[0];
+  assert.ok(block.indexOf("ВолнаСветa") < block.indexOf("Дьяволица"));
+  assert.ok(block.indexOf("Дьяволица") < block.indexOf("Tom & Jerry"));
+});
+
+test("/unstick refuses while Actions runs and releases uploading when idle", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-stuck",
+          chatId: "1",
+          title: "Застрял",
+          links: ["https://t.me/addstickers/stuck"],
+          priority: false,
+          createdAt: "2026-10-13T12:00:00.000Z",
+          status: "uploading",
+          stickers: 3,
+        },
+        {
+          id: "req-next",
+          chatId: "2",
+          title: "Следующий",
+          links: ["https://t.me/addstickers/next"],
+          priority: false,
+          createdAt: "2026-10-13T12:01:00.000Z",
+          status: "queued",
+          stickers: 4,
+        },
+      ],
+    }),
+  );
+  const sent = [];
+  const fetchBusy = async (url) => {
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [{ id: 1, status: "in_progress" }] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, {
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+    fetch: fetchBusy,
+  });
+  assert.match(sent[0], /Actions/);
+  assert.match(sent[0], /не трогаю/);
+  let stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items[0].status, "uploading");
+
+  sent.length = 0;
+  const fetchIdle = async (url) => {
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, {
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+    fetch: fetchIdle,
+  });
+  assert.match(sent[0], /Застрял/);
+  assert.match(sent[0], /снова в очереди/);
+  stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items.find((item) => item.id === "req-stuck").status, "queued");
+  assert.equal(unstickUploadingQueue(stored).changed, false);
 });
 
 test("admin /queue reads queue and one pack key for uploading progress", async () => {

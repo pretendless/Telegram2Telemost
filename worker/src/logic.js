@@ -397,6 +397,43 @@ function byTime(left, right) {
   return left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : left.id < right.id ? -1 : 1;
 }
 
+// Queued rows for display and ahead-count: priority first, FIFO within each band.
+export function sortQueuedItems(items) {
+  const waiting = (items || []).filter((item) => item.status === "queued");
+  const priority = waiting.filter((item) => item.priority).sort(byTime);
+  const normal = waiting.filter((item) => !item.priority).sort(byTime);
+  return priority.concat(normal);
+}
+
+// Reset stuck "uploading" rows when Actions is not running (admin /unstick).
+export function unstickUploadingQueue(queue) {
+  const stuck = (queue.items || []).filter((item) => item.status === "uploading");
+  if (!stuck.length) return { queue, changed: false, reason: "none", released: [] };
+  let changed = false;
+  const items = queue.items.map((item) => {
+    if (item.status !== "uploading") return item;
+    changed = true;
+    return { ...item, status: "queued" };
+  });
+  return {
+    queue: changed ? { priority: queue.priority.slice(), items } : queue,
+    changed,
+    reason: "released",
+    released: stuck,
+  };
+}
+
+export function unstickReply({ reason, released, actionsRunning }) {
+  if (actionsRunning) {
+    return "Сейчас идёт запуск Actions — строку «загружается» не трогаю.";
+  }
+  if (reason === "none" || !released.length) {
+    return "Зависших строк «загружается» нет.";
+  }
+  const titles = released.map((item) => `«${item.title}»`).join(", ");
+  return `Снял зависание: ${titles} — снова в очереди. При необходимости /restart или дождитесь автозапуска.`;
+}
+
 // Priority requests pass normal ones. An item already uploading stays in front and is not replaced.
 export function claimNext(queue) {
   const active = queue.items.find((item) => item.status === "uploading");
@@ -511,13 +548,11 @@ export function adminQueueOverviewText(queue, activePack) {
   } else {
     lines.push("Сейчас никто не загружается.");
   }
-  const waiting = items
-    .filter((item) => item.status === "queued")
-    .sort((left, right) => byTime(left, right));
+  const waiting = sortQueuedItems(items);
   if (uploading && waiting.length) {
     lines.push("");
     lines.push(
-      "Подсказка: в очереди есть ожидающие запросы, пока в KV висит «загружается». Если Actions снова берёт тот же набор, после merge обновите worker; при необходимости /restart или снимите зависшую строку в KV.",
+      "Подсказка: в очереди есть ожидающие, а в списке ещё «загружается». Если Actions не идут — /unstick; затем /restart или автозапуск возьмёт следующий запрос.",
     );
   }
   lines.push("");
