@@ -419,6 +419,24 @@ export function wantsPicture(text) {
   return ASK_PICTURE.test(body) || (CREATED.test(body) && /отправ/i.test(body));
 }
 
+// The idle menu names /newpack and /done. An open pack is still accepting
+// stickers, or it just refused a command because it wanted a picture.
+export function unfinishedPack(text) {
+  const body = String(text || '');
+  if (!body.trim() || SAVED.test(body) || ASK_TITLE.test(body)) return false;
+  if (READY.test(body) || CREATED.test(body)) return true;
+  if (ASK_EMOJI.test(body) || NOT_EMOJI.test(body)) return true;
+  if (/не картинк/i.test(body)) return true;
+  if (ASK_PICTURE.test(body)) return true;
+  return false;
+}
+
+// /newpack and /start must not land in an open pack. /done comes first.
+export function nextCommand(seenText, intended) {
+  if (unfinishedPack(seenText) && intended !== '/done') return '/done';
+  return intended;
+}
+
 // The saved 14-sticker draft is not the pack the bot is in now. Open a new one.
 const SAVED = /сохранён/i;
 
@@ -553,9 +571,25 @@ async function uploadPack(bot, dir, { close = false } = {}) {
 
   const history = await bot.surveyChat();
   const plan = resumeFromChat(history.messages, m.title, m.images.length);
-  console.log(dir, 'chat-plan', plan.action, plan.uploaded, history.reachedTop ? 'top' : 'partial');
-  if (plan.action === 'newpack' && !history.reachedTop) {
+  const live = await bot.recentIncoming(2);
+  const liveText = String(live.text || plan.lastText || '');
+  console.log(dir, 'chat-plan', plan.action, plan.uploaded, history.reachedTop ? 'top' : 'partial', unfinishedPack(liveText) ? 'open' : 'idle');
+  if (plan.action === 'newpack' && !history.reachedTop && !unfinishedPack(liveText)) {
     throw new Error('chat history did not load; not sending images');
+  }
+  if (plan.action === 'newpack' && unfinishedPack(liveText) && nextCommand(liveText, '/newpack') === '/done') {
+    console.log(dir, 'close-open-pack');
+    const closed = await bot.say('/done');
+    const closedText = String(closed.text || '').replace(/\s+/g, ' ').trim();
+    console.log(dir, 'done-reply', closedText.slice(0, 400));
+    if (!SAVED.test(closed.text)) {
+      throw new Error(`open pack was not saved; not sending /newpack: ${closedText.slice(0, 200)}`);
+    }
+    const closedUrl = extractPackUrl(closed.text, closed.links);
+    if (closedUrl) console.log(dir, 'closed-pack-url', closedUrl);
+    plan.action = 'newpack';
+    plan.uploaded = 0;
+    plan.lastText = closed.text || '';
   }
   if (plan.action === 'saved') {
     if (!plan.url) throw new Error('pack already saved but the link was not in the chat');
@@ -580,6 +614,10 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     }
     savePack(p);
   } else if (mustOpenNewPack(tm)) {
+    const before = await bot.recentIncoming(1);
+    if (nextCommand(before.text, '/newpack') !== '/newpack') {
+      throw new Error(`refusing /newpack while a pack is still open: ${String(before.text || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+    }
     const opened = await withRetry('newpack', () => bot.say('/newpack'));
     const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'newpack-reply', openedText.slice(0, 400));
