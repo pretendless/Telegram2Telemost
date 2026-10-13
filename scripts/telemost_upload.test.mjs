@@ -7,6 +7,8 @@ import {
   dirsForRun,
   extractPackUrl,
   finalizeDecision,
+  imageReply,
+  settledImageReply,
   leaveUnpublishedDraft,
   mustOpenNewPack,
   packDialogOpen,
@@ -70,6 +72,15 @@ test("pack 08 is the only pack closed after upload", () => {
   const dirs = ["07-set-redzh-i-letti", "08-maf-izis-i-agnes", "09-later"];
   assert.deepEqual(dirsForRun(dirs, { close: true }), ["08-maf-izis-i-agnes"]);
   assert.deepEqual(dirsForRun(dirs, { finalize: true }), ["07-set-redzh-i-letti"]);
+});
+
+test("a ready sticker does not wait for an emoji", () => {
+  assert.equal(imageReply("Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done"), "ready");
+  assert.equal(imageReply("Отправьте эмодзи для стикера."), "emoji");
+  assert.equal(imageReply("Стикеры"), "pending");
+  assert.equal(settledImageReply("Стикеры", 0), "pending");
+  assert.equal(settledImageReply("Стикеры", 400), "reject");
+  assert.equal(imageReply("Не удалось обработать картинку."), "reject");
 });
 
 test("finalize sends /done only after a sticker is ready and the pack is still open", () => {

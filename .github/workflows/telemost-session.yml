@@ -103,9 +103,20 @@ jobs:
           # shellcheck disable=SC2086
           python3 scripts/fetch_and_convert.py $PACK_NUMBERS
 
+      - name: Set up Docker Buildx
+        if: steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes'
+        uses: docker/setup-buildx-action@v3
+
       - name: Build browser image
         if: steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes'
-        run: docker build -f vm/Dockerfile -t tg2tm-browser .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: vm/Dockerfile
+          tags: tg2tm-browser
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Run browser
         if: steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes'
