@@ -196,11 +196,8 @@ elif [ "$MODE" = "restart" ]; then
 else
   node vm/login.mjs restore || status=$?
   if [ "$status" -eq 0 ]; then
-    if [ "$PACKS" = "08" ]; then
-      node scripts/telemost_upload.mjs --close "${pack_args[@]}" || status=$?
-    else
-      node scripts/telemost_upload.mjs "${pack_args[@]}" || status=$?
-    fi
+    # Always close the pack after upload. Title and stickers come from pack.json.
+    node scripts/telemost_upload.mjs --close "${pack_args[@]}" || status=$?
     node vm/login.mjs save || true
   fi
 fi
