@@ -119,8 +119,8 @@ async function readBody(response) {
   }
 }
 
-// Cancel every running telemost-session job, then dispatch one restart from main.
-// A new run is not created while an older one is still active.
+// Dispatch one restart from main, then cancel the runs that were already active.
+// If GitHub refuses the dispatch, the current upload stays.
 export async function restartWorkflow(fetchImpl, { token, repo, workflow, ref, chatId, sleep, now } = {}) {
   const headers = githubHeaders(token);
   const listUrl = workflowRunsUrl(repo, workflow);
@@ -130,17 +130,9 @@ export async function restartWorkflow(fetchImpl, { token, repo, workflow, ref, c
     const body = await readBody(response);
     return { status: response && response.status, runs: activeWorkflowRuns(body), all: body.workflow_runs || [] };
   };
-  let page = await listed();
+  const page = await listed();
   if (page.status !== 200) return { ok: false, reason: "list", status: page.status };
-  for (const run of page.runs) {
-    await fetchImpl(cancelRunUrl(repo, run.id), { method: "POST", headers });
-  }
-  for (let attempt = 0; attempt < 8 && page.runs.length; attempt++) {
-    if (sleep) await sleep(2000);
-    page = await listed();
-    if (page.status !== 200) return { ok: false, reason: "list", status: page.status };
-  }
-  if (page.runs.length) return { ok: false, reason: "still-running" };
+  const previous = page.runs.map((run) => run.id);
   const dispatched = await dispatchWorkflow(fetchImpl, {
     token,
     repo,
@@ -152,6 +144,9 @@ export async function restartWorkflow(fetchImpl, { token, repo, workflow, ref, c
     packs: "",
   });
   if (!dispatched.ok) return { ok: false, reason: "dispatch", status: dispatched.status };
+  for (const id of previous) {
+    await fetchImpl(cancelRunUrl(repo, id), { method: "POST", headers });
+  }
   let url = "";
   for (let attempt = 0; attempt < 5 && !url; attempt++) {
     if (sleep && attempt) await sleep(1000);

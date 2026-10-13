@@ -599,9 +599,7 @@ test("/restart is only for the admin chat, cancels the running job, and dispatch
       lists += 1;
       const runs = lists === 1
         ? [{ id: 38392857620, status: "in_progress", html_url: "https://github.com/pretendless/tg2tm/actions/runs/38392857620", created_at: "2026-10-13T11:49:14Z" }]
-        : lists === 2
-          ? []
-          : [{ id: 383999, status: "queued", html_url: "https://github.com/pretendless/tg2tm/actions/runs/383999", created_at: new Date().toISOString() }];
+        : [{ id: 383999, status: "queued", html_url: "https://github.com/pretendless/tg2tm/actions/runs/383999", created_at: new Date().toISOString() }];
       return { status: 200, json: async () => ({ workflow_runs: runs }) };
     }
     return { status: init && init.method === "POST" && String(url).endsWith("/cancel") ? 202 : 204, json: async () => ({}) };
@@ -615,7 +613,9 @@ test("/restart is only for the admin chat, cancels the running job, and dispatch
   const dispatch = calls.find((call) => String(call.url).endsWith("/dispatches"));
   assert.equal(dispatch.body.ref, "main");
   assert.deepEqual(dispatch.body.inputs, { mode: "restart", account: "default", chat_id: "8502935020", packs: "" });
-  assert.equal(calls.some((call) => String(call.url).endsWith("/38392857620/cancel")), true);
+  const dispatchAt = calls.findIndex((call) => String(call.url).endsWith("/dispatches"));
+  const cancelAt = calls.findIndex((call) => String(call.url).endsWith("/38392857620/cancel"));
+  assert.equal(dispatchAt < cancelAt, true);
   assert.match(sent[1].text, /383999/);
   assert.equal(sent[1].text.includes("dispatch-token"), false);
   assert.match(sent[1].text, /\/done/);
