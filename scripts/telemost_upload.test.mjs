@@ -9,6 +9,7 @@ import {
   finalizeDecision,
   imageReply,
   resumeFromChat,
+  scrollPageScript,
   settledImageReply,
   leaveUnpublishedDraft,
   mustOpenNewPack,
@@ -73,6 +74,16 @@ test("pack 08 is the only pack closed after upload", () => {
   const dirs = ["07-set-redzh-i-letti", "08-maf-izis-i-agnes", "09-later"];
   assert.deepEqual(dirsForRun(dirs, { close: true }), ["08-maf-izis-i-agnes"]);
   assert.deepEqual(dirsForRun(dirs, { finalize: true }), ["07-set-redzh-i-letti"]);
+});
+
+test("the chat scroll script defines direction inside the page", () => {
+  const up = scrollPageScript(-1);
+  const down = scrollPageScript(1);
+  assert.match(up, /const direction = -1;/);
+  assert.match(down, /const direction = 1;/);
+  assert.doesNotMatch(up, /\$\{/);
+  new Function(up);
+  new Function(down);
 });
 
 test("resume does not resend stickers the bot already accepted", () => {
