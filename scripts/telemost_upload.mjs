@@ -105,6 +105,22 @@ class Bot {
     throw new Error(`no bot reply in ${REPLY_TIMEOUT_S}s`);
   }
 
+  async recentIncoming(limit = 4) {
+    await this.ensureChat();
+    await this.c.ev(`(() => { const s = document.querySelector('.ui-InfiniteList-ScrollContainer'); if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight; })()`);
+    await sleep(700);
+    const text = await this.c.ev(`(() => {
+      const rows = [...document.querySelectorAll('article.message')].filter(a => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
+      return rows.slice(-${Number(limit) || 4}).map(a => (a.innerText || '').trim()).filter(Boolean).join('\\n');
+    })()`);
+    const links = await this.c.ev(`(() => {
+      const rows = [...document.querySelectorAll('article.message')].filter(a => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
+      const last = rows[rows.length - 1];
+      return last ? [...last.querySelectorAll('a[href]')].map(a => a.href) : [];
+    })()`);
+    return { text: text || '', links: links || [] };
+  }
+
   async clickSend(inDialog) {
     const sel = inDialog
       ? `[...document.querySelectorAll('[aria-label="Отправить сообщение"]')].filter(e => e.getBoundingClientRect().width > 0).sort((a, b) => a.getBoundingClientRect().y - b.getBoundingClientRect().y)[0]`
@@ -175,6 +191,47 @@ export function wantsPicture(text) {
 }
 
 // The saved 14-sticker draft is not the pack the bot is in now. Open a new one.
+const SAVED = /сохранён/i;
+
+// After a sticker is accepted the bot says «Стикер готов» and still holds the
+// unpublished pack. That is the offer to finish it with /done. The idle command
+// menu also names /done, and a brand-new pack only asks for a picture: neither
+// of those is this pack waiting to be saved.
+export function finalizeDecision(text) {
+  const body = String(text || '');
+  if (SAVED.test(body)) return { action: 'stop', reason: 'draft-gone' };
+  if (ASK_EMOJI.test(body) || NOT_EMOJI.test(body)) return { action: 'stop', reason: 'waiting-emoji' };
+  if (READY.test(body)) return { action: 'done' };
+  return { action: 'stop', reason: 'draft-gone' };
+}
+
+export function extractPackUrl(text, links) {
+  const fromLinks = (links || []).find((href) => /\/stickers\//.test(href) && !/addstickers/i.test(href));
+  if (fromLinks) return fromLinks;
+  const match = String(text || '').match(/https?:\/\/\S+/);
+  if (!match) return '';
+  const url = match[0].replace(/[),.;]+$/, '');
+  if (!/\/stickers\//.test(url) || /addstickers/i.test(url)) return '';
+  return url;
+}
+
+export async function postPackLink(fetchImpl, token, title, url) {
+  const response = await fetchImpl('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: '@tg2tm',
+      text: `«${title}»\n\n${url}`,
+      link_preview_options: { is_disabled: true },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    const description = data && data.description ? data.description : String(response.status);
+    throw new Error(`channel post failed: ${description}`);
+  }
+}
+
 export function mustOpenNewPack(tm) {
   if (!tm || tm.status === 'done') return false;
   if (tm.status === 'stopped' || tm.pendingFile) return true;
@@ -316,14 +373,56 @@ async function uploadPack(bot, dir) {
   log(m.title, '', `отправлены ${m.images.length} стикеров`, 'без /done');
 }
 
+async function finalizePack(bot, dir) {
+  const p = loadPack(dir);
+  const m = p.meta;
+  const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
+  if (tm.status === 'done' && tm.packUrl) {
+    console.log(dir, 'draft-gone', tm.packUrl);
+    return;
+  }
+  const seen = await bot.recentIncoming(1);
+  const shown = String(seen.text || '').replace(/\s+/g, ' ').trim();
+  console.log(dir, 'last-reply', shown.slice(0, 400));
+  const decision = finalizeDecision(seen.text);
+  if (decision.action !== 'done') {
+    console.log(dir, 'draft-gone', decision.reason);
+    return;
+  }
+  const done = await bot.say('/done');
+  const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
+  console.log(dir, 'done-reply', doneText.slice(0, 400));
+  const url = extractPackUrl(done.text, done.links);
+  if (!SAVED.test(done.text) || !url) {
+    console.log(dir, 'draft-gone', 'done did not save the pack');
+    return;
+  }
+  tm.status = 'done';
+  tm.packUrl = url;
+  tm.error = null;
+  tm.uploaded = m.images.length;
+  tm.pendingFile = null;
+  tm.botReply = doneText.slice(0, 300);
+  savePack(p);
+  console.log(dir, 'pack-url', url);
+  await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, url);
+  console.log(dir, 'channel-posted', '@tg2tm');
+}
+
 async function main() {
-  const wanted = process.argv.slice(2);
-  const dirs = readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort().filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
+  const finalize = process.argv.includes('--finalize');
+  const wanted = process.argv.slice(2).filter((arg) => arg !== '--finalize');
+  let dirs = readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort().filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
+  if (finalize) {
+    if (dirs.some((dir) => !dir.startsWith('07'))) console.log('skip pack 08');
+    dirs = dirs.filter((dir) => dir.startsWith('07'));
+  }
   const c = await connect();
   const bot = new Bot(c);
   for (const d of dirs) {
     try {
-      await uploadPack(bot, d);
+      if (finalize) await finalizePack(bot, d);
+      else await uploadPack(bot, d);
     } catch (e) {
       log(d, '', 'остановлено', e.message);
       process.exitCode = 1;

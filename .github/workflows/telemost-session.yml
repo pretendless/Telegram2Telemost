@@ -12,6 +12,7 @@ on:
         options:
           - login
           - upload
+          - finalize
         default: login
       account:
         description: Account label, for example default or work
@@ -61,7 +62,7 @@ jobs:
 
       - name: Restore encrypted session
         id: session
-        if: steps.in.outputs.mode == 'upload'
+        if: steps.in.outputs.mode == 'upload' || steps.in.outputs.mode == 'finalize'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -78,7 +79,7 @@ jobs:
           fi
 
       - name: Tell Telegram there is no session
-        if: steps.in.outputs.mode == 'upload' && steps.session.outputs.present != 'yes'
+        if: (steps.in.outputs.mode == 'upload' || steps.in.outputs.mode == 'finalize') && steps.session.outputs.present != 'yes'
         env:
           MODE: upload
           ACCOUNT: ${{ steps.in.outputs.account }}
@@ -114,10 +115,15 @@ jobs:
           CHAT_ID: ${{ steps.in.outputs.chat_id }}
           TELEMOST_SESSION_KEY: ${{ secrets.TELEMOST_SESSION_KEY }}
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
-          ENABLE_TUNNEL: "1"
         run: |
           mkdir -p sessions logs
           chmod a+rwx logs
+          if [ "$MODE" = "finalize" ]; then
+            ENABLE_TUNNEL=0
+          else
+            ENABLE_TUNNEL=1
+          fi
+          export ENABLE_TUNNEL
           docker run --rm --shm-size=1g \
             --user "$(id -u):$(id -g)" \
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL \
@@ -138,4 +144,13 @@ jobs:
           name: telemost-session-${{ steps.in.outputs.account }}
           path: sessions/${{ steps.in.outputs.account }}.tg2tm-session
           if-no-files-found: error
+          retention-days: 90
+
+      - name: Record pack file
+        if: always() && steps.in.outputs.mode == 'finalize'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-07-record
+          path: packs/07-set-redzh-i-letti/pack.json
+          if-no-files-found: warn
           retention-days: 90

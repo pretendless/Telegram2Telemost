@@ -4,7 +4,7 @@ import { ACCOUNT_RE } from "./dispatch.js";
 
 export function checkInputs(env) {
   const mode = env.MODE || "login";
-  if (mode !== "login" && mode !== "upload") return { ok: false, error: "mode" };
+  if (mode !== "login" && mode !== "upload" && mode !== "finalize") return { ok: false, error: "mode" };
   const account = String(env.ACCOUNT || "default").trim();
   if (!ACCOUNT_RE.test(account)) return { ok: false, error: "account" };
   const chat = String(env.CHAT_ID || env.TELEGRAM_CHAT_ID || "").trim();
@@ -14,7 +14,7 @@ export function checkInputs(env) {
     .trim()
     .replace(/\s+/g, " ");
   if (packs && !/^[0-9]{2}(?: [0-9]{2})*$/.test(packs)) return { ok: false, error: "packs" };
-  if (mode === "upload" && !packs) return { ok: false, error: "packs" };
+  if ((mode === "upload" || mode === "finalize") && !packs) return { ok: false, error: "packs" };
   return { ok: true, mode, account, chat_id: chat, packs };
 }
 
