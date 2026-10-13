@@ -8,6 +8,7 @@ import {
   extractPackUrl,
   finalizeDecision,
   imageReply,
+  resumeFromChat,
   settledImageReply,
   leaveUnpublishedDraft,
   mustOpenNewPack,
@@ -72,6 +73,37 @@ test("pack 08 is the only pack closed after upload", () => {
   const dirs = ["07-set-redzh-i-letti", "08-maf-izis-i-agnes", "09-later"];
   assert.deepEqual(dirsForRun(dirs, { close: true }), ["08-maf-izis-i-agnes"]);
   assert.deepEqual(dirsForRun(dirs, { finalize: true }), ["07-set-redzh-i-letti"]);
+});
+
+test("resume does not resend stickers the bot already accepted", () => {
+  const title = "Маф, Изис и Агнес";
+  const older = [
+    { own: false, text: "Создан набор стикеров «Сэт, Рэдж и Летти».", links: [] },
+    { own: false, text: "Стикер готов.", links: [] },
+    { own: false, text: "Набор «Сэт, Рэдж и Летти» сохранён.", links: ["https://messenger.360.yandex.ru/#/stickers/8393"] },
+  ];
+  const ready = { own: false, text: "Стикер готов. Отправьте картинку для следующего стикера.", links: [] };
+  const open = resumeFromChat(older.concat([
+    { own: false, text: "Создан набор стикеров «Маф, Изис и Агнес». Отправьте картинку.", links: [] },
+    ready,
+    ready,
+  ]), title, 144);
+  assert.equal(open.action, "continue");
+  assert.equal(open.uploaded, 2);
+  const asking = resumeFromChat(older.concat([
+    { own: false, text: "Создан набор стикеров «Маф, Изис и Агнес».", links: [] },
+    ready,
+    { own: false, text: "Отправьте эмодзи для стикера.", links: [] },
+  ]), title, 144);
+  assert.equal(asking.action, "emoji");
+  assert.equal(asking.uploaded, 1);
+  const saved = resumeFromChat(older.concat([
+    { own: false, text: "Создан набор стикеров «Маф, Изис и Агнес».", links: [] },
+    ready,
+    { own: false, text: "Набор «Маф, Изис и Агнес» сохранён и доступен по ссылке.", links: ["https://messenger.360.yandex.ru/#/stickers/8400"] },
+  ]), title, 144);
+  assert.equal(saved.action, "saved");
+  assert.equal(saved.url, "https://messenger.360.yandex.ru/#/stickers/8400");
 });
 
 test("a ready sticker does not wait for an emoji", () => {
