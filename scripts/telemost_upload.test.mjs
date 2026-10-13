@@ -9,9 +9,14 @@ import {
   extractPackUrl,
   finalizeDecision,
   afterImageAttempts,
+  afterSendReply,
+  changedBotText,
+  emojiAnswer,
   IMAGE_ATTEMPTS,
   imageReply,
+  isEmojiRequest,
   resumeFromChat,
+  waitStatusDue,
   scrollPageScript,
   settledImageReply,
   leaveUnpublishedDraft,
@@ -68,6 +73,7 @@ test("a stopped draft is opened with /newpack, not resumed and not /start", () =
   assert.equal(afterNewpack("Напишите название набора"), "title");
   assert.equal(afterNewpack("Создан набор. Отправьте картинку стикера."), "picture");
   assert.equal(wantsPicture("Отправьте картинку для стикера."), true);
+  assert.equal(wantsPicture("Это не картинка :)"), false);
   assert.equal(wantsPicture("Отправьте эмодзи для стикера."), false);
   assert.equal(packDialogOpen("Это не эмодзи :)"), true);
   assert.equal(afterNewpack("Это не эмодзи :)"), "open");
@@ -120,12 +126,32 @@ test("resume does not resend stickers the bot already accepted", () => {
   assert.equal(saved.url, "https://messenger.360.yandex.ru/#/stickers/8400");
 });
 
-test("five failures skip that image and the pack continues", () => {
-  assert.equal(IMAGE_ATTEMPTS, 5);
-  assert.equal(afterImageAttempts(0, false), "retry");
+test("a wait after send is not a failed attempt", () => {
+  assert.equal(afterSendReply("pending"), "wait");
+  assert.equal(afterSendReply("emoji"), "emoji");
+  assert.equal(afterSendReply("ready"), "next");
+  assert.equal(afterSendReply("reject"), "retry");
   assert.equal(afterImageAttempts(4, false), "retry");
-  assert.equal(afterImageAttempts(5, false), "skip");
-  assert.equal(afterImageAttempts(3, true), "next");
+  assert.equal(IMAGE_ATTEMPTS, 5);
+  assert.equal(waitStatusDue(20000, 0, 0), true);
+  assert.equal(waitStatusDue(19999, 0, 0), false);
+  assert.equal(waitStatusDue(30000, 0, 20000), false);
+  assert.equal(waitStatusDue(40000, 0, 20000), true);
+});
+
+test("an edited bubble after send is the emoji request, then the sticker is ready", () => {
+  const baseline = [{ id: "7", text: "Отправьте картинку для следующего стикера." }];
+  const asked = [{ id: "7", text: "Отправьте эмодзи для стикера." }];
+  const peeked = [{ id: "8", text: "🫣" }];
+  const ready = [{ id: "7", text: "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done" }];
+  assert.equal(changedBotText(baseline, asked), "Отправьте эмодзи для стикера.");
+  assert.equal(imageReply(changedBotText(baseline, asked)), "emoji");
+  assert.equal(isEmojiRequest("🫣"), true);
+  assert.equal(imageReply(changedBotText(baseline, peeked)), "emoji");
+  assert.equal(emojiAnswer("Отправьте эмодзи для стикера.", "🫣"), "🫣");
+  assert.equal(emojiAnswer("🫣", "😉"), "🫣");
+  assert.equal(imageReply(changedBotText(asked, ready)), "ready");
+  assert.equal(afterSendReply("ready"), "next");
 });
 
 test("eighteen accepted stickers continue at 019", () => {
@@ -140,6 +166,13 @@ test("eighteen accepted stickers continue at 019", () => {
   assert.equal(plan.uploaded, 18);
   assert.equal(pack.images[plan.uploaded].file, "019.png");
   assert.equal(pack.images[17].file, "018.png");
+  const accepted = resumeFromChat([
+    { own: false, text: "Создан набор стикеров «Маф, Изис и Агнес». Отправьте картинку.", links: [] },
+    ...Array.from({ length: 19 }, () => ready),
+  ], title, 144);
+  assert.equal(accepted.action, "continue");
+  assert.equal(accepted.uploaded, 19);
+  assert.equal(pack.images[accepted.uploaded].file, "020.png");
 });
 
 test("a ready sticker does not wait for an emoji", () => {

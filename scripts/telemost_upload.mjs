@@ -12,7 +12,6 @@ const PACKS = join(ROOT, 'packs');
 const LOG = join(ROOT, 'logs', 'transfer-log.md');
 const BOT_URL = process.env.TELEMOST_BOT_URL || 'https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d';
 const DEVTOOLS = process.env.DEVTOOLS || 'http://127.0.0.1:9222';
-const REPLY_TIMEOUT_S = Number(process.env.REPLY_TIMEOUT_S || 600);
 const POLL_MS = 100;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -85,51 +84,53 @@ class Bot {
     throw new Error('Telemost bot chat did not load');
   }
 
-  markSeen() {
-    return this.c.ev(`document.querySelectorAll('article.message').forEach(a => a.dataset.tg2tmSeen = '1')`);
-  }
-
-  readFresh() {
+  botRows() {
     return this.c.ev(`(() => {
-      const fresh = [...document.querySelectorAll('article.message')].filter(a => !a.dataset.tg2tmSeen && a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
-      return {
-        text: fresh.length ? fresh.map(a => (a.innerText || '').trim()).join('\\n') : '',
-        links: fresh.flatMap(a => [...a.querySelectorAll('a[href]')].map(x => x.href)),
-      };
+      window.__tg2tmNext = window.__tg2tmNext || 1;
+      const rows = [...document.querySelectorAll('article.message')].filter((a) => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
+      return rows.map((a) => {
+        if (!a.dataset.tg2tmId) a.dataset.tg2tmId = String(window.__tg2tmNext++);
+        return { id: a.dataset.tg2tmId, text: (a.innerText || '').replace(/\\s+/g, ' ').trim() };
+      });
     })()`);
   }
 
-  // Poll the new bot messages. The first look happens immediately.
-  async waitReply() {
-    const t0 = Date.now();
-    while ((Date.now() - t0) / 1000 < REPLY_TIMEOUT_S) {
-      const snap = await this.readFresh();
-      if (snap && snap.text) return { text: snap.text, links: snap.links || [], seconds: (Date.now() - t0) / 1000 };
-      await sleep(POLL_MS);
-    }
-    throw new Error(`no bot reply in ${REPLY_TIMEOUT_S}s`);
+  scrollToBottom() {
+    return this.c.ev(`(() => { const s = document.querySelector('.ui-InfiniteList-ScrollContainer'); if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight; })()`);
   }
 
-  // Keep polling until the bot has accepted the sticker or asked for an emoji.
-  // A half-drawn bubble is not a rejection, and a spinner is not a 90s timeout.
-  async waitImageReply() {
-    const t0 = Date.now();
+  // A seen flag hides a bubble the bot rewrites in place. Compare text instead.
+  // «Отправьте эмодзи» and the following «Стикер готов» are replies, not timeouts.
+  async waitForReply(baseline, { onWait, until } = {}) {
+    const started = Date.now();
+    let lastSentAt = 0;
     let stable = '';
     let stableAt = 0;
-    while ((Date.now() - t0) / 1000 < REPLY_TIMEOUT_S) {
-      const snap = await this.readFresh();
-      const text = snap && snap.text ? snap.text : '';
-      const kind = settledImageReply(text, text && text === stable ? Date.now() - stableAt : 0);
-      if (kind !== 'pending') {
-        return { text, links: (snap && snap.links) || [], seconds: (Date.now() - t0) / 1000, kind };
+    for (;;) {
+      const rows = await this.botRows();
+      const text = changedBotText(baseline, rows);
+      const kind = imageReply(text);
+      const stickerReply = kind === 'ready' || kind === 'emoji' || kind === 'reject';
+      if (until === 'sticker' && stickerReply) {
+        return { text, links: [], seconds: (Date.now() - started) / 1000, kind };
+      }
+      if (until !== 'sticker' && text.trim()) {
+        const sameFor = text === stable ? Date.now() - stableAt : 0;
+        if (kind !== 'pending' || sameFor >= 400) {
+          return { text, links: [], seconds: (Date.now() - started) / 1000, kind: kind === 'pending' ? 'other' : kind };
+        }
       }
       if (text !== stable) {
         stable = text;
         stableAt = Date.now();
       }
+      const now = Date.now();
+      if (onWait && waitStatusDue(now, started, lastSentAt)) {
+        lastSentAt = now;
+        await onWait(Math.round((now - started) / 1000));
+      }
       await sleep(POLL_MS);
     }
-    throw new Error(`no bot reply in ${REPLY_TIMEOUT_S}s`);
   }
 
   async recentIncoming(limit = 4) {
@@ -158,13 +159,14 @@ class Bot {
     throw new Error('send button not found');
   }
 
-  async say(text) {
+  async say(text, opts) {
     await this.ensureChat();
-    await this.markSeen();
+    await this.scrollToBottom();
+    const baseline = await this.botRows();
     await this.c.ev(`(() => { const e = document.querySelector('[contenteditable=true]'); e.focus(); })()`);
     await this.c.send('Input.insertText', { text });
     await this.clickSend(false);
-    return this.waitReply();
+    return this.waitForReply(baseline, opts || {});
   }
 
   async fileInput() {
@@ -177,9 +179,10 @@ class Bot {
     return q.nodeIds[0];
   }
 
-  async sendImage(path) {
+  async sendImage(path, opts) {
     await this.ensureChat();
-    await this.markSeen();
+    await this.scrollToBottom();
+    const baseline = await this.botRows();
     const nodeId = await this.fileInput();
     await this.c.send('DOM.setFileInputFiles', { nodeId, files: [path] });
     for (let i = 0; i < 80; i++) {
@@ -188,7 +191,7 @@ class Bot {
       await sleep(POLL_MS);
     }
     await this.clickSend(true);
-    return this.waitImageReply();
+    return this.waitForReply(baseline, { until: 'sticker', ...(opts || {}) });
   }
 
   // Scroll the sticker-bot history once and keep every message. A later run
@@ -196,18 +199,22 @@ class Bot {
   async surveyChat() {
     await this.ensureChat();
     const scrollBy = (direction) => this.c.ev(scrollPageScript(direction));
-    let top = -1;
-    let idle = 0;
-    let last = null;
-    for (let i = 0; i < 400 && idle < 2; i++) {
-      top = await scrollBy(-1);
-      if (top < 0) break;
-      if (top === 0 || top === last) idle++;
-      else idle = 0;
-      last = top;
+    let height = -1;
+    let stable = 0;
+    for (let i = 0; i < 200 && stable < 8; i++) {
+      const info = await this.c.ev(`(() => {
+        const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
+        if (!s || !('scrollTop' in s)) return { top: -1, height: 0 };
+        s.scrollTop = 0;
+        return { top: s.scrollTop, height: s.scrollHeight };
+      })()`);
+      if (!info || info.top < 0) break;
+      if (info.top === 0 && info.height === height) stable++;
+      else stable = 0;
+      height = info.height;
       await sleep(POLL_MS);
     }
-    const reachedTop = top <= 0;
+    const reachedTop = stable >= 8;
     await this.c.ev(`(() => {
       window.__tg2tmLog = [];
       window.__tg2tmNext = 1;
@@ -232,9 +239,9 @@ class Bot {
       window.__tg2tmNext = n;
       return log.length;
     })()`;
-    idle = 0;
+    let idle = 0;
     let prevCount = -1;
-    for (let i = 0; i < 400 && idle < 2; i++) {
+    for (let i = 0; i < 800 && idle < 3; i++) {
       const count = await this.c.ev(stamp);
       const pos = await scrollBy(1);
       if (pos < 0) break;
@@ -264,15 +271,58 @@ const COMMAND_MENU = /\/newpack/;
 const ASK_PICTURE = /картинк|изображен|фото|Отправьте стикер|Пришлите стикер|отправьте файл/i;
 const IMAGE_FAIL = /Не удалось обработать|не подходит|слишком больш|отклон/i;
 
-// «Стикер готов» means the next image can go now. An emoji is sent only when
-// the bot asked for one. A short or still-growing bubble stays pending.
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|\uFE0F|\u200D|\s)+$/u;
+
+// «Отправьте эмодзи» or a bare emoji such as 🫣 asks for the sticker emoji.
+// «Стикер готов» means that sticker is accepted.
+export function isEmojiRequest(text) {
+  const body = String(text || '').trim();
+  if (!body || body.length > 32) return false;
+  if (ASK_EMOJI.test(body) || NOT_EMOJI.test(body)) return true;
+  return EMOJI_ONLY.test(body);
+}
+
 export function imageReply(text) {
   const body = String(text || '');
   if (!body.trim()) return 'pending';
   if (READY.test(body)) return 'ready';
-  if (ASK_EMOJI.test(body) || NOT_EMOJI.test(body)) return 'emoji';
+  if (isEmojiRequest(body)) return 'emoji';
   if (IMAGE_FAIL.test(body)) return 'reject';
   return 'pending';
+}
+
+// The emoji phrase gets the sticker's emoji. A bare emoji is sent back as itself.
+export function emojiAnswer(replyText, stickerEmoji) {
+  const body = String(replyText || '').trim();
+  if (EMOJI_ONLY.test(body)) return body;
+  return stickerEmoji || '🙂';
+}
+
+// Same bubble, new text, is a new reply. A seen-flag would miss it.
+export function changedBotText(baseline, rows) {
+  const prev = new Map((baseline || []).map((row) => [String(row.id), row.text]));
+  const parts = [];
+  for (const row of rows || []) {
+    if (!row || !row.text) continue;
+    if (prev.get(String(row.id)) === row.text) continue;
+    parts.push(row.text);
+  }
+  return parts.join('\n');
+}
+
+// After send: answer an emoji request, accept «Стикер готов», or retry a real
+// rejection. Silence is a wait, not one of those.
+export function afterSendReply(kind) {
+  if (kind === 'ready') return 'next';
+  if (kind === 'emoji') return 'emoji';
+  if (kind === 'reject') return 'retry';
+  return 'wait';
+}
+
+export function waitStatusDue(now, startedAt, lastSentAt) {
+  if (now - startedAt < 20000) return false;
+  if (!lastSentAt) return true;
+  return now - lastSentAt >= 20000;
 }
 
 export function settledImageReply(text, sameForMs) {
@@ -282,8 +332,8 @@ export function settledImageReply(text, sameForMs) {
   return 'pending';
 }
 
-// One image gets five tries. A rejection or a timeout then skips that file.
-// The pack keeps going and can still be saved.
+// A real «Не удалось обработать» can be retried. A silent wait is not one of
+// these attempts and does not skip the file.
 export const IMAGE_ATTEMPTS = 5;
 
 export function afterImageAttempts(attempt, accepted) {
@@ -299,7 +349,7 @@ export function scrollPageScript(direction) {
   return `(() => {
     const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
     if (!s || !('scrollTop' in s)) return -1;
-    const step = Math.max(240, Math.floor(s.clientHeight * 0.5));
+    const step = Math.max(120, Math.floor(s.clientHeight * 0.25));
     const direction = ${way};
     s.scrollTop = direction < 0 ? Math.max(0, s.scrollTop - step) : Math.min(s.scrollHeight, s.scrollTop + step);
     return s.scrollTop;
@@ -365,6 +415,7 @@ export function afterNewpack(text) {
 export function wantsPicture(text) {
   const body = String(text || '');
   if (packDialogOpen(body)) return false;
+  if (/не картинк/i.test(body)) return false;
   return ASK_PICTURE.test(body) || (CREATED.test(body) && /отправ/i.test(body));
 }
 
@@ -391,6 +442,26 @@ export function extractPackUrl(text, links) {
   const url = match[0].replace(/[),.;]+$/, '');
   if (!/\/stickers\//.test(url) || /addstickers/i.test(url)) return '';
   return url;
+}
+
+export async function postAdminStatus(fetchImpl, token, chatId, text) {
+  const response = await fetchImpl('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, disable_notification: true }),
+  });
+  if (!response.ok) throw new Error('admin status http ' + response.status);
+}
+
+async function notifyAdmin(text) {
+  const token = process.env.TG2TMBOT_TOKEN || '';
+  const chatId = process.env.TELEGRAM_CHAT_ID || '';
+  if (!token || !chatId) return;
+  try {
+    await postAdminStatus(fetch, token, chatId, text);
+  } catch {
+    console.log('admin status skipped');
+  }
 }
 
 export async function postPackLink(fetchImpl, token, title, url) {
@@ -500,9 +571,10 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     tm.status = 'uploading';
     if (plan.action === 'emoji') {
       const img = m.images[plan.uploaded];
-      let reply = await bot.say(img.emoji || '🙂');
-      if (imageReply(reply.text) === 'emoji') reply = await bot.say('🙂');
-      if (imageReply(reply.text) !== 'ready') throw new Error(`emoji: ${String(reply.text || '').slice(0, 200)}`);
+      const onWait = (seconds) => notifyAdmin(`«${m.title}»: ${img.file} уже отправлен, жду ответ бота ${seconds} с`);
+      let reply = await bot.say(emojiAnswer('', img.emoji), { onWait, until: 'sticker' });
+      if (reply.kind === 'emoji') reply = await bot.say('🙂', { onWait, until: 'sticker' });
+      if (reply.kind !== 'ready') throw new Error(`emoji: ${String(reply.text || '').slice(0, 200)}`);
       tm.uploaded += 1;
       lastText = reply.text;
     }
@@ -543,31 +615,54 @@ async function uploadPack(bot, dir, { close = false } = {}) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
     console.log(dir, 'send', img.file);
-    let ok = false;
-    let attempt = 0;
-    while (afterImageAttempts(attempt, ok) === 'retry') {
-      attempt += 1;
-      try {
-        const r = await bot.sendImage(file);
-        if (r.kind === 'ready') { ok = true; lastText = r.text; break; }
-        if (r.kind !== 'emoji') throw new Error(`image rejected: ${String(r.text || '').slice(0, 200)}`);
-        let e = await bot.say(img.emoji || '🙂');
-        if (imageReply(e.text) === 'emoji') e = await bot.say('🙂');
-        if (imageReply(e.text) !== 'ready') throw new Error(`emoji: ${String(e.text || '').slice(0, 200)}`);
-        ok = true;
-        lastText = e.text;
-        if (r.seconds + e.seconds > 60) log(m.title, img.file, 'медленно', `${(r.seconds + e.seconds).toFixed(0)} с`);
-      } catch (err) {
-        log(m.title, img.file, `ошибка, попытка ${attempt}`, err.message);
+    const onWait = (seconds) => notifyAdmin(`«${m.title}»: ${img.file} отправлен, жду ответ бота ${seconds} с`);
+    let accepted = false;
+    let rejects = 0;
+    while (!accepted) {
+      const reply = await bot.sendImage(file, { onWait });
+      const shown = String(reply.text || '').replace(/\s+/g, ' ').trim();
+      console.log(dir, 'bot', reply.kind, shown.slice(0, 180));
+      if (reply.kind === 'reject') {
+        rejects += 1;
+        log(m.title, img.file, `ошибка, попытка ${rejects}`, shown);
+        if (afterImageAttempts(rejects, false) === 'skip') {
+          tm.skipped = [...(tm.skipped || []), img.file];
+          log(m.title, img.file, 'пропуск', 'бот отклонил картинку');
+          savePack(p);
+          break;
+        }
         await sleep(1000);
+        continue;
       }
+      let done = reply;
+      if (reply.kind === 'emoji') {
+        console.log(dir, 'emoji', img.file);
+        done = await bot.say(emojiAnswer(reply.text, img.emoji), { onWait, until: 'sticker' });
+        if (done.kind === 'emoji') done = await bot.say('🙂', { onWait, until: 'sticker' });
+        if (done.kind === 'emoji') {
+          const baseline = await bot.botRows();
+          done = await bot.waitForReply(baseline, { onWait, until: 'sticker' });
+        }
+        const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
+        console.log(dir, 'bot', done.kind, doneText.slice(0, 180));
+        if (done.kind === 'reject') {
+          rejects += 1;
+          log(m.title, img.file, `ошибка, попытка ${rejects}`, doneText);
+          if (afterImageAttempts(rejects, false) === 'skip') {
+            tm.skipped = [...(tm.skipped || []), img.file];
+            log(m.title, img.file, 'пропуск', 'бот отклонил картинку');
+            savePack(p);
+            break;
+          }
+          await sleep(1000);
+          continue;
+        }
+      }
+      if (done.kind !== 'ready') continue;
+      lastText = done.text;
+      accepted = true;
     }
-    if (!ok) {
-      tm.skipped = [...(tm.skipped || []), img.file];
-      log(m.title, img.file, 'пропуск', `не принято за ${IMAGE_ATTEMPTS} попыток`);
-      savePack(p);
-      continue;
-    }
+    if (!accepted) continue;
     tm.uploaded = i + 1;
     if (tm.uploaded % 10 === 0 || tm.uploaded === m.images.length) {
       savePack(p);
