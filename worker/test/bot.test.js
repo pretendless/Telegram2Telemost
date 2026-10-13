@@ -254,8 +254,9 @@ test("admin chat gets another user's upload, edits the sticker count, and /statu
   sent.length = 0;
   await handle(progressRequest({ ...body, uploaded: 2 }), env, { sendMessage, editMessage });
   await handle(progressRequest({ ...body, uploaded: 3 }), env, { sendMessage, editMessage });
-  assert.equal(edited.length, 1);
-  assert.match(edited[0].text, /отправка 3\/144/);
+  assert.equal(edited.length, 2);
+  assert.equal(sent.length, 0);
+  assert.match(edited[1].text, /отправка 3\/144/);
   assert.equal(String(edited[0].chatId), "8502935020");
 
   const idle = [];

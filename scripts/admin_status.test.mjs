@@ -26,15 +26,19 @@ test('a sticker number, a wait, or a retry edits the same card', () => {
   const retry = card({ phase: 'retry', index: 16, total: 144, attempt: 1 });
   assert.equal(adminDelivery(retry, card({ phase: 'retry', index: 16, total: 144, attempt: 2 })).action, 'edit');
   assert.equal(adminDelivery(sending, sending).action, 'skip');
-  assert.equal(adminDelivery(sending, card({ phase: 'sending', index: 17, total: 144, attempt: 1 })).action, 'send');
+  assert.equal(adminDelivery(sending, card({ phase: 'sending', index: 17, total: 144, attempt: 1 })).action, 'edit');
+  assert.equal(adminDelivery(null, sending).action, 'send');
+  assert.equal(adminDelivery(sending, { ...card({ phase: 'sending', index: 17, total: 144 }), pack: 'Другой' }).action, 'send');
 });
 
-test('emoji, /done, error, saved, and link are new messages', () => {
+test('emoji, the next send, an error, and the saved link edit the same card', () => {
   const sending = card({ phase: 'sending', index: 1, total: 144 });
-  for (const phase of ['emoji', 'done', 'error', 'saved', 'link', 'start', 'newpack', 'failed']) {
-    assert.equal(adminDelivery(sending, card({ phase, index: 1, total: 144 })).action, 'send');
-    assert.equal(adminDelivery(card({ phase, index: 1, total: 144 }), card({ phase, index: 2, total: 144 })).action, 'send');
+  for (const phase of ['emoji', 'done', 'error', 'saved', 'link', 'start', 'newpack', 'failed', 'waiting', 'retry']) {
+    assert.equal(adminDelivery(sending, card({ phase, index: 1, total: 144 })).action, 'edit');
+    assert.equal(adminDelivery(card({ phase, index: 1, total: 144 }), card({ phase, index: 2, total: 144 })).action, 'edit');
   }
+  assert.equal(adminDelivery(sending, card({ phase: 'link', index: 144, total: 144, link: 'https://messenger.360.yandex.ru/#/stickers/1' })).action, 'edit');
+  assert.equal(adminDelivery(sending, card({ phase: 'error', error: 'Не удалось обработать картинку' })).action, 'edit');
 });
 
 test('the card names the pack, the step, the bot line, and another user only by chat id', () => {
@@ -117,10 +121,10 @@ test('the feed edits a repeated wait and does not call Telegram when the card is
   await notify(card({ phase: 'waiting', seconds: 20 }));
   await notify(card({ phase: 'waiting', seconds: 40 }));
   await notify(card({ phase: 'emoji', index: 1, total: 144 }));
-  assert.deepEqual(calls.map((call) => call[0]), ['send', 'edit', 'send']);
+  assert.deepEqual(calls.map((call) => call[0]), ['send', 'edit', 'edit']);
   assert.match(calls[1][2], /жду бота 40 с/);
   assert.match(calls[1][2], /запрос: 111/);
-  assert.match(calls[2][1], /эмодзи 1\/144/);
+  assert.match(calls[2][2], /эмодзи 1\/144/);
   messageId = 8;
 });
 
@@ -154,6 +158,22 @@ test('a failed Actions run sends one forwardable card and skips when the error w
   writeFileSync(path, stored);
   await reportRunFailed({ fetchImpl, token: 'bot-token', statePath: path });
   assert.equal(sent.length, 1);
+  writeFileSync(path, JSON.stringify({ messageId: 9, event: { phase: 'sending', pack, index: 4, total: 144 } }));
+  const edited = [];
+  await reportRunFailed({
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      edited.push({ url, body });
+      return { ok: true, json: async () => ({ ok: true, result: { message_id: body.message_id || 9 } }) };
+    },
+    token: 'bot-token',
+    statePath: path,
+    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/1',
+  });
+  assert.equal(edited.length, 1);
+  assert.match(edited[0].url, /editMessageText/);
+  assert.equal(edited[0].body.message_id, 9);
+  assert.match(edited[0].body.text, /сбой Actions/);
   rmSync(dir, { recursive: true });
   await reportRunFailed({ fetchImpl, token: '', statePath: path });
   assert.equal(sent.length, 1);

@@ -1,11 +1,11 @@
-// Status cards for the admin chat. A repeat that only moves the sticker number,
-// the wait, or the retry count edits the previous card. A phase change is a new message.
+// Status cards for the admin chat. One pack run keeps one message and edits it
+// for every step. If the edit is rejected, the old message is deleted and one
+// replacement is sent.
 import { readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 export const ADMIN_CHAT_ID = '8502935020';
 
-const EDITABLE = new Set(['sending', 'waiting', 'retry']);
 const PHASES = new Set(['start', 'newpack', 'sending', 'waiting', 'retry', 'emoji', 'done', 'saved', 'link', 'error', 'failed']);
 
 const LABEL = {
@@ -72,17 +72,29 @@ export function formatAdminStatus(event, now = new Date()) {
   return lines.join('\n');
 }
 
-// Same kind, and exactly one of sticker number / wait seconds / retry count moved:
-// edit the card already in the chat. Any other change is a new message.
+function cardKey(event) {
+  return [
+    event.phase || '',
+    event.pack || '',
+    num(event.index),
+    num(event.total),
+    num(event.seconds),
+    num(event.attempt),
+    oneLine(event.lastLine),
+    oneLine(event.error),
+    oneLine(event.link),
+    oneLine(event.step),
+    String(event.requester || ''),
+  ].join('\0');
+}
+
+// One pack keeps one card. Emoji, the next send, a wait, a retry, an error,
+// and the saved link all edit that card. A different pack starts a new one.
 export function adminDelivery(prev, next) {
-  if (!prev || prev.phase !== next.phase) return { action: 'send' };
-  if (!EDITABLE.has(next.phase)) return { action: 'send' };
+  if (!prev) return { action: 'send' };
   if ((prev.pack || '') !== (next.pack || '')) return { action: 'send' };
-  if (String(prev.requester || '') !== String(next.requester || '')) return { action: 'send' };
-  const changed = ['index', 'seconds', 'attempt'].filter((key) => num(prev[key]) !== num(next[key]));
-  if (changed.length === 1) return { action: 'edit' };
-  if (changed.length === 0) return { action: 'skip' };
-  return { action: 'send' };
+  if (cardKey(prev) === cardKey(next)) return { action: 'skip' };
+  return { action: 'edit' };
 }
 
 export function adminJobText(job) {
@@ -238,8 +250,9 @@ export async function reportRunFailed({
   }
   const step = LABEL[event.phase] || event.phase || '';
   const io = telegramIo(fetchImpl, token);
+  const prev = stored && stored.messageId ? { messageId: stored.messageId, event } : null;
   try {
-    await deliverAdminStatus(io, ADMIN_CHAT_ID, null, {
+    await deliverAdminStatus(io, ADMIN_CHAT_ID, prev, {
       phase: 'failed',
       pack: event.pack || packs,
       index: event.index,
