@@ -19,8 +19,10 @@ import {
   waitStatusDue,
   scrollPageScript,
   settledImageReply,
+  unfinishedPack,
   leaveUnpublishedDraft,
   mustOpenNewPack,
+  nextCommand,
   packDialogOpen,
   resetForNewPack,
   wantsPicture,
@@ -173,6 +175,19 @@ test("eighteen accepted stickers continue at 019", () => {
   assert.equal(accepted.action, "continue");
   assert.equal(accepted.uploaded, 19);
   assert.equal(pack.images[accepted.uploaded].file, "020.png");
+});
+
+test("an open pack is saved with /done before /newpack", () => {
+  const ready = "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
+  const menu = "Команды\n/newpack — создать набор\n/done — завершить действие";
+  assert.equal(unfinishedPack(ready), true);
+  assert.equal(nextCommand(ready, "/newpack"), "/done");
+  assert.equal(nextCommand(ready, "/start"), "/done");
+  assert.equal(nextCommand("Это не картинка :)", "/newpack"), "/done");
+  assert.equal(unfinishedPack(menu), false);
+  assert.equal(nextCommand(menu, "/newpack"), "/newpack");
+  assert.equal(nextCommand("Набор «Маф» сохранён", "/newpack"), "/newpack");
+  assert.equal(nextCommand("Напишите название набора", "/newpack"), "/newpack");
 });
 
 test("a ready sticker does not wait for an emoji", () => {
