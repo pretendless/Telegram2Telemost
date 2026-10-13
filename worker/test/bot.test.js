@@ -14,8 +14,12 @@ import {
   claimNext,
   emptyQueue,
   enqueueRequest,
+  findUploadingReleaseId,
+  queueHasPendingWork,
   queueStatusText,
   realPackUrl,
+  shouldStartPipeline,
+  terminalProgress,
 } from "../src/logic.js";
 
 const PACK_URL = "https://messenger.360.yandex.ru/#/stickers/8377";
@@ -338,6 +342,122 @@ test("a priority chat is queued ahead of an older normal request, behind an acti
   assert.equal(queueStatusText(claimed.queue, 111).includes("Второй"), true);
   assert.match(queueStatusText(claimed.queue, 111), /перед ним 1/);
   assert.doesNotMatch(queueStatusText(claimed.queue, 222), /111/);
+});
+
+test("a finished request is not enqueued again", () => {
+  let queue = emptyQueue();
+  const req = {
+    chatId: 42,
+    title: "Лис",
+    links: ["https://t.me/addstickers/fox_one"],
+    priority: false,
+    createdAt: "2026-10-12T14:00:00.000Z",
+    stickers: 5,
+  };
+  const first = enqueueRequest(queue, req);
+  queue = first.queue;
+  queue = {
+    ...queue,
+    items: queue.items.map((item) => ({ ...item, status: "done" })),
+  };
+  const again = enqueueRequest(queue, req);
+  assert.equal(again.created, false);
+  assert.equal(again.duplicate, "done");
+});
+
+test("progress done releases the uploading row and dispatches the next restart", async () => {
+  const env = envWith();
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-1",
+          chatId: "99",
+          title: "Запад",
+          links: ["https://t.me/addstickers/zapad"],
+          priority: false,
+          createdAt: "2026-10-13T12:00:00.000Z",
+          status: "uploading",
+          stickers: 10,
+        },
+        {
+          id: "req-2",
+          chatId: "100",
+          title: "Восток",
+          links: ["https://t.me/addstickers/vostok"],
+          priority: false,
+          createdAt: "2026-10-13T12:01:00.000Z",
+          status: "queued",
+          stickers: 8,
+        },
+      ],
+    }),
+  );
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push(String(url));
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  const sendMessage = async () => ({ message_id: 1 });
+  const body = {
+    slug: "request-req-1",
+    title: "Запад",
+    status: "done",
+    uploaded: 10,
+    total: 10,
+    packUrl: PACK_URL,
+    queueRequestId: "req-1",
+    adminDelivered: true,
+  };
+  await handle(progressRequest(body), env, { sendMessage, fetch, waitUntil: (promise) => promise });
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items[0].status, "done");
+  assert.equal(calls.some((url) => url.endsWith("/dispatches")), true);
+});
+
+test("an accepted pack dispatches restart when Actions is idle", async () => {
+  const env = envWith();
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  env.BOT_KV.store.set("meta:seeded", "1");
+  const calls = [];
+  const fetch = async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  const text = "Запад\n\nhttps://t.me/addstickers/zapad";
+  await handle(packMessage(4242, text), env, {
+    sendMessage: async () => {},
+    stickerCount: async () => 10,
+    fetch,
+    waitUntil: (promise) => promise,
+  });
+  assert.equal(calls.some((url) => url.endsWith("/dispatches")), true);
+});
+
+test("pipeline start waits while a Telemost run is already active", () => {
+  const queue = enqueueRequest(emptyQueue(), {
+    chatId: 1,
+    title: "A",
+    links: ["https://t.me/addstickers/a"],
+    priority: false,
+    createdAt: "1",
+    stickers: 1,
+  }).queue;
+  queue.items[0].status = "uploading";
+  assert.equal(shouldStartPipeline(queue, true), false);
+  assert.equal(shouldStartPipeline(queue, false), true);
+  assert.equal(queueHasPendingWork(queue), true);
+  assert.equal(findUploadingReleaseId(queue, { title: "A", queueRequestId: queue.items[0].id }), queue.items[0].id);
+  assert.equal(terminalProgress({ status: "done", url: PACK_URL }), true);
 });
 
 test("an accepted priority request is one KV write and /status does not list", async () => {
