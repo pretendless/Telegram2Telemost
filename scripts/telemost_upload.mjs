@@ -528,6 +528,71 @@ export function unfinishedPack(text) {
   return false;
 }
 
+// The last created title that has not been saved. Any pack, not one fixed name.
+export function openPackTitle(messages) {
+  let title = '';
+  let open = false;
+  for (const message of messages || []) {
+    if (!message || message.own) continue;
+    const text = String(message.text || '');
+    const created = text.match(/Создан набор(?: стикеров)? «([^»]+)»/);
+    if (created) {
+      title = created[1];
+      open = true;
+    }
+    if (title && text.includes('«' + title + '»') && SAVED.test(text)) open = false;
+  }
+  return open ? title : '';
+}
+
+export function stickerSetName(link) {
+  const match = String(link || '').match(/addstickers\/([A-Za-z0-9_]+)/);
+  return match ? match[1] : '';
+}
+
+function byRequestTime(left, right) {
+  const a = String(left.createdAt || '');
+  const b = String(right.createdAt || '');
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return String(left.id || '') < String(right.id || '') ? -1 : 1;
+}
+
+// An open dialog restarts that pack from its first image. An idle dialog
+// takes the stored request that is already uploading, or the next queued one.
+export function restartTarget({ unfinished, title, catalogs, requests } = {}) {
+  const stored = requests || [];
+  if (unfinished) {
+    const catalog = (catalogs || []).find((pack) => pack && pack.title === title);
+    const named = stored.find((item) => item && item.title === title);
+    if (catalog) {
+      return {
+        action: 'restart',
+        title: catalog.title,
+        dir: catalog.dir || '',
+        requestId: named ? named.id : '',
+        links: named && named.links ? named.links : [],
+      };
+    }
+    if (named) return { action: 'restart', title: named.title, dir: '', requestId: named.id || '', links: named.links || [] };
+    const active = stored.find((item) => item && item.status === 'uploading');
+    if (!title && active) return { action: 'restart', title: active.title, dir: '', requestId: active.id || '', links: active.links || [] };
+    return { action: 'missing', title: title || '' };
+  }
+  const active = stored.find((item) => item && item.status === 'uploading');
+  if (active) return { action: 'upload', title: active.title, dir: '', requestId: active.id || '', links: active.links || [] };
+  const waiting = stored.filter((item) => item && item.status === 'queued').sort(byRequestTime);
+  const priority = waiting.filter((item) => item.priority);
+  const next = (priority.length ? priority : waiting)[0];
+  if (!next) return { action: 'idle' };
+  return { action: 'upload', title: next.title, dir: '', requestId: next.id || '', links: next.links || [] };
+}
+
+export function restartAfterClose(text) {
+  if (unfinishedPack(text)) return { action: 'stop' };
+  return { action: 'newpack', uploaded: 0 };
+}
+
 // /newpack and /start must not land in an open pack. /done comes first.
 export function nextCommand(seenText, intended) {
   if (unfinishedPack(seenText) && intended !== '/done') return '/done';
@@ -672,11 +737,12 @@ async function withRetry(label, fn, tries = 4) {
   throw err;
 }
 
-async function uploadPack(bot, dir, { close = false, note = async () => {}, dirRef = null } = {}) {
+async function uploadPack(bot, dir, { close = false, restart = false, note = async () => {}, dirRef = null } = {}) {
   const p = loadPack(dir);
   const m = p.meta;
-  const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
-  if (tm.status === 'done') { console.log(dir, 'already done'); return; }
+  let tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
+  if (restart) tm = m.telemost = resetForNewPack(tm);
+  else if (tm.status === 'done') { console.log(dir, 'already done'); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
   if (dirRef) dirRef.title = m.title;
   await note({ phase: 'start', pack: m.title, total: m.images.length });
@@ -686,8 +752,9 @@ async function uploadPack(bot, dir, { close = false, note = async () => {}, dirR
   const live = await bot.recentIncoming(2);
   const liveText = String(live.text || plan.lastText || '');
   plan = planUpload(plan, history.messages, liveText, m.images.length);
+  if (restart) plan = { action: 'newpack', uploaded: 0, lastText: '' };
   console.log(dir, 'chat-plan', plan.action, plan.uploaded, history.reachedTop ? 'top' : 'partial', unfinishedPack(liveText) ? 'open' : 'idle');
-  if (plan.action === 'newpack' && !history.reachedTop && !unfinishedPack(liveText)) {
+  if (!restart && plan.action === 'newpack' && !history.reachedTop && !unfinishedPack(liveText)) {
     throw new Error('chat history did not load; not sending images');
   }
   if (plan.action === 'newpack' && unfinishedPack(liveText)) {
@@ -922,6 +989,42 @@ async function finalizePack(bot, dir, note = async () => {}, dirRef = null) {
   if (!saved) return;
 }
 
+async function peekRestart(bot) {
+  const history = await bot.surveyChat();
+  const live = await bot.recentIncoming(4);
+  const choice = {
+    unfinished: unfinishedPack(live.text),
+    title: openPackTitle(history.messages),
+    liveText: String(live.text || '').replace(/\s+/g, ' ').trim().slice(0, 500),
+  };
+  mkdirSync(join(ROOT, 'logs'), { recursive: true });
+  writeFileSync(join(ROOT, 'logs', 'restart-choice.json'), JSON.stringify(choice));
+  console.log('restart-choice', choice.unfinished ? 'open' : 'idle', choice.title);
+}
+
+async function restartRun(bot, note, dirRef) {
+  const choice = JSON.parse(readFileSync(join(ROOT, 'logs', 'restart-choice.json'), 'utf8'));
+  const selected = JSON.parse(readFileSync(join(ROOT, 'logs', 'restart-pack.json'), 'utf8'));
+  if (!selected || selected.action === 'idle') {
+    await note({ phase: 'error', pack: 'очередь', error: 'нет запроса в очереди' });
+    return;
+  }
+  if (selected.action === 'missing' || !selected.dir) throw new Error('restart pack was not prepared');
+  const pack = loadPack(selected.dir);
+  if (dirRef) dirRef.title = pack.meta.title;
+  const live = await bot.recentIncoming(2);
+  if (choice.unfinished || unfinishedPack(live.text)) {
+    await note({ phase: 'done', pack: pack.meta.title, total: pack.meta.images.length, lastLine: live.text });
+    const closed = await withRetry('restart-done', () => bot.say('/done'));
+    const closedText = String(closed.text || '');
+    console.log(selected.dir, 'restart-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
+    if (restartAfterClose(closedText).action === 'stop') {
+      throw new Error(`refusing /newpack while a pack is still open: ${closedText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+    }
+  }
+  await uploadPack(bot, selected.dir, { close: true, restart: true, note, dirRef });
+}
+
 export function dirsForRun(dirs, { finalize = false, close = false } = {}) {
   const list = [...dirs];
   if (finalize) return list.filter((dir) => dir.startsWith('07'));
@@ -931,8 +1034,10 @@ export function dirsForRun(dirs, { finalize = false, close = false } = {}) {
 
 async function main() {
   const finalize = process.argv.includes('--finalize');
-  const close = process.argv.includes('--close');
-  const wanted = process.argv.slice(2).filter((arg) => arg !== '--finalize' && arg !== '--close');
+  const peek = process.argv.includes('--restart-peek');
+  const restart = process.argv.includes('--restart');
+  const close = process.argv.includes('--close') || restart;
+  const wanted = process.argv.slice(2).filter((arg) => !['--finalize', '--close', '--restart', '--restart-peek'].includes(arg));
   let dirs = readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort().filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
   const skipped = dirs.filter((dir) => !dirsForRun([dir], { finalize, close }).length);
   if (skipped.length) console.log('skip', skipped.join(' '));
@@ -941,6 +1046,27 @@ async function main() {
   const bot = new Bot(c);
   const dirRef = { dir: '', title: '' };
   const note = openAdminFeed(dirRef);
+  if (peek) {
+    try {
+      await peekRestart(bot);
+    } catch (e) {
+      log('restart', '', 'остановлено', e.message);
+      process.exitCode = 1;
+    }
+    c.close();
+    return;
+  }
+  if (restart) {
+    try {
+      await restartRun(bot, note, dirRef);
+    } catch (e) {
+      log('restart', '', 'остановлено', e.message);
+      await note({ phase: 'error', pack: dirRef.title || 'перезапуск', error: e.message });
+      process.exitCode = 1;
+    }
+    c.close();
+    return;
+  }
   for (const d of dirs) {
     dirRef.dir = d;
     try {

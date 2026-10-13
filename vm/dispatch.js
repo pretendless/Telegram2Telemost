@@ -1,4 +1,4 @@
-// Telegram /login, /connect and /upload → GitHub workflow_dispatch.
+// Telegram /login, /connect, /upload and /restart → GitHub workflow_dispatch.
 // No Node builtins: the Cloudflare Worker in PR #2 can import this file.
 
 export const DEFAULT_REPO = "pretendless/tg2tm";
@@ -59,7 +59,7 @@ export function assertRef(ref) {
 
 export function buildDispatch({ repo, workflow, ref, mode, account, chatId, packs }) {
   if (!ACCOUNT_RE.test(account)) throw new Error("account");
-  if (mode !== "login" && mode !== "upload") throw new Error("mode");
+  if (mode !== "login" && mode !== "upload" && mode !== "restart") throw new Error("mode");
   return {
     url: dispatchUrl(repo, workflow),
     body: {
@@ -92,4 +92,67 @@ export async function dispatchWorkflow(fetchImpl, { token, repo, workflow, ref, 
     body: JSON.stringify(built.body),
   });
   return { ok: res.status === 204, status: res.status };
+}
+
+const ACTIVE_RUN = new Set(["queued", "in_progress", "waiting", "requested", "pending"]);
+
+export function activeWorkflowRuns(payload) {
+  return ((payload && payload.workflow_runs) || []).filter((run) => run && ACTIVE_RUN.has(run.status) && /^[0-9]+$/.test(String(run.id)));
+}
+
+export function workflowRunsUrl(repo, workflow) {
+  return dispatchUrl(repo, workflow).replace(/\/dispatches$/, "/runs?per_page=20");
+}
+
+export function cancelRunUrl(repo, runId) {
+  if (!/^[0-9]{1,12}$/.test(String(runId))) throw new Error("run");
+  const [owner, name] = String(repo || "").split("/");
+  return `https://api.github.com/repos/${owner}/${name}/actions/runs/${runId}/cancel`;
+}
+
+async function readBody(response) {
+  if (!response || typeof response.json !== "function") return {};
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+// Dispatch one restart from main, then cancel the runs that were already active.
+// If GitHub refuses the dispatch, the current upload stays.
+export async function restartWorkflow(fetchImpl, { token, repo, workflow, ref, chatId, sleep, now } = {}) {
+  const headers = githubHeaders(token);
+  const listUrl = workflowRunsUrl(repo, workflow);
+  const startedAt = typeof now === "function" ? now() : Date.now();
+  const listed = async () => {
+    const response = await fetchImpl(listUrl, { headers });
+    const body = await readBody(response);
+    return { status: response && response.status, runs: activeWorkflowRuns(body), all: body.workflow_runs || [] };
+  };
+  const page = await listed();
+  if (page.status !== 200) return { ok: false, reason: "list", status: page.status };
+  const previous = page.runs.map((run) => run.id);
+  const dispatched = await dispatchWorkflow(fetchImpl, {
+    token,
+    repo,
+    workflow,
+    ref,
+    mode: "restart",
+    account: "default",
+    chatId,
+    packs: "",
+  });
+  if (!dispatched.ok) return { ok: false, reason: "dispatch", status: dispatched.status };
+  for (const id of previous) {
+    await fetchImpl(cancelRunUrl(repo, id), { method: "POST", headers });
+  }
+  let url = "";
+  for (let attempt = 0; attempt < 5 && !url; attempt++) {
+    if (sleep && attempt) await sleep(1000);
+    const again = await listed();
+    const fresh = (again.all || []).find((run) => Date.parse(run.created_at) >= startedAt - 15000 && run.html_url);
+    if (fresh) url = fresh.html_url;
+  }
+  return { ok: true, url };
 }

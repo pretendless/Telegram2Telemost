@@ -11,6 +11,7 @@
 // Secrets read from env: GH_DISPATCH_TOKEN, LOGIN_CHAT_IDS.
 // Optional: GH_REPO, TELEMOST_WORKFLOW, TELEMOST_VM_REF.
 
+import { ADMIN_CHAT_ID, isAdminChat } from "../scripts/admin_status.mjs";
 import {
   DEFAULT_REF,
   DEFAULT_REPO,
@@ -18,6 +19,7 @@ import {
   allowedChat,
   dispatchWorkflow,
   parseVmCommand,
+  restartWorkflow,
 } from "./dispatch.js";
 
 export function usageText(error) {
@@ -36,6 +38,53 @@ export function startedText(parsed) {
 
 export function githubFailText(status) {
   return `Не удалось запустить браузер: GitHub ответил ${status}. Workflow telemost-session.yml должен лежать в ветке по умолчанию.`;
+}
+
+export function restartReply({ ok, url, reason, status }) {
+  if (ok && url) {
+    return "Останавливаю текущую загрузку и запускаю одну новую с main. Если в Телемосте открыт набор, он будет закрыт через /done и начат заново со своего первого стикера. Если диалог пуст, возьму следующий запрос.\n" + url;
+  }
+  if (ok) return "Запуск принят, ссылка на Actions ещё не появилась. Второй запуск не создаю.";
+  if (reason === "still-running") {
+    return "Текущий запуск ещё не остановился. Новый не стартую, чтобы не открыть второй браузер. Пришлите /restart ещё раз через минуту.";
+  }
+  return `Не удалось перезапустить: GitHub ответил ${status || reason || "error"}.`;
+}
+
+export async function handleRestart(env, message, deps = {}) {
+  const send = deps.send;
+  if (!send) throw new Error("send");
+  const chatId = message && message.chat && message.chat.id;
+  if (!isAdminChat(chatId, ADMIN_CHAT_ID)) {
+    await send(env, chatId, "Эта команда только для администратора.");
+    return true;
+  }
+  if (!env || !env.GH_DISPATCH_TOKEN) {
+    await send(env, chatId, "Перезапуск не настроен: нет секрета GH_DISPATCH_TOKEN.");
+    return true;
+  }
+  const fetchImpl = deps.fetch || fetch;
+  let result;
+  try {
+    result = await restartWorkflow(fetchImpl, {
+      token: env.GH_DISPATCH_TOKEN,
+      repo: env.GH_REPO || DEFAULT_REPO,
+      workflow: env.TELEMOST_WORKFLOW || DEFAULT_WORKFLOW,
+      ref: DEFAULT_REF,
+      chatId,
+      sleep: deps.sleep,
+    });
+  } catch (err) {
+    console.error("restart failed", err && err.message);
+    result = { ok: false, reason: "error" };
+  }
+  const text = restartReply(result);
+  if (text.includes(String(env.GH_DISPATCH_TOKEN))) {
+    await send(env, chatId, "Не удалось перезапустить.");
+    return true;
+  }
+  await send(env, chatId, text);
+  return true;
 }
 
 export async function handleVmCommand(env, message, deps = {}) {

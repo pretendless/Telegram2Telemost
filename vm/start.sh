@@ -182,6 +182,17 @@ elif [ "$MODE" = "finalize" ]; then
     node scripts/telemost_upload.mjs --finalize "${pack_args[@]}" || status=$?
     node vm/login.mjs save || true
   fi
+elif [ "$MODE" = "restart-peek" ]; then
+  node vm/login.mjs restore || status=$?
+  if [ "$status" -eq 0 ]; then
+    node scripts/telemost_upload.mjs --restart-peek || status=$?
+  fi
+elif [ "$MODE" = "restart" ]; then
+  node vm/login.mjs restore || status=$?
+  if [ "$status" -eq 0 ]; then
+    node scripts/telemost_upload.mjs --restart || status=$?
+    node vm/login.mjs save || true
+  fi
 else
   node vm/login.mjs restore || status=$?
   if [ "$status" -eq 0 ]; then
