@@ -93,7 +93,12 @@ class Bot {
       const rows = [...document.querySelectorAll('article.message')].filter((a) => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
       return rows.map((a) => {
         if (!a.dataset.tg2tmId) a.dataset.tg2tmId = String(window.__tg2tmNext++);
-        return { id: a.dataset.tg2tmId, text: (a.innerText || '').replace(/\\s+/g, ' ').trim() };
+        return {
+          id: a.dataset.tg2tmId,
+          text: (a.innerText || '').replace(/\\s+/g, ' ').trim(),
+          // «сохранён и доступен по ссылке» keeps the pack URL only on <a href>.
+          links: [...a.querySelectorAll('a[href]')].map((x) => x.href),
+        };
       });
     })()`);
   }
@@ -104,31 +109,54 @@ class Bot {
 
   // A seen flag hides a bubble the bot rewrites in place. Compare text instead.
   // «Отправьте эмодзи» and the following «Стикер готов» are replies, not timeouts.
-  async waitForReply(baseline, { onWait, until } = {}) {
+  async waitForReply(baseline, { onWait, until, savedTimeoutMs = 20000 } = {}) {
     const started = Date.now();
     let lastSentAt = 0;
     let stable = '';
     let stableAt = 0;
+    let savedSeenAt = 0;
     for (;;) {
       const rows = await this.botRows();
       // A sticker wait treats an existing «Стикер готов» line as acceptance.
       // A command wait does not: /newpack and a title need a new bot line.
+      // /done waits for «сохранён» even when an older emoji ask is still in the
+      // changed text, and keeps polling until the sticker <a> appears.
       let seen;
       if (until === 'sticker') seen = stickerReplyText(baseline, rows);
+      else if (until === 'saved') seen = savedReplyText(baseline, rows);
       else {
         const changed = changedBotText(baseline, rows);
-        seen = { text: changed, kind: imageReply(changed) };
+        seen = { text: changed, links: changedBotLinks(baseline, rows), kind: imageReply(changed) };
       }
       const text = seen.text;
+      const links = seen.links || [];
       const kind = seen.kind;
       const stickerReply = kind === 'ready' || kind === 'emoji' || kind === 'reject';
       if (until === 'sticker' && stickerReply) {
-        return { text, links: [], seconds: (Date.now() - started) / 1000, kind };
+        return { text, links, seconds: (Date.now() - started) / 1000, kind };
       }
-      if (until !== 'sticker' && text.trim()) {
+      if (until === 'saved') {
+        if (SAVED.test(text)) {
+          if (!savedSeenAt) savedSeenAt = Date.now();
+          const url = extractPackUrl(text, links);
+          const waited = Date.now() - savedSeenAt;
+          // The href often lands a moment after the «сохранён» wording.
+          if (url || waited >= 2500) {
+            return { text, links, seconds: (Date.now() - started) / 1000, kind: 'saved' };
+          }
+        } else if (Date.now() - started >= savedTimeoutMs) {
+          // Let publishSavedPack re-read the chat or send /done again.
+          return {
+            text: text || lastBotLine(rows),
+            links: [...links, ...savedPackLinks(rows)],
+            seconds: (Date.now() - started) / 1000,
+            kind: kind === 'pending' ? 'other' : kind,
+          };
+        }
+      } else if (until !== 'sticker' && text.trim()) {
         const sameFor = text === stable ? Date.now() - stableAt : 0;
         if (kind !== 'pending' || sameFor >= 400) {
-          return { text, links: [], seconds: (Date.now() - started) / 1000, kind: kind === 'pending' ? 'other' : kind };
+          return { text, links, seconds: (Date.now() - started) / 1000, kind: kind === 'pending' ? 'other' : kind };
         }
       }
       if (text !== stable) {
@@ -147,14 +175,16 @@ class Bot {
   async recentIncoming(limit = 4) {
     await this.ensureChat();
     await this.c.ev(`(() => { const s = document.querySelector('.ui-InfiniteList-ScrollContainer'); if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight; })()`);
+    const slice = Math.max(1, Number(limit) || 4);
     const text = await this.c.ev(`(() => {
       const rows = [...document.querySelectorAll('article.message')].filter(a => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
-      return rows.slice(-${Number(limit) || 4}).map(a => (a.innerText || '').trim()).filter(Boolean).join('\\n');
+      return rows.slice(-${slice}).map(a => (a.innerText || '').trim()).filter(Boolean).join('\\n');
     })()`);
+    // The command menu can be the last bubble. The pack URL sits on the
+    // «сохранён» message just above it, so scan the whole recent window.
     const links = await this.c.ev(`(() => {
       const rows = [...document.querySelectorAll('article.message')].filter(a => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
-      const last = rows[rows.length - 1];
-      return last ? [...last.querySelectorAll('a[href]')].map(a => a.href) : [];
+      return rows.slice(-${slice}).flatMap((row) => [...row.querySelectorAll('a[href]')].map((a) => a.href));
     })()`);
     return { text: text || '', links: links || [] };
   }
@@ -277,6 +307,7 @@ const ASK_EMOJI = /Отправьте эмодзи/;
 const NOT_EMOJI = /Это не эмодзи/;
 const ASK_TITLE = /Напишите название/;
 const CREATED = /Создан набор/;
+const SAVED = /сохранён/i;
 const PUBLISHED = /сохранён|\/stickers\//;
 const COMMAND_MENU = /\/newpack/;
 const ASK_PICTURE = /картинк|изображен|фото|Отправьте стикер|Пришлите стикер|отправьте файл/i;
@@ -333,6 +364,50 @@ export function changedBotText(baseline, rows) {
     parts.push(row.text);
   }
   return parts.join('\n');
+}
+
+// Collect hrefs from bubbles whose text just changed. Late-hydrated links on a
+// «сохранён» bubble are gathered separately by savedPackLinks.
+export function changedBotLinks(baseline, rows) {
+  const prev = new Map((baseline || []).map((row) => [String(row.id), row.text]));
+  const links = [];
+  for (const row of rows || []) {
+    if (!row || !row.text) continue;
+    if (replyCore(prev.get(String(row.id))) === replyCore(row.text)) continue;
+    for (const href of row.links || []) links.push(href);
+  }
+  return links;
+}
+
+// The pack URL is only on the «сохранён» <a>, including when the command menu
+// is the newest bot line and an older emoji ask is still in the changed text.
+export function savedPackLinks(rows) {
+  const links = [];
+  for (const row of rows || []) {
+    if (!row || !SAVED.test(row.text || '')) continue;
+    for (const href of row.links || []) links.push(href);
+  }
+  return links;
+}
+
+export function savedReplyText(baseline, rows) {
+  const changed = changedBotText(baseline, rows);
+  const fromSaved = (rows || [])
+    .filter((row) => row && SAVED.test(row.text || ''))
+    .map((row) => row.text);
+  const text = [changed, ...fromSaved].filter(Boolean).join('\n');
+  const links = [...changedBotLinks(baseline, rows), ...savedPackLinks(rows)];
+  if (SAVED.test(text)) return { text, links, kind: 'saved' };
+  return { text: changed, links, kind: imageReply(changed) };
+}
+
+// «сохранён» without a /stickers/ href is not enough to mark the upload done.
+export function packSavedReply(text, links) {
+  const body = String(text || '');
+  if (!SAVED.test(body)) return { ok: false, reason: 'not-saved', url: '' };
+  const url = extractPackUrl(body, links);
+  if (!url) return { ok: false, reason: 'missing-url', url: '' };
+  return { ok: true, reason: 'saved', url };
 }
 
 export function lastBotLine(rows) {
@@ -686,9 +761,6 @@ export function nextCommand(seenText, intended) {
   return intended;
 }
 
-// The saved 14-sticker draft is not the pack the bot is in now. Open a new one.
-const SAVED = /сохранён/i;
-
 // After a sticker is accepted the bot says «Стикер готов» and still holds the
 // unpublished pack. That is the offer to finish it with /done. The idle command
 // menu also names /done, and a brand-new pack only asks for a picture: neither
@@ -1028,29 +1100,62 @@ async function rememberAndPost(p, dir, url, replyText, note = async () => {}) {
   console.log(dir, 'channel-posted', '@tg2tm');
 }
 
+async function resolveSavedPackUrl(bot, text, links, dir) {
+  let body = String(text || '');
+  let hrefs = [...(links || [])];
+  let url = extractPackUrl(body, hrefs);
+  if (packSavedReply(body, hrefs).ok) return { text: body, links: hrefs, url };
+  // Telemost often paints «сохранён и доступен по ссылке» before the <a> href
+  // is in the DOM, and the idle command menu can sit above that bubble.
+  for (let attempt = 0; attempt < 25 && SAVED.test(body) && !url; attempt++) {
+    await sleep(200);
+    const seen = await bot.recentIncoming(8);
+    body = [body, seen.text].filter(Boolean).join('\n');
+    hrefs = [...hrefs, ...(seen.links || [])];
+    url = extractPackUrl(body, hrefs);
+    console.log(dir, 'done-link-wait', attempt + 1, url ? 'ok' : 'pending');
+  }
+  return { text: body, links: hrefs, url };
+}
+
 async function publishSavedPack(bot, p, dir, note = async () => {}) {
   const m = p.meta;
   const tm = m.telemost;
   await note({ phase: 'done', pack: m.title, lastLine: tm.botReply || '' });
-  const done = await bot.say('/done');
-  const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
-  console.log(dir, 'done-reply', doneText.slice(0, 400));
-  const url = extractPackUrl(done.text, done.links);
-  if (!SAVED.test(done.text) || !url) {
-    console.log(dir, 'draft-gone', 'done did not save the pack');
+  let doneText = '';
+  let saved = { ok: false, reason: 'not-saved', url: '' };
+  // Wait for «сохранён», not the first non-pending line (an older emoji ask
+  // can ride along in the changed text and would stop the wait too early).
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const done = await bot.say('/done', { until: 'saved' });
+    const recovered = await resolveSavedPackUrl(bot, done.text, done.links, dir);
+    doneText = String(recovered.text || '').replace(/\s+/g, ' ').trim();
+    console.log(dir, 'done-reply', attempt, doneText.slice(0, 400));
+    saved = packSavedReply(recovered.text, recovered.links);
+    if (saved.ok) break;
+    // Still holding the draft: /done may have been ignored. Try again.
+    if (finalizeDecision(recovered.text).action === 'done' || READY.test(recovered.text)) {
+      console.log(dir, 'done-retry', saved.reason || 'not-saved');
+      await sleep(500);
+      continue;
+    }
+    break;
+  }
+  if (!saved.ok) {
+    console.log(dir, 'draft-gone', saved.reason === 'missing-url' ? 'done saved without pack url' : 'done did not save the pack');
     return false;
   }
   tm.status = 'done';
-  tm.packUrl = url;
+  tm.packUrl = saved.url;
   tm.error = null;
   tm.uploaded = m.images.length;
   tm.pendingFile = null;
   tm.botReply = doneText.slice(0, 300);
   savePack(p);
-  console.log(dir, 'pack-url', url);
+  console.log(dir, 'pack-url', saved.url);
   await note({ phase: 'saved', pack: m.title, lastLine: doneText });
-  await note({ phase: 'link', pack: m.title, lastLine: doneText, link: url });
-  await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, url);
+  await note({ phase: 'link', pack: m.title, lastLine: doneText, link: saved.url });
+  await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, saved.url);
   console.log(dir, 'channel-posted', '@tg2tm');
   return true;
 }
