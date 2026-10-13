@@ -10,6 +10,7 @@ import {
 } from "../../scripts/admin_status.mjs";
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
 import { startPipelineIfIdle } from "../../vm/queue_runner.js";
+import { QUEUE_REASON } from "../../vm/dispatch_reason.js";
 import { defaultSessionReason, notifySessionStartOnce } from "../../vm/session_notify.js";
 import {
   CHANNEL_CHAT,
@@ -334,7 +335,7 @@ async function finishQueueItem(env, pack, prev, deps) {
   const status = pack.status === "error" ? "error" : "done";
   const released = releaseRequest(queue, id, status);
   if (released.changed) await writeQueue(env.BOT_KV, released.queue);
-  schedulePipeline(env, released.queue, deps, { dispatchReason: "очередь: следующий пак после завершения" });
+  schedulePipeline(env, released.queue, deps, { dispatchReason: QUEUE_REASON.afterFinish });
   return released.queue;
 }
 
@@ -525,7 +526,12 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       out = queueStatusText(queue, chatId) || statusText(await listPacks(env.BOT_KV));
     }
   } else if (cmd === "/restart") {
-    await handleRestart(env, message, { send, fetch: deps.fetch, sleep: deps.sleep });
+    await handleRestart(env, message, {
+      send,
+      fetch: deps.fetch,
+      sleep: deps.sleep,
+      getQueue: async () => readQueue(env.BOT_KV),
+    });
     return;
   } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
     await handleVmCommand(env, message, { send, fetch: deps.fetch });
@@ -579,7 +585,7 @@ async function answer(env, update, send, stickerCount, deps = {}) {
           userCardAfterAccept = { item: stored.item, queue: stored.queue };
         }
         if (stored.duplicate !== "done") {
-          schedulePipeline(env, queueAfter, deps, { dispatchReason: "очередь: новый запрос принят" });
+          schedulePipeline(env, queueAfter, deps, { dispatchReason: QUEUE_REASON.newRequest });
         }
       }
     }

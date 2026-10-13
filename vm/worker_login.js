@@ -21,6 +21,7 @@ import {
   parseVmCommand,
   restartWorkflow,
 } from "./dispatch.js";
+import { adminRestartReason, adminUploadReason } from "./dispatch_reason.js";
 
 export function usageText(error) {
   if (error === "upload" || error === "packs") {
@@ -64,6 +65,14 @@ export async function handleRestart(env, message, deps = {}) {
     return true;
   }
   const fetchImpl = deps.fetch || fetch;
+  let queue = { priority: [], items: [] };
+  if (typeof deps.getQueue === "function") {
+    try {
+      queue = await deps.getQueue();
+    } catch {
+      queue = { priority: [], items: [] };
+    }
+  }
   let result;
   try {
     result = await restartWorkflow(fetchImpl, {
@@ -73,7 +82,7 @@ export async function handleRestart(env, message, deps = {}) {
       ref: DEFAULT_REF,
       chatId,
       sleep: deps.sleep,
-      dispatchReason: "админ: /restart",
+      dispatchReason: adminRestartReason(queue),
     });
   } catch (err) {
     console.error("restart failed", err && err.message);
@@ -110,7 +119,7 @@ export async function handleVmCommand(env, message, deps = {}) {
   let result;
   try {
     const dispatchReason = parsed.mode === "upload"
-      ? `админ: /upload ${parsed.packs}`
+      ? adminUploadReason(parsed.packs)
       : "админ: /login или /connect";
     result = await dispatchWorkflow(fetchImpl, {
       token: env.GH_DISPATCH_TOKEN,

@@ -1,4 +1,6 @@
 // GitHub Actions: tell the Worker admin chat that this run started (once per run id).
+import { enrichDispatchReason } from "../vm/dispatch_reason.js";
+import { defaultPacksRoot, titlesForPackNumbers } from "../vm/pack_titles.js";
 import { defaultSessionReason } from "../vm/session_notify.js";
 
 const url = process.env.TG2TM_SESSION_NOTIFY_URL
@@ -6,8 +8,14 @@ const url = process.env.TG2TM_SESSION_NOTIFY_URL
 const secret = process.env.UPLOADER_SECRET || "";
 const runId = String(process.env.RUN_ID || process.env.GITHUB_RUN_ID || "").trim();
 const runUrl = String(process.env.RUN_URL || "").trim();
-const reason = String(process.env.DISPATCH_REASON || "").trim()
-  || defaultSessionReason(process.env.MODE || process.env.INPUT_MODE || "");
+const mode = process.env.MODE || process.env.INPUT_MODE || "";
+const packs = process.env.PACKS || process.env.INPUT_PACKS || "";
+const reason = enrichDispatchReason({
+  dispatchReason: String(process.env.DISPATCH_REASON || "").trim(),
+  mode,
+  packs,
+  resolveTitles: (nums) => titlesForPackNumbers(nums, defaultPacksRoot(import.meta.url)),
+}) || defaultSessionReason(mode);
 
 async function main() {
   if (!url || !secret || !runId) {
