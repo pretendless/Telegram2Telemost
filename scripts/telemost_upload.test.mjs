@@ -8,6 +8,10 @@ import {
   dirsForRun,
   extractPackUrl,
   finalizeDecision,
+  packSavedReply,
+  savedReplyText,
+  changedBotLinks,
+  savedPackLinks,
   afterImageAttempts,
   afterSendReply,
   changedBotText,
@@ -273,6 +277,33 @@ test("finalize sends /done only after a sticker is ready and the pack is still o
     extractPackUrl("Набор «Сэт» сохранён", ["https://t.me/addstickers/x", "https://messenger.360.yandex.ru/#/stickers/9999"]),
     "https://messenger.360.yandex.ru/#/stickers/9999",
   );
+});
+
+test("done save needs сохранён plus the sticker href, not plain «по ссылке» wording", () => {
+  const wording = "Стикеры Отправьте эмодзи для стикера. 15:30 Набор «Маф, Изис и Агнес» сохранён и доступен по ссылке. /start — показать команды /newpack — создать набор /done — завершить действие 15:30";
+  assert.equal(packSavedReply(wording, []).ok, false);
+  assert.equal(packSavedReply(wording, []).reason, "missing-url");
+  assert.equal(
+    packSavedReply(wording, ["https://messenger.360.yandex.ru/#/stickers/8401"]).url,
+    "https://messenger.360.yandex.ru/#/stickers/8401",
+  );
+  const baseline = [{ id: "1", text: "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done 15:30" }];
+  const rows = [
+    { id: "1", text: "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done 15:30", links: [] },
+    { id: "2", text: "Отправьте эмодзи для стикера. 15:30", links: [] },
+    {
+      id: "3",
+      text: "Набор «Маф, Изис и Агнес» сохранён и доступен по ссылке. 15:30",
+      links: ["https://messenger.360.yandex.ru/#/stickers/8401"],
+    },
+    { id: "4", text: "/start — показать команды\n/newpack — создать набор\n/done — завершить действие 15:30", links: [] },
+  ];
+  const seen = savedReplyText(baseline, rows);
+  assert.equal(seen.kind, "saved");
+  assert.match(seen.text, /сохранён/);
+  assert.equal(extractPackUrl(seen.text, seen.links), "https://messenger.360.yandex.ru/#/stickers/8401");
+  assert.deepEqual(savedPackLinks(rows), ["https://messenger.360.yandex.ru/#/stickers/8401"]);
+  assert.ok(changedBotLinks(baseline, rows).includes("https://messenger.360.yandex.ru/#/stickers/8401"));
 });
 
 test("a reply that is still asking for an emoji does not continue", async () => {
