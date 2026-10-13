@@ -544,12 +544,12 @@ export function stickerReplyText(baseline, rows, opts = {}) {
   const thread = Array.isArray(opts.thread) ? opts.thread : null;
   const bots = thread ? thread.filter((row) => row && !row.own) : (rows || []);
   const changed = changedBotText(baseline, bots);
-  const changedKind = imageReply(changed);
-  if (changedKind === 'emoji' || changedKind === 'reject' || changedKind === 'ready') {
-    return { text: changed, kind: changedKind };
-  }
   const afterOwnId = opts.afterOwnId;
-  if (afterOwnId != null && thread) {
+  // Live chat waits must anchor on a bot line *after* our outbound bubble.
+  // changedBotText alone would accept an old «Стикер готов» above the image
+  // and send the next file while the bot is still silent.
+  if (thread) {
+    if (afterOwnId == null) return { text: changed, kind: 'pending' };
     const after = botRepliesAfterOwn(thread, afterOwnId);
     for (let i = after.length - 1; i >= 0; i--) {
       const kind = imageReply(after[i].text);
@@ -557,9 +557,11 @@ export function stickerReplyText(baseline, rows, opts = {}) {
         return { text: after[i].text, kind };
       }
     }
-    // Our send is on screen; a ready that only exists *before* it is the
-    // previous sticker. Keep waiting (or stall) instead of racing ahead.
     return { text: changed, kind: 'pending' };
+  }
+  const changedKind = imageReply(changed);
+  if (changedKind === 'emoji' || changedKind === 'reject' || changedKind === 'ready') {
+    return { text: changed, kind: changedKind };
   }
   const last = lastBotLine(bots);
   const prev = lastBotLine(baseline);
@@ -1246,22 +1248,36 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     let accepted = false;
     let rejects = 0;
     let stalls = 0;
+    // One outbound action at a time: image, then optional emoji, then wait for ready.
+    let outboundStep = 'image';
+    let emojiAnswerText = '';
+    tm.pendingFile = img.file;
+    savePack(p);
+    const recoverFromStall = async (reply, label) => {
+      stalls += 1;
+      log(m.title, img.file, `${label} ${stalls}`, String(reply.text || '').replace(/\s+/g, ' ').trim().slice(0, 180));
+      await note({
+        phase: 'waiting',
+        pack: m.title,
+        index: i + 1,
+        total: m.images.length,
+        seconds: Math.round(reply.seconds || 0),
+        lastLine: waitLastLine(30, reply.text || 'нет ответа, перезагрузка'),
+      });
+      await bot.recoverChat();
+    };
     while (!accepted) {
-      const reply = await bot.sendImage(file, { onWait });
+      let reply;
+      if (outboundStep === 'image') {
+        reply = await bot.sendImage(file, { onWait });
+      } else {
+        const text = emojiAnswerText || emojiAnswer('', img.emoji);
+        reply = await bot.say(text, { onWait, until: 'sticker' });
+      }
       const shown = String(reply.text || '').replace(/\s+/g, ' ').trim();
-      console.log(dir, 'bot', reply.kind, shown.slice(0, 180));
+      console.log(dir, 'bot', outboundStep, reply.kind, shown.slice(0, 180));
       if (reply.kind === 'stall' || afterSendReply(reply.kind) === 'recover') {
-        stalls += 1;
-        log(m.title, img.file, `зависание, перезагрузка ${stalls}`, shown);
-        await note({
-          phase: 'waiting',
-          pack: m.title,
-          index: i + 1,
-          total: m.images.length,
-          seconds: Math.round(reply.seconds || 0),
-          lastLine: waitLastLine(30, shown || 'нет ответа, перезагрузка'),
-        });
-        await bot.recoverChat();
+        await recoverFromStall(reply, outboundStep === 'image' ? 'зависание, перезагрузка' : 'зависание после эмодзи');
         continue;
       }
       if (reply.kind === 'reject') {
@@ -1275,24 +1291,22 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
           savePack(p);
           break;
         }
+        outboundStep = 'image';
         await sleep(1000);
         continue;
       }
-      let done = reply;
-      if (reply.kind === 'emoji') {
+      if (outboundStep === 'image' && reply.kind === 'emoji') {
         console.log(dir, 'emoji', img.file);
         await note({ phase: 'emoji', pack: m.title, index: i + 1, total: m.images.length, lastLine: shown });
-        done = await bot.say(emojiAnswer(reply.text, img.emoji), { onWait, until: 'sticker' });
+        emojiAnswerText = emojiAnswer(reply.text, img.emoji);
+        outboundStep = 'emoji';
+        continue;
+      }
+      let done = reply;
+      if (outboundStep === 'emoji' && reply.kind === 'emoji') {
+        done = await bot.say('🙂', { onWait, until: 'sticker' });
         if (done.kind === 'stall') {
-          stalls += 1;
-          log(m.title, img.file, `зависание после эмодзи ${stalls}`, String(done.text || ''));
-          await bot.recoverChat();
-          continue;
-        }
-        if (done.kind === 'emoji') done = await bot.say('🙂', { onWait, until: 'sticker' });
-        if (done.kind === 'stall') {
-          stalls += 1;
-          await bot.recoverChat();
+          await recoverFromStall(done, 'зависание после эмодзи');
           continue;
         }
         if (done.kind === 'emoji') {
@@ -1300,8 +1314,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
           done = await bot.waitForReply(baseline, { onWait, until: 'sticker' });
         }
         if (done.kind === 'stall') {
-          stalls += 1;
-          await bot.recoverChat();
+          await recoverFromStall(done, 'зависание после эмодзи');
           continue;
         }
         const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
@@ -1317,6 +1330,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
             savePack(p);
             break;
           }
+          outboundStep = 'image';
           await sleep(1000);
           continue;
         }
@@ -1326,6 +1340,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       lastText = done.text;
       await note({ phase: 'ready', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
       accepted = true;
+      tm.pendingFile = null;
     }
     if (!accepted) continue;
     tm.uploaded = i + 1;

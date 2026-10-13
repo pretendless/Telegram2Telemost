@@ -254,6 +254,53 @@ test("an existing «Стикер готов» line does not advance until a new 
   assert.equal(stickerReplyText(asked, rewritten).kind, "ready");
 });
 
+test("changed bot text above our image does not count as ready", () => {
+  const line = "Стикеры Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
+  const baseline = [{ id: "9", text: `${line} 23:10` }];
+  const thread = [
+    { id: "9", own: false, text: `${line} 23:11` },
+    { id: "12", own: true, text: "фото 23:11" },
+  ];
+  // Run 38421357861: changedBotText saw «Стикер готов» above the new image and sent N+2.
+  assert.equal(
+    stickerReplyText(baseline, thread.filter((r) => !r.own), { thread, afterOwnId: "12" }).kind,
+    "pending",
+  );
+  assert.equal(stickerReplyText(baseline, thread.filter((r) => !r.own), { thread, afterOwnId: null }).kind, "pending");
+});
+
+test("must not treat sticker N+1 as ready before bot replies to sticker N", () => {
+  const ready = "Стикеры Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
+  const baseline = [{ id: "9", text: `${ready} 23:11` }];
+  const afterSend = [
+    { id: "9", own: false, text: `${ready} 23:11` },
+    { id: "10", own: true, text: "стикер-10 23:11" },
+  ];
+  assert.equal(
+    stickerReplyText(baseline, afterSend.filter((r) => !r.own), { thread: afterSend, afterOwnId: "10" }).kind,
+    "pending",
+  );
+  const replied = [
+    ...afterSend,
+    { id: "11", own: false, text: "Стикеры Отправьте эмодзи для стикера. 23:12" },
+  ];
+  assert.equal(
+    stickerReplyText(baseline, replied.filter((r) => !r.own), { thread: replied, afterOwnId: "10" }).kind,
+    "emoji",
+  );
+  const done = [
+    { id: "9", own: false, text: `${ready} 23:11` },
+    { id: "10", own: true, text: "стикер-10 23:11" },
+    { id: "11", own: false, text: `${ready} 23:12` },
+  ];
+  assert.equal(
+    stickerReplyText(baseline, done.filter((r) => !r.own), { thread: done, afterOwnId: "10" }).kind,
+    "ready",
+  );
+  assert.equal(afterSendReply("ready"), "next");
+  assert.equal(afterSendReply("pending"), "wait");
+});
+
 test("a ready after our outbound bubble advances; the old ready before it does not", () => {
   const line = "Стикеры Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
   const baseline = [{ id: "9", text: `${line} 20:08` }];
