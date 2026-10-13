@@ -10,7 +10,9 @@ import {
   formatAdminStatus,
   isAdminChat,
   failurePackName,
+  reportRestartNoUpload,
   reportRunFailed,
+  restartNoUploadCopy,
 } from './admin_status.mjs';
 
 const pack = 'Маф, Изис и Агнес';
@@ -224,6 +226,45 @@ test('a failed Actions run sends one forwardable card and skips when the error w
   rmSync(dir, { recursive: true });
   await reportRunFailed({ fetchImpl, token: '', statePath: path });
   assert.equal(sent.length, 1);
+});
+
+test('a quiet restart idle posts reason and next action to admin', async () => {
+  const empty = restartNoUploadCopy({ reason: 'empty-queue', lastLine: '/done — завершить действие' });
+  assert.equal(empty.pack, 'перезапуск');
+  assert.match(empty.error, /очередь пуста/);
+  assert.match(empty.next, /пришлите пак/);
+  const secret = restartNoUploadCopy({ reason: 'no-uploader-secret' });
+  assert.match(secret.error, /UPLOADER_SECRET/);
+  assert.match(secret.next, /секреты Actions/);
+
+  const sent = [];
+  const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'restart-idle-'));
+  writeFileSync(join(dir, 'restart-pack.json'), JSON.stringify({
+    action: 'idle',
+    title: '',
+    lastLine: '/done — завершить действие',
+    reason: 'no-uploader-secret',
+  }));
+  await reportRestartNoUpload({
+    fetchImpl: async (_url, options) => {
+      sent.push(JSON.parse(options.body).text);
+      return { ok: true, json: async () => ({ ok: true, result: { message_id: 5 } }) };
+    },
+    token: 'bot-token',
+    statePath: join(dir, 'missing-admin.json'),
+    logsDir: dir,
+    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/38416619883',
+  });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /«перезапуск»/);
+  assert.match(sent[0], /ошибка: очередь недоступна/);
+  assert.match(sent[0], /дальше: проверьте секреты Actions/);
+  assert.match(sent[0], /бот: \/done — завершить действие/);
+  assert.match(sent[0], /actions\/runs\/38416619883/);
+  rmSync(dir, { recursive: true });
 });
 
 test('a restart failure names the open pack, or says перезапуск when the title is still unknown', async () => {

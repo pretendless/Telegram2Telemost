@@ -13,12 +13,23 @@ export function githubOutputValue(value) {
   return String(value ?? '').replace(/[\r\n]+/g, ' ').trimEnd();
 }
 
-export function restartGithubOutput({ action, title = '', lastLine = '' } = {}) {
+export function restartGithubOutput({ action, title = '', lastLine = '', reason = '' } = {}) {
   return [
     `action=${githubOutputValue(action)}`,
     `restart_seen_title=${githubOutputValue(title)}`,
     `restart_seen_last_line=${githubOutputValue(lastLine)}`,
+    `restart_reason=${githubOutputValue(reason)}`,
   ].join('\n') + '\n';
+}
+
+// Why prepare stopped without an upload. The workflow skips Run browser on
+// idle; admin_status turns this into a Telegram card.
+export function restartQuietReason({ action, queueReadable = true } = {}) {
+  if (action === 'idle' && !queueReadable) return 'no-uploader-secret';
+  if (action === 'idle') return 'empty-queue';
+  if (action === 'close') return 'close-open-dialog';
+  if (action === 'seen') return 'unmatched-title';
+  return action || '';
 }
 
 function catalogs() {
@@ -29,6 +40,10 @@ function catalogs() {
       const meta = JSON.parse(readFileSync(join(packs, dir, 'pack.json'), 'utf8'));
       return { title: meta.title, dir };
     });
+}
+
+function queueReadable() {
+  return Boolean(process.env.UPLOADER_SECRET) && Boolean(process.env.TG2TM_PROGRESS_URL);
 }
 
 async function storedRequests() {
@@ -86,6 +101,7 @@ async function main() {
   const seen = { title, lastLine };
   // Keep diagnostics off stdout when that stream is GITHUB_OUTPUT.
   console.error('restart-seen', JSON.stringify(seen));
+  const canReadQueue = queueReadable();
   const target = restartTarget({
     unfinished: Boolean(choice.unfinished),
     title,
@@ -95,10 +111,18 @@ async function main() {
   });
   mkdirSync(join(ROOT, 'logs'), { recursive: true });
   if (target.action === 'idle' || target.action === 'seen' || target.action === 'close') {
-    writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify({ ...target, ...seen, liveText: choice.liveText || '' }));
-    if (githubOutput) writeGithubOutput({ action: target.action, ...seen });
+    const reason = restartQuietReason({ action: target.action, queueReadable: canReadQueue });
+    writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify({
+      ...target,
+      ...seen,
+      liveText: choice.liveText || '',
+      reason,
+      queueReadable: canReadQueue,
+    }));
+    if (githubOutput) writeGithubOutput({ action: target.action, ...seen, reason });
     // Empty or clock-only title is fine: close the open dialog, or report a
     // real unmatched title as "seen". Neither may write invalid GITHUB_OUTPUT.
+    // idle skips Run browser; the workflow posts an admin card for that case.
     process.exit(0);
   }
   const dir = target.dir || writeRequestPack(target);

@@ -192,6 +192,17 @@ jobs:
             -v "$PWD/logs:/opt/tg2tm/logs" \
             tg2tm-browser
 
+      # idle skips Run browser on purpose. Still tell admin why — a green run
+      # with no Telegram card looks like the bot did nothing.
+      - name: Tell admin restart uploaded nothing
+        if: success() && steps.in.outputs.mode == 'restart' && steps.prepare.outputs.action == 'idle'
+        env:
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ steps.in.outputs.chat_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESTART_REASON: ${{ steps.prepare.outputs.restart_reason }}
+        run: node scripts/admin_status.mjs --restart-no-upload
+
       - name: Store encrypted session
         if: success() && (steps.in.outputs.mode == 'login' || steps.session.outputs.present == 'yes')
         uses: actions/upload-artifact@v4
