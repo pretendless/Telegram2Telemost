@@ -431,7 +431,11 @@ export function unstickReply({ reason, released, actionsRunning }) {
     return "Зависших строк «загружается» нет.";
   }
   const titles = released.map((item) => `«${item.title}»`).join(", ");
-  return `Снял зависание: ${titles} — снова в очереди. При необходимости /restart или дождитесь автозапуска.`;
+  const one = released.length === 1;
+  const subject = one ? "Набор" : "Наборы";
+  const wait = one ? "ждёт" : "ждут";
+  const loading = one ? "не грузится" : "не грузятся";
+  return `Снял блокировку «загружается» у ${titles}. ${subject} ${wait} в очереди — сейчас ${loading}. Запускаю pipeline: следующий пак по приоритету (или /restart).`;
 }
 
 // Priority requests pass normal ones. An item already uploading stays in front and is not replaced.
@@ -552,7 +556,7 @@ export function adminQueueOverviewText(queue, activePack) {
   if (uploading && waiting.length) {
     lines.push("");
     lines.push(
-      "Подсказка: в очереди есть ожидающие, а в списке ещё «загружается». Если Actions не идут — /unstick; затем /restart или автозапуск возьмёт следующий запрос.",
+      "Подсказка: в очереди есть ожидающие, а в списке ещё «загружается». Если Actions не идут — /unstick (снимет блокировку и запустит следующий пак).",
     );
   }
   lines.push("");

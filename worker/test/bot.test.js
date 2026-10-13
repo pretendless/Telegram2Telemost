@@ -901,7 +901,12 @@ test("/unstick refuses while Actions runs and releases uploading when idle", asy
   assert.equal(stored.items[0].status, "uploading");
 
   sent.length = 0;
-  const fetchIdle = async (url) => {
+  const calls = [];
+  const fetchIdle = async (url, init) => {
+    calls.push({
+      url: String(url),
+      body: init && init.body ? JSON.parse(init.body) : null,
+    });
     if (String(url).includes("/runs?")) {
       return { status: 200, json: async () => ({ workflow_runs: [] }) };
     }
@@ -910,12 +915,19 @@ test("/unstick refuses while Actions runs and releases uploading when idle", asy
   await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, {
     sendMessage: async (_env, _chatId, text) => sent.push(text),
     fetch: fetchIdle,
+    waitUntil: (promise) => promise,
   });
   assert.match(sent[0], /Застрял/);
-  assert.match(sent[0], /снова в очереди/);
+  assert.match(sent[0], /блокировку «загружается»/);
+  assert.match(sent[0], /ждёт в очереди/);
+  assert.doesNotMatch(sent[0], /снова в очереди/);
+  assert.match(sent[0], /Запускаю pipeline/);
   stored = JSON.parse(env.BOT_KV.store.get("queue"));
   assert.equal(stored.items.find((item) => item.id === "req-stuck").status, "queued");
   assert.equal(unstickUploadingQueue(stored).changed, false);
+  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
+  assert.ok(dispatch);
+  assert.match(dispatch.body.inputs.dispatch_reason, /unstick|Следующий|Застрял/i);
 });
 
 test("admin /queue reads queue and one pack key for uploading progress", async () => {
