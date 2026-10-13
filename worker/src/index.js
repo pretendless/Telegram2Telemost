@@ -9,7 +9,7 @@ import {
   isAdminChat,
 } from "../../scripts/admin_status.mjs";
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
-import { startPipelineIfIdle } from "../../vm/queue_runner.js";
+import { startPipelineIfIdle, telemostRunActive } from "../../vm/queue_runner.js";
 import { QUEUE_REASON } from "../../vm/dispatch_reason.js";
 import { defaultSessionReason, notifySessionStartOnce } from "../../vm/session_notify.js";
 import {
@@ -38,6 +38,8 @@ import {
   queueItemByRequestId,
   queueItemSlug,
   queueStatusText,
+  unstickReply,
+  unstickUploadingQueue,
   releaseRequest,
   renderPackCheck,
   staticReply,
@@ -516,6 +518,25 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       const uploading = queue.items.find((item) => item.status === "uploading");
       const activePack = uploading ? await readPackProgress(env.BOT_KV, uploading) : null;
       out = adminQueueOverviewText(queue, activePack);
+    }
+  } else if (cmd === "/unstick") {
+    if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
+      out = "Эта команда только для администратора.";
+    } else {
+      const fetchImpl = deps.fetch || fetch;
+      const actionsRunning = await telemostRunActive(fetchImpl, env);
+      if (actionsRunning) {
+        out = unstickReply({ reason: "none", released: [], actionsRunning: true });
+      } else {
+        const queue = await readQueue(env.BOT_KV);
+        const unstuck = unstickUploadingQueue(queue);
+        if (unstuck.changed) await writeQueue(env.BOT_KV, unstuck.queue);
+        out = unstickReply({
+          reason: unstuck.reason,
+          released: unstuck.released,
+          actionsRunning: false,
+        });
+      }
     }
   } else if (cmd === "/status") {
     if (isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
