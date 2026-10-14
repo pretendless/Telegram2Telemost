@@ -255,8 +255,9 @@ async function applyProgress(env, pack, deps) {
   if (prev && !prev.notice) notice = parseStored(await kv.get(`state:${pack.slug}`));
   const steps = notificationSteps(notice, pack);
   const waitingForUrl = pack.status === "done" && !pack.url;
+  const terminal = terminalProgress(pack);
+  if (terminal) await finishQueueItem(env, pack, prev, deps);
   if (sameVisibleProgress(prev, pack) && steps.length === 0) {
-    await finishQueueItem(env, pack, prev, deps);
     return { ok: true, status: 200, notified: 0, posted: false, waitingForUrl };
   }
 
@@ -266,7 +267,7 @@ async function applyProgress(env, pack, deps) {
   const writePack = (cursor) => kv.put(packKey, JSON.stringify({ ...pack, notice: cursor, admin, userCard }));
   if (needsToken) {
     await writePack(notice);
-    return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false };
+    return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false, waitingForUrl };
   }
 
   let subs = [];
@@ -319,7 +320,6 @@ async function applyProgress(env, pack, deps) {
     console.log("user request card skipped");
   }
   await writePack(cursor);
-  await finishQueueItem(env, pack, prev, deps);
   return { ok: true, status: 200, notified, posted, waitingForUrl };
 }
 
@@ -346,6 +346,16 @@ async function reconcileTerminalUploadingQueue(kv, queue) {
     packForItem: (item) => packByItemId[item.id] || null,
     terminalOnly: true,
   });
+}
+
+async function reconcileQueueAndAutostart(env, queue, deps) {
+  const reconciled = await reconcileTerminalUploadingQueue(env.BOT_KV, queue);
+  if (!reconciled.changed) return { queue, changed: false, finished: [] };
+  await writeQueue(env.BOT_KV, reconciled.queue);
+  if ((reconciled.finished || []).length) {
+    schedulePipeline(env, reconciled.queue, deps, { dispatchReason: QUEUE_REASON.afterFinish });
+  }
+  return { queue: reconciled.queue, changed: true, finished: reconciled.finished || [] };
 }
 
 function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
@@ -563,11 +573,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       out = "Эта команда только для администратора.";
     } else {
       let queue = await readQueue(env.BOT_KV);
-      const reconciled = await reconcileTerminalUploadingQueue(env.BOT_KV, queue);
-      if (reconciled.changed) {
-        await writeQueue(env.BOT_KV, reconciled.queue);
-        queue = reconciled.queue;
-      }
+      const reconciled = await reconcileQueueAndAutostart(env, queue, deps);
+      queue = reconciled.queue;
       const uploading = queue.items.find((item) => item.status === "uploading");
       const activePack = uploading ? await readPackProgress(env.BOT_KV, uploading) : null;
       out = adminQueueOverviewText(queue, activePack);
@@ -640,7 +647,9 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     }
   } else if (cmd === "/status") {
     if (isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
-      const queue = await readQueue(env.BOT_KV);
+      let queue = await readQueue(env.BOT_KV);
+      const reconciled = await reconcileQueueAndAutostart(env, queue, deps);
+      queue = reconciled.queue;
       out = adminJobText(currentAdminJob(await listPacks(env.BOT_KV), queue));
     } else {
       const queue = await readQueue(env.BOT_KV);
