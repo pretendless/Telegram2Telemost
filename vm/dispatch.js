@@ -9,26 +9,13 @@ export const ACCOUNT_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 export function parseVmCommand(text) {
   const trimmed = String(text || "").trim();
-  const match = trimmed.match(/^\/(login|connect|upload)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/i);
+  const match = trimmed.match(/^\/(login|connect)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/i);
   if (!match) return null;
-  const name = match[1].toLowerCase();
   const rest = (match[2] || "").trim().split(/\s+/).filter(Boolean);
-  if (name === "login") {
-    if (rest.length > 1) return { error: "label" };
-    const account = rest[0] || "default";
-    if (!ACCOUNT_RE.test(account)) return { error: "label" };
-    return { mode: "login", account, packs: "" };
-  }
-  if (name === "connect") {
-    if (rest.length !== 1 || !ACCOUNT_RE.test(rest[0])) return { error: "label" };
-    return { mode: "login", account: rest[0], packs: "" };
-  }
-  if (rest.length < 2) return { error: "upload" };
-  const account = rest[0];
-  const packs = rest.slice(1);
+  if (rest.length > 1) return { error: "label" };
+  const account = rest[0] || "default";
   if (!ACCOUNT_RE.test(account)) return { error: "label" };
-  if (!packs.every((pack) => /^[0-9]{2}$/.test(pack))) return { error: "packs" };
-  return { mode: "upload", account, packs: packs.join(" ") };
+  return { mode: "login", account, packs: "" };
 }
 
 export function allowedChat(chatId, allowlist) {

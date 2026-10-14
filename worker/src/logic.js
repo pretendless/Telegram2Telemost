@@ -102,15 +102,14 @@ export const USER_COMMANDS = [
 
 export const ADMIN_ONLY_COMMANDS = [
   { command: "queue", description: "Очередь и прогресс" },
-  { command: "unstick", description: "Снять зависшую загрузку" },
   { command: "skip", description: "Пропустить текущий пак" },
   { command: "restart", description: "Перезапустить загрузку" },
   { command: "project", description: "Вопрос или задача для Cursor Cloud Agent" },
   { command: "ghrun", description: "Запустить GitHub workflow" },
   { command: "login", description: "Войти в Яндекс" },
-  { command: "connect", description: "Войти в аккаунт с меткой" },
-  { command: "upload", description: "Загрузить паки этой сессией" },
 ];
+
+export const RETIRED_COMMAND = "Эта команда больше не доступна.";
 
 export const ADMIN_COMMANDS = USER_COMMANDS.concat(ADMIN_ONLY_COMMANDS);
 
@@ -906,12 +905,6 @@ export function adminQueueOverviewText(queue, activePack) {
     lines.push("Сейчас никто не загружается.");
   }
   const waiting = sortQueuedItems(items);
-  if (uploading && waiting.length) {
-    lines.push("");
-    lines.push(
-      "Подсказка: в очереди есть ожидающие, а в списке ещё «загружается». Если Actions не идут — /unstick (снимет блокировку и запустит следующий пак).",
-    );
-  }
   lines.push("");
   if (!waiting.length) {
     lines.push("В очереди: пусто.");

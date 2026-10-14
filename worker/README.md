@@ -103,7 +103,7 @@ TG2TMBOT_TOKEN=... npm run setup-bot
 
 ### Профиль бота и команды
 
-Локально: `TG2TMBOT_TOKEN=... npm run setup-bot`. Опционально `LOGIN_CHAT_IDS=8502935020,...` — те же id, что у воркера: для них в меню появятся админ-команды (`/queue`, `/unstick`, `/skip`, …). См. `docs/bot.md`.
+Локально: `TG2TMBOT_TOKEN=... npm run setup-bot`. Опционально `LOGIN_CHAT_IDS=8502935020,...` — те же id, что у воркера: для них в меню появятся админ-команды (`/queue`, `/skip`, `/login`, …). См. `docs/bot.md`.
 
 С корпоративного ПК, где Telegram недоступен, проще запустить workflow **Setup bot** в GitHub Actions (`workflow_dispatch`): runner достаёт `api.telegram.org` напрямую, секрет `TG2TMBOT_TOKEN`, переменная репозитория `LOGIN_CHAT_IDS` (по умолчанию `8502935020`, как в `wrangler.toml`).
 

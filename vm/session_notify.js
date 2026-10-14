@@ -28,7 +28,7 @@ export function readLiveSession(raw) {
 
 export function defaultSessionReason(mode) {
   const name = String(mode || "").trim().toLowerCase();
-  if (name === "login") return "вход в Яндекс (/login или /connect)";
+  if (name === "login") return "вход в Яндекс (/login)";
   if (name === "upload") return "ручная загрузка (/upload)";
   if (name === "finalize") return "завершение пака (finalize)";
   if (name === "restart") return "перезапуск Telemost (restart)";

@@ -48,8 +48,7 @@ import {
   queueItemSlug,
   matchedProgressRequester,
   queueStatusText,
-  unstickReply,
-  unstickUploadingQueue,
+  RETIRED_COMMAND,
   skipReply,
   skipUploadingQueue,
   releaseRequest,
@@ -642,7 +641,6 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   // Other commands leave await:<chatId> as it is.
   if (known) {
     if (known.subscribe === true) await env.BOT_KV.put(`sub:${chatId}`, "1");
-    if (known.subscribe === false) await env.BOT_KV.delete(`sub:${chatId}`);
     out = known.text;
   } else if (cmd === "/create") {
     await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
@@ -659,50 +657,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps);
       out = adminQueueOverviewText(queue, activePack);
     }
-  } else if (cmd === "/unstick") {
-    if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
-      out = "Эта команда только для администратора.";
-    } else {
-      const fetchImpl = deps.fetch || fetch;
-      const actionsRunning = await telemostRunActive(fetchImpl, env);
-      if (actionsRunning) {
-        const queue = await readQueue(env.BOT_KV);
-        const packByItemId = await packProgressByUploadingId(env.BOT_KV, queue);
-        const cleaned = unstickUploadingQueue(queue, {
-          packForItem: (item) => packByItemId[item.id] || null,
-          terminalOnly: true,
-        });
-        if (cleaned.changed) await writeQueue(env.BOT_KV, cleaned.queue);
-        out = unstickReply({
-          reason: cleaned.reason,
-          released: [],
-          finished: cleaned.finished,
-          actionsRunning: true,
-          cleanedWhileRunning: cleaned.changed,
-        });
-      } else {
-        const queue = await readQueue(env.BOT_KV);
-        const kv = env.BOT_KV;
-        const packByItemId = {};
-        for (const item of queue.items) {
-          if (item.status !== "uploading") continue;
-          packByItemId[item.id] = await readPackProgress(kv, item);
-        }
-        const unstuck = unstickUploadingQueue(queue, {
-          packForItem: (item) => packByItemId[item.id] || null,
-        });
-        if (unstuck.changed) {
-          await writeQueue(env.BOT_KV, unstuck.queue);
-          schedulePipeline(env, unstuck.queue, deps, { dispatchReason: QUEUE_REASON.afterUnstick });
-        }
-        out = unstickReply({
-          reason: unstuck.reason,
-          released: unstuck.released,
-          finished: unstuck.finished,
-          actionsRunning: false,
-        });
-      }
-    }
+  } else if (cmd === "/unstick" || cmd === "/upload") {
+    out = RETIRED_COMMAND;
   } else if (cmd === "/skip") {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";
@@ -753,7 +709,7 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       },
     });
     return;
-  } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
+  } else if (cmd === "/login" || cmd === "/connect") {
     await handleVmCommand(env, message, { send, fetch: deps.fetch });
     return;
   } else if (cmd === "/project") {

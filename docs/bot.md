@@ -23,13 +23,12 @@
 | Команда | Описание |
 | --- | --- |
 | `/queue` | Очередь: кто ждёт (приоритет выше обычных, FIFO внутри группы), что загружается (N из M), недавние готовые/ошибки; «зависшие» uploading с уже завершённым прогрессом в KV закрываются как готовые |
-| `/unstick` | При простое Actions: снять зависшую «загружается», закрыть как «готов» если прогресс уже done/error в KV, иначе вернуть в очередь; автозапуск **следующего** queued-пака (приоритет → FIFO). Пока Actions идут — строку «загружается» не снимает, но может закрыть её как «готов» по KV; после run — повторить при необходимости |
 | `/skip` | Пометить текущую «загружается» как ошибку и перейти к следующему в очереди (если Actions не идут) |
 | `/status` | Шаг сессии: очередь, запуск Actions (и ссылка на run, если она уже есть) или «стикер N из M». Голое «простаивает» — только когда нет очереди и загрузки |
 | `/restart` | Прервать текущий Actions и один новый запуск с `main`; выбор пака — только **queued/uploading** из KV, не «призраки» из каталога `packs/07…` без активной строки очереди |
 | `/project` | Вопрос или задача для Cursor Cloud Agent: мгновенный ack в TG, затем фоновый dispatch `cursor-agent.yml`. Actions читает prompt из KV, запускает агента на `pretendless/tg2tm` (`main`) и шлёт краткий итог через `POST /project/reply`. Issue (`project-prompt.yml`) — только если у воркера `PROJECT_ALSO_CREATE_ISSUE=1`, сбой issue не отменяет агента. В GitHub нужны `CURSOR_API_KEY`, `UPLOADER_SECRET` и `TG2TM_PROGRESS_URL` (`https://tg2tmbot.prtndz.workers.dev/progress`). Проверка ключа: Actions → **Check Cursor API**, без curl на своём компьютере; после деплоя воркера то же самое — `/ghrun check-cursor-api.yml` |
 | `/ghrun` | Запуск произвольного workflow: `/ghrun <file.yml> [key=value …]`. Только админ; опционально `GH_WORKFLOW_ALLOWLIST` |
-| `/login`, `/connect`, `/upload` | Запуск браузера / ручная загрузка (как раньше) |
+| `/login` | Войти в Яндекс. Без метки — аккаунт `default`, с меткой — `/login work`. `/connect` — тот же вход, в меню его нет |
 
 При **каждом новом** запуске workflow Telemost в админ-чат приходит одно сообщение: **причина** (новый запрос в очереди, следующий пак, `/restart`, `/login`, …) и ссылка на run Actions. Ход загрузки по-прежнему правит одну **карточку** «стикер N из TOTAL».
 
@@ -39,13 +38,13 @@
 
 Повторная загрузка **старого каталогового** пака (папка `packs/NN-…` без строки в очереди) — только через dispatch с `TG2TM_CATALOG_RETRY=1` в окружении prepare (не через обычный `/restart`).
 
-Обычные пользователи **не** могут `/restart`, `/queue`, `/unstick`, `/skip`, `/login`, `/connect`, `/upload`.
+Обычные пользователи **не** могут `/restart`, `/queue`, `/skip`, `/login`. `/unstick` и `/upload` никому не доступны: бот отвечает, что команды больше нет.
 
 ## Меню команд в Telegram
 
 Список у BotFather обновляет `worker/setup-bot.mjs` (`npm run setup-bot` в каталоге `worker/`).
 
 - **Все чаты** — `USER_COMMANDS`: `/start`, `/create`, `/format`, `/status`, `/stop`.
-- **Админ-чаты** из `LOGIN_CHAT_IDS` (воркер и переменная окружения при `setup-bot`) — полный список `ADMIN_COMMANDS`: пользовательские команды плюс `/queue`, `/unstick`, `/skip`, `/restart`, `/project`, `/ghrun`, `/login`, `/connect`, `/upload` (scope `chat` в API Telegram).
+- **Админ-чаты** из `LOGIN_CHAT_IDS` (воркер и переменная окружения при `setup-bot`) — полный список `ADMIN_COMMANDS`: пользовательские команды плюс `/queue`, `/skip`, `/restart`, `/project`, `/ghrun`, `/login` (scope `chat` в API Telegram). `/connect` в меню нет.
 
 `/help` в меню нет — работает как `/start`.

@@ -961,19 +961,24 @@ test("an allowlisted /login and /connect dispatch the Telemost workflow", async 
     account: "default",
     chat_id: "8502935020",
     packs: "",
-    dispatch_reason: "админ: /login или /connect",
+    dispatch_reason: "админ: /login",
   });
   assert.deepEqual(calls[1].body.inputs, {
     mode: "login",
     account: "work",
     chat_id: "8502935020",
     packs: "",
-    dispatch_reason: "админ: /login или /connect",
+    dispatch_reason: "админ: /login",
   });
   assert.match(sent[0].text, /QR-код Яндекса/);
   assert.match(sent[1].text, /«work»/);
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/login work"), env, { sendMessage, fetch });
+  assert.equal(calls[2].body.inputs.account, "work");
+  assert.equal(calls[2].body.inputs.mode, "login");
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "login").description, "Войти в Яндекс");
-  assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "connect").description, "Войти в аккаунт с меткой");
+  assert.equal(ADMIN_ONLY_COMMANDS.some((item) => item.command === "connect"), false);
+  assert.equal(ADMIN_ONLY_COMMANDS.some((item) => item.command === "unstick"), false);
+  assert.equal(ADMIN_ONLY_COMMANDS.some((item) => item.command === "upload"), false);
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "restart").description, "Перезапустить загрузку");
 });
 
@@ -1069,7 +1074,7 @@ test("/queue lists priority queued rows before normal ones", () => {
   assert.ok(block.indexOf("Дьяволица") < block.indexOf("Tom & Jerry"));
 });
 
-test("/unstick refuses while Actions runs and releases uploading when idle", async () => {
+test("/unstick and /upload reply once that they are gone and do not dispatch", async () => {
   const env = envWith();
   env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
   env.GH_DISPATCH_TOKEN = "dispatch-token";
@@ -1088,64 +1093,26 @@ test("/unstick refuses while Actions runs and releases uploading when idle", asy
           status: "uploading",
           stickers: 3,
         },
-        {
-          id: "req-next",
-          chatId: "2",
-          title: "Следующий",
-          links: ["https://t.me/addstickers/next"],
-          priority: false,
-          createdAt: "2026-10-13T12:01:00.000Z",
-          status: "queued",
-          stickers: 4,
-        },
       ],
     }),
   );
   const sent = [];
-  const fetchBusy = async (url) => {
-    if (String(url).includes("/runs?")) {
-      return { status: 200, json: async () => ({ workflow_runs: [{ id: 1, status: "in_progress" }] }) };
-    }
+  let fetched = 0;
+  const fetch = async () => {
+    fetched += 1;
     return { status: 204, json: async () => ({}) };
   };
-  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, {
-    sendMessage: async (_env, _chatId, text) => sent.push(text),
-    fetch: fetchBusy,
-  });
-  assert.match(sent[0], /Actions/);
-  assert.match(sent[0], /не трогаю/);
-  let stored = JSON.parse(env.BOT_KV.store.get("queue"));
-  assert.equal(stored.items[0].status, "uploading");
-
-  sent.length = 0;
-  const calls = [];
-  const fetchIdle = async (url, init) => {
-    calls.push({
-      url: String(url),
-      body: init && init.body ? JSON.parse(init.body) : null,
+  for (const text of ["/unstick", "/upload work 03 04", "/unstick@tg2tmbot"]) {
+    const res = await handle(telegramRequest(111, text), env, {
+      sendMessage: async (_env, _chatId, reply) => sent.push(reply),
+      fetch,
     });
-    if (String(url).includes("/runs?")) {
-      return { status: 200, json: async () => ({ workflow_runs: [] }) };
-    }
-    return { status: 204, json: async () => ({}) };
-  };
-  const pipe = trackPipelineWait({
-    sendMessage: async (_env, _chatId, text) => sent.push(text),
-    fetch: fetchIdle,
-  });
-  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, pipe);
-  await pipe.flushPipeline();
-  assert.match(sent[0], /Застрял/);
-  assert.match(sent[0], /блокировку «загружается»/);
-  assert.match(sent[0], /ждёт в очереди/);
-  assert.doesNotMatch(sent[0], /снова в очереди/);
-  assert.match(sent[0], /Запускаю pipeline/);
-  stored = JSON.parse(env.BOT_KV.store.get("queue"));
-  assert.equal(stored.items.find((item) => item.id === "req-stuck").status, "queued");
-  assert.equal(unstickUploadingQueue(stored).changed, false);
-  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
-  assert.ok(dispatch);
-  assert.match(dispatch.body.inputs.dispatch_reason, /unstick|Следующий|Застрял/i);
+    assert.equal(res.status, 200);
+  }
+  assert.equal(fetched, 0);
+  assert.equal(sent.length, 3);
+  for (const reply of sent) assert.equal(reply, "Эта команда больше не доступна.");
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].status, "uploading");
 });
 
 test("terminal progress releases queue row matched by slug when status is queued", async () => {
@@ -1440,15 +1407,17 @@ test("/unstick autostart dispatch names next queued pack after terminal uploadin
     }
     return { status: 204, json: async () => ({}) };
   };
-  const pipe = trackPipelineWait({ sendMessage: async () => {}, fetch: fetchIdle });
+  const sent = [];
+  const pipe = trackPipelineWait({
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+    fetch: fetchIdle,
+  });
   await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, pipe);
   await pipe.flushPipeline();
+  assert.equal(sent[0], "Эта команда больше не доступна.");
   const stored = JSON.parse(env.BOT_KV.store.get("queue"));
-  assert.equal(stored.items.find((item) => item.id === "req-snoopy").status, "done");
-  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
-  assert.ok(dispatch);
-  assert.match(dispatch.body.inputs.dispatch_reason, /ВолнаСветa/);
-  assert.doesNotMatch(dispatch.body.inputs.dispatch_reason, /Снупи/);
+  assert.equal(stored.items.find((item) => item.id === "req-snoopy").status, "uploading");
+  assert.equal(calls.some((call) => call.url.endsWith("/dispatches")), false);
 });
 
 test("admin /queue reads queue and one pack key for uploading progress", async () => {
@@ -1483,7 +1452,7 @@ test("admin /queue reads queue and one pack key for uploading progress", async (
   assert.match(sent[0], /Запад/);
   assert.match(sent[0], /стикер 3 из 10/);
   assert.match(sent[0], /Восток/);
-  assert.match(sent[0], /Подсказка:/);
+  assert.doesNotMatch(sent[0], /\/unstick/);
   assert.equal(env.BOT_KV.ops.list, 0);
 });
 
