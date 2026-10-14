@@ -70,6 +70,10 @@ import {
   isClearHistoryConfirmButton,
   dialogWarnsClearHistory,
   sidebarTitleIsChat,
+  notAnImageReply,
+  notAnImageStop,
+  pictureNotAskedError,
+  canForwardBufferImage,
   forwardSubmenuLogLine,
   botReplyLogLine,
   forwardTargetFromTitle,
@@ -839,6 +843,29 @@ test("buffer clear empties TG2TM before upload and does not treat leftovers as t
   assert.match(src, /clearStickersHistory/);
 });
 
+test("«Это не картинка» stops the pack and only a real buffer image is forwarded", () => {
+  const line = "Стикеры Это не картинка :) 19:01";
+  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38619533883";
+  assert.equal(notAnImageReply(line), true);
+  assert.equal(notAnImageReply("Отправьте картинку для стикера."), false);
+  assert.equal(imageReply(line), "not-image");
+  assert.equal(wantsPicture(line), false);
+  assert.equal(afterNewpack(line), "other");
+  assert.equal(
+    notAnImageStop(line, runUrl),
+    `bot rejected a non-image («Это не картинка»): ${line} ${runUrl}`,
+  );
+  assert.equal(
+    pictureNotAskedError(line, runUrl),
+    notAnImageStop(line, runUrl),
+  );
+  const ask = "Отправьте картинку для стикера.";
+  assert.equal(canForwardBufferImage(ask, { id: "3", hasImage: true }), true);
+  assert.equal(canForwardBufferImage(ask, { id: "3", hasImage: false }), false);
+  assert.equal(canForwardBufferImage(line, { id: "3", hasImage: true }), false);
+  assert.equal(canForwardBufferImage("Напишите название набора.", { id: "3", hasImage: true }), false);
+});
+
 test("devtools opens a buffer tab with PUT and keeps the URL hash", () => {
   const target = "https://telemost.yandex.ru/chat/tg2tm-channel#room";
   const reqs = devtoolsNewTabRequests("http://127.0.0.1:9222", target);
@@ -909,7 +936,7 @@ test("a ready sticker does not wait for an emoji", () => {
   assert.equal(emojiAnswer(live, "😉"), "😉");
   assert.equal(isEmojiRequest("Стикеры 🫣 10:46"), true);
   assert.equal(emojiAnswer("Стикеры 🫣 10:46", "😉"), "🫣");
-  assert.equal(imageReply("Стикеры Это не картинка :) 10:33"), "pending");
+  assert.equal(imageReply("Стикеры Это не картинка :) 10:33"), "not-image");
   assert.equal(imageReply("Стикеры"), "pending");
   assert.equal(settledImageReply("Стикеры", 0), "pending");
   assert.equal(settledImageReply("Стикеры", 400), "reject");
