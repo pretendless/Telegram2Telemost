@@ -92,6 +92,9 @@ export const STAGING_MESSAGE_ACTIONS_SELECTOR = [
   '[class*="MessageActions" i] button',
   '[class*="message-actions" i] button',
   'button[aria-label*="Действия" i]',
+  '.yamb-message-row__actions button',
+  '.yamb-message-row__actions [role="button"]',
+  '[class*="yamb-message-row__actions" i] button',
 ].join(', ');
 
 // Bot + staging chat URLs live in config/settings.json (overridable by env).
@@ -567,6 +570,95 @@ class Bot {
     await this.cdpMouse('mouseReleased', x, y, { button, clickCount: 1 });
   }
 
+  async cdpKeyTap(key, { code, windowsVirtualKeyCode, modifiers = 0 } = {}) {
+    const base = {
+      key,
+      code: code || key,
+      modifiers,
+      windowsVirtualKeyCode: windowsVirtualKeyCode || 0,
+      nativeVirtualKeyCode: windowsVirtualKeyCode || 0,
+    };
+    await this.c.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
+    await this.c.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base });
+    await this.c.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+  }
+
+  async focusMessageRow(ownId) {
+    const id = JSON.stringify(String(ownId));
+    return this.c.ev(`(() => {
+      const want = ${id};
+      const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+      if (!row) return false;
+      row.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const inner = row.querySelector('.yamb-message-row__content, .yamb-message-row, .yamb-message-row__body') || row;
+      if (!inner.hasAttribute('tabindex')) inner.setAttribute('tabindex', '-1');
+      inner.focus({ preventScroll: true });
+      if (document.activeElement && (document.activeElement === inner || row.contains(document.activeElement))) return true;
+      row.focus({ preventScroll: true });
+      return document.activeElement === row || row.contains(document.activeElement);
+    })()`);
+  }
+
+  async pressMessageRowActions(ownId, { button = 0 } = {}) {
+    const id = JSON.stringify(String(ownId));
+    const btnSel = JSON.stringify(STAGING_MESSAGE_ACTIONS_SELECTOR);
+    const btn = button === 2 ? 2 : 0;
+    return this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const want = ${id};
+      const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+      if (!row) return false;
+      const btnSel = ${btnSel};
+      const pickBtn = () => {
+        const inRow = tg2tmDeepWithin(row, btnSel).filter((e) => {
+          const b = e.getBoundingClientRect();
+          return b.width > 2 && b.height > 2;
+        });
+        if (inRow.length) return inRow[inRow.length - 1];
+        const actions = row.querySelector('.yamb-message-row__actions');
+        if (actions) {
+          const nested = tg2tmDeepWithin(actions, 'button, [role="button"]').find((e) => e.getBoundingClientRect().width > 2);
+          if (nested) return nested;
+        }
+        const r = row.getBoundingClientRect();
+        const near = tg2tmDeepMatch(btnSel).filter((e) => {
+          const b = e.getBoundingClientRect();
+          if (b.width < 2 || b.height < 2) return false;
+          return Math.abs(b.y + b.height / 2 - (r.y + r.height / 2)) < 56 && b.x >= r.x + r.width * 0.35;
+        });
+        return near[near.length - 1] || null;
+      };
+      const media = row.querySelector('.yamb-message-row__attachment, .yamb-message-row__body, .yamb-message-row__content, img[src], video, canvas, [class*="attachment" i], [class*="Attachment" i]');
+      const target = media && media.getBoundingClientRect().width > 2 ? media : row;
+      const el = pickBtn() || target;
+      return tg2tmPress(el, ${btn});
+    })()`);
+  }
+
+  async stagingForwardDebugCapture(ownId) {
+    try {
+      const geom = await this.messageRowGeometry(ownId).catch(() => null);
+      const params = { format: 'png', fromSurface: true };
+      if (geom && geom.ok && geom.rowW > 20 && geom.rowH > 20) {
+        params.clip = {
+          x: Math.max(0, Math.floor(geom.rowX - 12)),
+          y: Math.max(0, Math.floor(geom.rowY - 8)),
+          width: Math.min(960, Math.ceil(geom.rowW + 24)),
+          height: Math.min(480, Math.ceil(geom.rowH + 16)),
+          scale: 1,
+        };
+      }
+      const shot = await this.c.send('Page.captureScreenshot', params);
+      const dir = join(ROOT, 'logs');
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `staging-forward-menu-${String(ownId).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${Date.now()}.png`);
+      writeFileSync(file, Buffer.from(shot.data, 'base64'));
+      return file;
+    } catch {
+      return null;
+    }
+  }
+
   async messageRowGeometry(ownId) {
     const id = JSON.stringify(String(ownId));
     const btnSel = JSON.stringify(STAGING_MESSAGE_ACTIONS_SELECTOR);
@@ -596,6 +688,9 @@ class Bot {
         btn = near[0] || null;
       }
       const br = btn ? btn.getBoundingClientRect() : null;
+      const rr = row.getBoundingClientRect();
+      const actionsEl = row.querySelector('.yamb-message-row__actions');
+      const ar = actionsEl ? actionsEl.getBoundingClientRect() : null;
       return {
         ok: true,
         x,
@@ -603,6 +698,12 @@ class Bot {
         hasBtn: !!btn,
         btnX: br ? br.x + br.width / 2 : null,
         btnY: br ? br.y + br.height / 2 : null,
+        actionsX: ar && ar.width > 2 ? ar.x + ar.width / 2 : rr.x + Math.max(8, rr.width - 18),
+        actionsY: ar && ar.height > 2 ? ar.y + ar.height / 2 : y,
+        rowX: rr.x,
+        rowY: rr.y,
+        rowW: rr.width,
+        rowH: rr.height,
       };
     })()`);
   }
@@ -616,11 +717,16 @@ class Bot {
           const r = e.getBoundingClientRect();
           return r.width > 4 && r.height > 4;
         };
-        const menus = tg2tmDeepMatch('[role="menu"], [class*="ContextMenu" i], [class*="MenuList" i], [class*="context-menu" i], [class*="Dropdown" i][class*="Menu" i]');
+        const menus = tg2tmDeepMatch('[role="menu"], [class*="ContextMenu" i], [class*="MenuList" i], [class*="context-menu" i], [class*="Dropdown" i][class*="Menu" i], [class*="PopupMenu" i], [class*="popup-menu" i], [class*="yamb" i][class*="menu" i]');
         for (const menu of menus) {
           if (!vis(menu)) continue;
           const items = [...menu.querySelectorAll('[role="menuitem"], button, [role="button"], li, a')].filter(vis);
           if (items.length >= 2) return true;
+          if (items.length === 1) {
+            const t = (items[0].innerText || items[0].textContent || '').replace(/\\s+/g, ' ').trim();
+            const a = (items[0].getAttribute('aria-label') || '').trim();
+            if (/пересл|forward|удал|delete|копир|copy/i.test(t + ' ' + a)) return true;
+          }
         }
         const looseItems = tg2tmDeepMatch('[role="menuitem"], button, [role="button"]').filter(vis);
         if (looseItems.length >= 2) return true;
@@ -629,7 +735,13 @@ class Bot {
           const a = (e.getAttribute('aria-label') || '').trim();
           return /пересл|forward|удал|delete|копир|copy/i.test(t + ' ' + a);
         });
-        return forwardish;
+        if (forwardish) return true;
+        const popups = tg2tmDeepMatch('[class*="Popup" i], [class*="popup" i], [class*="Dropdown" i]').filter(vis);
+        for (const pop of popups) {
+          const t = (pop.innerText || pop.textContent || '').replace(/\\s+/g, ' ').trim();
+          if (/пересл|forward/i.test(t)) return true;
+        }
+        return false;
       })()`);
       if (open) return true;
       await sleep(POLL_MS);
@@ -699,21 +811,26 @@ class Bot {
     await this.focusChatSurface();
     const id = JSON.stringify(String(ownId));
     const btnSel = JSON.stringify(STAGING_MESSAGE_ACTIONS_SELECTOR);
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const mode = attempt % 5;
-      const geom = await this.messageRowGeometry(ownId);
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const mode = attempt % 8;
+      let geom = await this.messageRowGeometry(ownId);
       if (!geom || !geom.ok) {
         if (geom && geom.reason === 'missing') break;
         continue;
       }
       sawRow = true;
       await this.cdpHover(geom.x, geom.y);
-      await sleep(mode === 4 ? 520 : 160);
-      if (mode === 0 && geom.hasBtn && geom.btnX != null && geom.btnY != null) {
-        await this.cdpClickAt(geom.btnX, geom.btnY, 'left');
-      } else if (mode === 1) {
-        await this.cdpClickAt(geom.x, geom.y, 'right');
+      await sleep(mode === 3 || mode === 4 ? 480 : 200);
+      if (mode === 0 || mode === 1) {
+        if (mode === 1 && geom.actionsX != null && geom.actionsY != null) {
+          await this.cdpHover(geom.actionsX, geom.actionsY);
+          await sleep(280);
+        }
+        geom = (await this.messageRowGeometry(ownId)) || geom;
+        await this.pressMessageRowActions(ownId, { button: 0 });
       } else if (mode === 2) {
+        await this.cdpClickAt(geom.x, geom.y, 'right');
+      } else if (mode === 3) {
         await this.c.ev(`(() => {
           ${TG2TM_DEEP_WALK}
           const want = ${id};
@@ -734,7 +851,7 @@ class Bot {
           if (btn) return tg2tmPress(btn, 0);
           return tg2tmPress(target, 2);
         })()`);
-      } else if (mode === 3) {
+      } else if (mode === 4) {
         await this.c.ev(`(() => {
           ${TG2TM_DEEP_WALK}
           const want = ${id};
@@ -751,35 +868,19 @@ class Bot {
           return true;
         })()`);
         await sleep(650);
-        await this.c.ev(`(() => {
-          ${TG2TM_DEEP_WALK}
-          const want = ${id};
-          const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
-          if (!row) return false;
-          const media = row.querySelector('.yamb-message-row__attachment, .yamb-message-row__body, .yamb-message-row__content, img[src], video, canvas, [class*="attachment" i], [class*="Attachment" i]');
-          const target = media && media.getBoundingClientRect().width > 2 ? media : row;
-          const b = target.getBoundingClientRect();
-          const clientX = b.x + b.width / 2;
-          const clientY = b.y + b.height / 2;
-          const o = { bubbles: true, cancelable: true, composed: true, clientX, clientY, button: 0, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true };
-          target.dispatchEvent(new PointerEvent('pointerup', o));
-          target.dispatchEvent(new MouseEvent('mouseup', o));
-          target.dispatchEvent(new MouseEvent('contextmenu', { ...o, button: 2, buttons: 2 }));
-          return true;
-        })()`);
+        await this.pressMessageRowActions(ownId, { button: 2 });
+      } else if (mode === 5) {
+        await this.focusMessageRow(ownId);
+        await sleep(80);
+        await this.cdpKeyTap('F10', { code: 'F10', windowsVirtualKeyCode: 121, modifiers: 8 });
+      } else if (mode === 6) {
+        await this.focusMessageRow(ownId);
+        await sleep(80);
+        await this.cdpKeyTap('ContextMenu', { code: 'ContextMenu', windowsVirtualKeyCode: 93 });
       } else {
-        await this.c.ev(`(() => {
-          ${TG2TM_DEEP_WALK}
-          const want = ${id};
-          const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
-          if (!row) return false;
-          const btnSel = ${btnSel};
-          const btn = tg2tmDeepWithin(row, btnSel).find((e) => e.getBoundingClientRect().width > 2)
-            || tg2tmDeepMatch(btnSel).find((e) => e.getBoundingClientRect().width > 2);
-          return btn ? tg2tmPress(btn, 0) : false;
-        })()`);
+        await this.pressMessageRowActions(ownId, { button: 0 });
       }
-      if (await this.waitForContextMenu(attempt < 3 ? 2400 : 3600)) {
+      if (await this.waitForContextMenu(attempt < 4 ? 2600 : 3800)) {
         menuOpened = true;
         return;
       }
@@ -787,7 +888,15 @@ class Bot {
       await sleep(120);
     }
     if (!sawRow) throw new Error(`staging forward: message ${ownId} not found`);
-    if (!menuOpened) throw new Error(`staging forward: context menu did not open for ${ownId}`);
+    if (!menuOpened) {
+      const hint = await this.stagingForwardMenuDebug().catch(() => null);
+      const png = await this.stagingForwardDebugCapture(ownId);
+      const parts = [];
+      if (hint && hint.labels && hint.labels.length) parts.push(`menu=${JSON.stringify(hint.labels).slice(0, 320)}`);
+      if (png) parts.push(`screenshot=${png}`);
+      const suffix = parts.length ? ` (${parts.join('; ')})` : '';
+      throw new Error(`staging forward: context menu did not open for ${ownId}${suffix}`);
+    }
   }
 
   // Forward one staging bubble into the stickers bot chat (no disk upload there).
@@ -2237,7 +2346,16 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       );
     }
     console.log(dir, 'forward', m.images[index].file, 'id', ownId);
-    await bot.forwardOwnToBot(ownId, botUrl);
+    try {
+      await bot.forwardOwnToBot(ownId, botUrl);
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : '';
+      const menuBlocked = /context menu did not open|Переслать not found/i.test(msg);
+      if (!menuBlocked) throw e;
+      console.log(dir, 'forward-fallback-send', m.images[index].file, msg.replace(/\s+/g, ' ').slice(0, 240));
+      await bot.openChat(botUrl);
+      return bot.sendImage(file, { onWait });
+    }
     return bot.waitForReply(baseline, { until: 'sticker', ownBeforeIds, onWait });
   }
 

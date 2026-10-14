@@ -518,8 +518,13 @@ test("staging message menu uses deep press helpers and CDP hover", () => {
   assert.match(src, /async cdpHover/);
   assert.match(src, /async messageRowGeometry/);
   assert.match(src, /async focusChatSurface/);
+  assert.match(src, /async cdpKeyTap/);
+  assert.match(src, /async pressMessageRowActions/);
+  assert.match(src, /async focusMessageRow/);
+  assert.match(src, /stagingForwardDebugCapture/);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /Действия с сообщением/);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /MessageActions/i);
+  assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /yamb-message-row__actions/);
 });
 
 test("stagingRowsForForward prefers survey then merges live hasImage", async () => {
