@@ -36,7 +36,7 @@ test('a sticker number, a wait, or a retry edits the same card', () => {
 
 test('emoji, the next send, an error, and the saved link edit the same card', () => {
   const sending = card({ phase: 'sending', index: 1, total: 144 });
-  for (const phase of ['emoji', 'ready', 'done', 'error', 'saved', 'link', 'start', 'newpack', 'failed', 'waiting', 'retry']) {
+  for (const phase of ['buffering', 'emoji', 'ready', 'done', 'error', 'saved', 'link', 'start', 'newpack', 'failed', 'waiting', 'retry']) {
     assert.equal(adminDelivery(sending, card({ phase, index: 1, total: 144 })).action, 'edit');
     assert.equal(adminDelivery(card({ phase, index: 1, total: 144 }), card({ phase, index: 2, total: 144 })).action, 'edit');
   }
@@ -53,6 +53,8 @@ test('the card names the pack, the step, the bot line, and another user only by 
     requester: '111',
   }));
   assert.match(text, /^10:44 \| «Маф, Изис и Агнес» \| стикер 16 из 144 \| отправка/);
+  const buffering = formatAdminStatus(card({ phase: 'buffering', index: 3, total: 144 }));
+  assert.match(buffering, /стикер 3 из 144 \| буфферизация/);
   assert.match(text, /бот: Отправьте эмодзи для стикера\./);
   assert.match(text, /запрос: 111/);
   assert.equal(isAdminChat(ADMIN_CHAT_ID), true);
