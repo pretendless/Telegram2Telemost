@@ -2,7 +2,7 @@
 import {
   ADMIN_CHAT_ID,
   adminChatIds,
-  adminJobText,
+  adminLiveStatusText,
   deliverAdminStatus,
   eventFromProgress,
   isAdminChat,
@@ -10,7 +10,7 @@ import {
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
 import { startPipelineIfIdle, telemostRunActive } from "../../vm/queue_runner.js";
 import { QUEUE_REASON, queuePipelineReason } from "../../vm/dispatch_reason.js";
-import { defaultSessionReason, notifySessionStartOnce } from "../../vm/session_notify.js";
+import { LIVE_SESSION_KEY, defaultSessionReason, notifySessionStartOnce, readLiveSession } from "../../vm/session_notify.js";
 import {
   CHANNEL_CHAT,
   INITIAL_SUBSCRIBER,
@@ -31,6 +31,8 @@ import {
   awaitCreateKey,
   claimNext,
   CREATE_PROMPT,
+  STOP_CLEARED,
+  STOP_IDLE,
   createLinksPrompt,
   decodeAwaitCreate,
   encodeAwaitCreate,
@@ -595,7 +597,15 @@ async function acceptCountedRequest(env, chatId, { title, names, rows, total }, 
   if (stored.created) await writeQueue(env.BOT_KV, stored.queue);
   const queueAfter = stored.created ? stored.queue : queue;
   let out;
-  if (stored.duplicate) {
+  if (stored.duplicate === "done") {
+    out = `${duplicateRequestReply({
+      title,
+      duplicate: stored.duplicate,
+      priority,
+      links: stickerLinks(names),
+    })}\n\n${CREATE_PROMPT}`;
+    await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
+  } else if (stored.duplicate) {
     out = duplicateRequestReply({
       title,
       duplicate: stored.duplicate,
@@ -628,8 +638,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   const known = staticReply(cmd);
   let out;
   let userCardAfterAccept = null;
-  // Commands other than /create leave await:<chatId> as it is (name or links).
-  // /create rewrites that key and starts again at the name.
+  // /create restarts at the name. /stop clears a half-finished dialog and does not touch the queue.
+  // Other commands leave await:<chatId> as it is.
   if (known) {
     if (known.subscribe === true) await env.BOT_KV.put(`sub:${chatId}`, "1");
     if (known.subscribe === false) await env.BOT_KV.delete(`sub:${chatId}`);
@@ -637,6 +647,10 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   } else if (cmd === "/create") {
     await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
     out = CREATE_PROMPT;
+  } else if (cmd === "/stop") {
+    const pending = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
+    if (pending) await env.BOT_KV.delete(awaitCreateKey(chatId));
+    out = pending ? STOP_CLEARED : STOP_IDLE;
   } else if (cmd === "/queue") {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";
@@ -715,7 +729,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     if (isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       const { queue, job, reconcile } = await loadAdminQueueState(env.BOT_KV);
       schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps);
-      out = adminJobText(job);
+      const session = readLiveSession(await env.BOT_KV.get(LIVE_SESSION_KEY));
+      out = adminLiveStatusText({ queue, job, session });
     } else {
       const queue = await readQueue(env.BOT_KV);
       out =

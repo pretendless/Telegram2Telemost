@@ -47,7 +47,7 @@ export const START =
   FORMAT +
   `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
   "\n\nСначала /create — бот спросит название, затем ссылки (см. /format). Бот проверит набор и поставит его в очередь." +
-  "\n\nБот пишет вам только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылает. /status — ваши запросы, /stop — отписаться.";
+  "\n\nБот пишет вам только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылает. /status — ваши запросы, /stop — прервать ввод.";
 
 export const DESCRIPTION =
   `${BOT_NAME} переносит стикеры из Telegram в Телемост.\n` +
@@ -78,6 +78,13 @@ export function createLinksPrompt(title) {
 export const NEED_CREATE =
   "Сначала отправьте /create. Бот спросит название, затем ссылки t.me/addstickers/….\n\nПодробнее — /format.";
 
+export const STOP_CLEARED =
+  "Ввод прерван. Незаконченный /create сброшен.\n\n" +
+  "Снова можно пользоваться командами: /create, /status, /format, /start.";
+
+export const STOP_IDLE =
+  "Сейчас нечего прерывать. Команды доступны: /create, /status, /format, /start.";
+
 export const AWAIT_CREATE_PREFIX = "await:";
 
 export function awaitCreateKey(chatId) {
@@ -90,7 +97,7 @@ export const USER_COMMANDS = [
   { command: "create", description: "Новый запрос на перенос" },
   { command: "format", description: "Формат и пример пака" },
   { command: "status", description: "Ваши запросы в очереди" },
-  { command: "stop", description: "Отписаться" },
+  { command: "stop", description: "Прервать ввод и вернуться к командам" },
 ];
 
 export const ADMIN_ONLY_COMMANDS = [
@@ -294,7 +301,6 @@ export function commandOf(text) {
 
 export function staticReply(cmd) {
   if (cmd === "/start" || cmd === "/help") return { subscribe: true, text: START };
-  if (cmd === "/stop") return { subscribe: false, text: "Уведомления выключены. /start — включить снова." };
   if (cmd === "/format" || cmd === "/example") return { text: FORMAT };
   return null;
 }
@@ -481,6 +487,36 @@ function sameLinks(left, right) {
   return left.length === right.length && left.every((link, index) => link === right[index]);
 }
 
+// Sticker-set names, unique and ordered, so https and bare t.me forms match.
+export function linkSetNames(links) {
+  const names = [];
+  const re = /(?:https?:\/\/)?t\.me\/addstickers\/([A-Za-z0-9_]+)/gi;
+  for (const link of Array.isArray(links) ? links : []) {
+    const text = String(link || "");
+    let found = false;
+    for (const match of text.matchAll(re)) {
+      found = true;
+      if (!names.includes(match[1])) names.push(match[1]);
+    }
+    if (!found) {
+      const plain = text.trim();
+      if (plain && !names.includes(plain)) names.push(plain);
+    }
+  }
+  names.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  return names;
+}
+
+function sameLinkSet(left, right) {
+  const a = linkSetNames(left);
+  const b = linkSetNames(right);
+  return a.length > 0 && a.length === b.length && a.every((name, index) => name === b[index]);
+}
+
+function sameTitle(left, right) {
+  return String(left || "").replace(/\s+/g, " ").trim() === String(right || "").replace(/\s+/g, " ").trim();
+}
+
 export function normalizeQueue(raw) {
   const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const priority = [];
@@ -528,12 +564,24 @@ function sameRequest(left, right) {
   );
 }
 
+// A finished request blocks a new one only when the trimmed title and the link set both match.
 function duplicateDoneRequest(queue, request) {
-  const title = String(request.title || "").trim();
   return queue.items.find(
     (item) =>
       item.status === "done" &&
-      (item.title === title || sameLinks(item.links, request.links)),
+      sameTitle(item.title, request.title) &&
+      sameLinkSet(item.links, request.links),
+  );
+}
+
+export function finishedDuplicateText(title, links) {
+  const names = linkSetNames(links);
+  const listed = names.length ? names.map((name) => `t.me/addstickers/${name}`).join("\n") : "те же ссылки";
+  const shown = String(title || "").replace(/\s+/g, " ").trim();
+  return (
+    `Уже переносился набор «${shown}» с этими же ссылками:\n` +
+    `${listed}\n\n` +
+    `Совпадают и название, и ссылки.`
   );
 }
 
@@ -584,10 +632,8 @@ export function shouldStartPipeline(queue, activeRun) {
   return queueHasQueuedWork(queue);
 }
 
-export function duplicateRequestReply({ title, duplicate, priority }) {
-  if (duplicate === "done") {
-    return `Набор «${title}» уже переносился. Чтобы отправить снова, измените название или список ссылок.`;
-  }
+export function duplicateRequestReply({ title, duplicate, priority, links }) {
+  if (duplicate === "done") return finishedDuplicateText(title, links);
   return alreadyQueuedReply({ title, priority: Boolean(priority) });
 }
 

@@ -6,7 +6,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { activeUploadJob } from '../worker/src/logic.js';
+import { activeUploadJob, sortQueuedItems } from '../worker/src/logic.js';
 
 export const ADMIN_CHAT_ID = '8502935020';
 
@@ -134,6 +134,35 @@ export function adminJobText(job) {
   if (job.pack && sticker) return `идёт | «${oneLine(job.pack)}» | ${sticker}`;
   if (job.pack) return `идёт | «${oneLine(job.pack)}»`;
   return 'идёт';
+}
+
+function sessionCoversItem(session, item) {
+  if (!session) return false;
+  if (!session.at || !item || !item.createdAt) return Boolean(session.url);
+  return String(session.at) >= String(item.createdAt);
+}
+
+function startingActionsText(title, session) {
+  const name = oneLine(title) || '…';
+  const head = `запуск Actions, пак «${name}», стикеры ещё не пошли`;
+  const url = session && /^https?:\/\//i.test(String(session.url || '').trim()) ? String(session.url).trim() : '';
+  return url ? `${head}\n${url}` : head;
+}
+
+// Admin /status: name the step. Bare «простаивает» only when nothing is queued or uploading.
+export function adminLiveStatusText({ queue, job, session } = {}) {
+  if (job && job.running) {
+    const index = num(job.index);
+    const total = num(job.total);
+    if (job.pack && index != null && total != null) return adminJobText(job);
+    return startingActionsText(job.pack, session);
+  }
+  const next = sortQueuedItems((queue && queue.items) || [])[0];
+  if (!next) return 'простаивает';
+  if (sessionCoversItem(session, next)) return startingActionsText(next.title, session);
+  const stickers = Number(next.stickers);
+  const count = Number.isFinite(stickers) && stickers > 0 ? `, ${stickers} стикеров` : '';
+  return `в очереди | «${oneLine(next.title)}»${count}`;
 }
 
 /** Queue uploading row + its pack: progress only (ignores orphan catalog keys in KV). */

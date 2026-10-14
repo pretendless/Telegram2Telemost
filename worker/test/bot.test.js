@@ -858,6 +858,10 @@ test("/start subscribes and replies with the format and the channel example", as
   assert.equal(USER_COMMANDS.find((item) => item.command === "create").description, "Новый запрос на перенос");
   assert.equal(USER_COMMANDS.find((item) => item.command === "start").description, "Как пользоваться");
   assert.equal(USER_COMMANDS.find((item) => item.command === "format").description, "Формат и пример пака");
+  assert.equal(
+    USER_COMMANDS.find((item) => item.command === "stop").description,
+    "Прервать ввод и вернуться к командам",
+  );
   assert.equal(USER_COMMANDS.some((item) => item.command === "example"), false);
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "queue").description, "Очередь и прогресс");
   assert.equal(ADMIN_COMMANDS.length, USER_COMMANDS.length + ADMIN_ONLY_COMMANDS.length);
@@ -1766,26 +1770,45 @@ test("login does not dispatch when the GitHub token is missing", async () => {
   assert.match(sent[0].text, /GH_DISPATCH_TOKEN/);
 });
 
-test("enqueue rejects a done title from another chat", () => {
+test("a finished request blocks only the same title and the same link set", () => {
   let queue = enqueueRequest(emptyQueue(), {
     chatId: 1,
-    title: "Маф, Изис и Агнес",
-    links: ["https://t.me/addstickers/a"],
+    title: "test",
+    links: ["https://t.me/addstickers/oldset"],
     priority: false,
     createdAt: "1",
-    stickers: 1,
+    stickers: 4,
   }).queue;
   queue = { ...queue, items: queue.items.map((item) => ({ ...item, status: "done" })) };
-  const again = enqueueRequest(queue, {
+  const otherLinks = enqueueRequest(queue, {
     chatId: 2,
-    title: "Маф, Изис и Агнес",
-    links: ["https://t.me/addstickers/b"],
+    title: "test",
+    links: ["https://t.me/addstickers/konchanch"],
     priority: false,
     createdAt: "2",
-    stickers: 1,
+    stickers: 33,
   });
-  assert.equal(again.created, false);
-  assert.equal(again.duplicate, "done");
+  assert.equal(otherLinks.created, true);
+  const otherTitle = enqueueRequest(queue, {
+    chatId: 2,
+    title: "test2",
+    links: ["https://t.me/addstickers/oldset"],
+    priority: false,
+    createdAt: "3",
+    stickers: 4,
+  });
+  assert.equal(otherTitle.created, true);
+  assert.equal(otherTitle.item.title, "test2");
+  const same = enqueueRequest(queue, {
+    chatId: 2,
+    title: "test",
+    links: ["t.me/addstickers/oldset"],
+    priority: false,
+    createdAt: "4",
+    stickers: 4,
+  });
+  assert.equal(same.created, false);
+  assert.equal(same.duplicate, "done");
 });
 
 test("admin chat accepts a pack without /create", async () => {
@@ -1846,7 +1869,9 @@ test("admin /status matches /queue when catalog pack KV is orphan", async () => 
   await handle(packMessage(INITIAL_SUBSCRIBER, "/status"), env, {
     sendMessage: async (_env, _chatId, text) => sent.push(text),
   });
-  assert.equal(sent[0], "простаивает");
+  assert.match(sent[0], /в очереди \| «Maf»/);
+  assert.doesNotMatch(sent[0], /^простаивает$/);
+  assert.doesNotMatch(sent[0], /Сэт, Рэдж и Летти/);
   sent.length = 0;
   await handle(packMessage(INITIAL_SUBSCRIBER, "/queue"), env, {
     sendMessage: async (_env, _chatId, text) => sent.push(text),
@@ -1948,8 +1973,9 @@ test("/format, /example and /stop", async () => {
     env,
     { sendMessage: send },
   );
-  assert.equal(await env.BOT_KV.get(`sub:${INITIAL_SUBSCRIBER}`), null);
-  assert.match(sent[2].text, /Уведомления выключены/);
+  assert.match(sent[2].text, /нечего прерывать/);
+  assert.match(sent[2].text, /\/create/);
+  assert.equal(await env.BOT_KV.get(`sub:${INITIAL_SUBSCRIBER}`), "1");
 });
 
 test("/project is admin-only and dispatches cursor-agent workflow", async () => {
