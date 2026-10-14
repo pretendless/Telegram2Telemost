@@ -13,6 +13,7 @@ import {
   doneNotice,
   normalizeProgress,
   planNotifications,
+  progressPercent,
   adminQueueOverviewText,
   claimNext,
   emptyQueue,
@@ -108,7 +109,7 @@ test("a real Telemost sticker link is kept, including the hash", () => {
 
 test("done without packUrl does not notify and does not post", () => {
   const plan = planNotifications(null, pack());
-  assert.deepEqual(plan.messages, ["Начата загрузка пака «Джек и Бевка» в Телемост: 144/144."]);
+  assert.deepEqual(plan.messages, ["Начата загрузка пака «Джек и Бевка» в Телемост: 0/144."]);
   assert.equal(plan.channel, null);
   assert.equal(plan.state.done, false);
   assert.equal(plan.state.posted, false);
@@ -136,15 +137,40 @@ test("a linkless done notice is followed by the link, then the channel post", ()
 
 test("progress percentages and errors follow the polling bot", () => {
   const started = planNotifications(null, pack({ status: "uploading", uploaded: 10, total: 100, url: null }));
-  assert.deepEqual(started.messages, ["Начата загрузка пака «Джек и Бевка» в Телемост: 10/100."]);
+  assert.deepEqual(started.messages, ["Начата загрузка пака «Джек и Бевка» в Телемост: 0/100."]);
   const quarter = planNotifications(started.state, pack({ status: "uploading", uploaded: 40, total: 100 }));
-  assert.deepEqual(quarter.messages, ["«Джек и Бевка»: 40/100 (25 %)."]);
+  assert.deepEqual(quarter.messages, ["«Джек и Бевка»: 40/100 (40 %)."]);
   const late = planNotifications(quarter.state, pack({ status: "uploading", uploaded: 80, total: 100 }));
-  assert.deepEqual(late.messages, ["«Джек и Бевка»: 80/100 (75 %)."]);
+  assert.deepEqual(late.messages, ["«Джек и Бевка»: 80/100 (80 %)."]);
   const failed = planNotifications(late.state, pack({ status: "error", uploaded: 80, total: 100, error: "stopped at 081.png" }));
   assert.match(failed.messages[0], /Ошибка в паке «Джек и Бевка»: stopped at 081.png/);
   const same = planNotifications(failed.state, pack({ status: "error", uploaded: 80, total: 100, error: "stopped at 081.png" }));
   assert.deepEqual(same.messages, []);
+});
+
+test("92 of 92 is 100 percent and the start line is zero of total", () => {
+  assert.equal(progressPercent(92, 92), 100);
+  assert.equal(progressPercent(0, 92), 0);
+  assert.equal(progressPercent(69, 92), 75);
+  const opened = planNotifications(null, pack({
+    title: "ХорниМуд",
+    status: "uploading",
+    uploaded: 92,
+    total: 92,
+    url: null,
+  }));
+  assert.deepEqual(opened.messages, [
+    "Начата загрузка пака «ХорниМуд» в Телемост: 0/92.",
+    "«ХорниМуд»: 92/92 (100 %).",
+  ]);
+  const fromZero = planNotifications(null, pack({
+    title: "ХорниМуд",
+    status: "uploading",
+    uploaded: 0,
+    total: 92,
+    url: null,
+  }));
+  assert.deepEqual(fromZero.messages, ["Начата загрузка пака «ХорниМуд» в Телемост: 0/92."]);
 });
 
 test("nested pack.json telemost block is accepted", () => {

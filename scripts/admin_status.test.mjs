@@ -422,6 +422,28 @@ test('two packs in one session do not keep a stale requester, and TELEGRAM_CHAT_
   }
 });
 
+test('a new start does not keep the previous pack sticker count', async () => {
+  const seen = [];
+  const io = {
+    send: async () => ({ message_id: 1 }),
+    edit: async () => {},
+    delete: async () => {},
+  };
+  const notify = createAdminFeed({
+    io,
+    onDelivered: async (event) => {
+      seen.push({ phase: event.phase, index: event.index, total: event.total, pack: event.pack });
+    },
+  });
+  await notify({ phase: 'link', pack: 'ХорниМуд', index: 92, total: 92, link: 'https://messenger.360.yandex.ru/#/stickers/1' });
+  await notify({ phase: 'start', pack: 'ХорниМуд', total: 92 });
+  assert.equal(seen.at(-1).phase, 'start');
+  assert.equal(seen.at(-1).index, 0);
+  assert.equal(seen.at(-1).total, 92);
+  await notify({ phase: 'sending', pack: 'ХорниМуд', index: 54, total: 92 });
+  assert.equal(seen.at(-1).index, 54);
+});
+
 test('the admin feed sends the card only to the admin chat', async () => {
   const chats = [];
   const io = {

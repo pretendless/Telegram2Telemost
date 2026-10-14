@@ -3069,7 +3069,8 @@ function openAdminFeed(dirRef) {
     onDelivered: (event, delivery) => {
       if (!delivery || delivery.action === 'skip' || !dirRef.dir) return;
       const fields = progressFieldsForPack(dirRef);
-      const index = Number(event.index);
+      const fresh = event.phase === 'start' || event.phase === 'newpack';
+      const index = fresh ? 0 : Number(event.index);
       const total = Number(event.total);
       return postProgress(fetch, process.env.TG2TM_PROGRESS_URL || '', process.env.UPLOADER_SECRET || '', {
         slug: dirRef.dir,
@@ -3208,6 +3209,7 @@ export async function closeOpenBotPackBeforeNew(bot, note, { label = 'перез
   await note({
     phase: 'done',
     pack: label,
+    index: 0,
     lastLine: lastLine || screenLine(tailText),
   });
 
@@ -3282,7 +3284,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   if (restart) {
     await closeOpenBotPackBeforeNew(bot, note, { label: m.title });
   }
-  await note({ phase: 'start', pack: m.title, total: m.images.length });
+  await note({ phase: 'start', pack: m.title, index: 0, total: m.images.length });
 
   const history = await bot.surveyChat();
   let plan = resumeFromChat(history.messages, m.title, m.images.length);
@@ -3390,7 +3392,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       if (doneSent) return;
       doneSent = true;
       console.log(dir, 'pre-newpack-done', why);
-      await note({ phase: 'done', pack: m.title, lastLine: screenLine(beforeTail) });
+      await note({ phase: 'done', pack: m.title, index: 0, total: m.images.length, lastLine: screenLine(beforeTail) });
       const closed = await bot.say('/done');
       const closedText = String(closed.text || '').replace(/\s+/g, ' ').trim();
       console.log(dir, 'pre-newpack-done-reply', closedText.slice(0, 400));

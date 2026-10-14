@@ -9,6 +9,16 @@ export const CHANNEL_CHAT = "@tg2tm";
 export const CHANNEL_TITLE = "Стикеры TG → Телемост";
 export const CHANNEL_ABOUT = "Готовые наборы стикеров, перенесённые в Телемост. Каждый пост — один набор и ссылка на него.";
 export const STEPS = [25, 50, 75];
+
+// The number in parentheses is this ratio, not the 25/50/75 milestone.
+// 92/92 used to print 75% because the milestone list stops at 75.
+export function progressPercent(uploaded, total) {
+  const up = Number(uploaded);
+  const all = Number(total);
+  if (!Number.isFinite(up) || !Number.isFinite(all) || all <= 0 || up <= 0) return 0;
+  if (up >= all) return 100;
+  return Math.round((100 * up) / all);
+}
 // Existing subscriber from the polling bot. Written to KV once; /stop is not undone.
 export const INITIAL_SUBSCRIBER = 8502935020;
 
@@ -147,25 +157,26 @@ export function notificationSteps(prev, pack) {
   const title = pack.title;
   const uploaded = pack.uploaded;
   const total = pack.total;
-  const pct = total ? Math.floor((100 * uploaded) / total) : 0;
+  const percent = progressPercent(uploaded, total);
   const url = realPackUrl(pack.url);
 
-  if ((pack.status === "uploading" || pack.status === "done") && !state.started) {
+  if ((pack.status === "uploading" || pack.status === "done") && !state.started && total > 0) {
     state.started = true;
     steps.push({
       kind: "subscribers",
-      text: `Начата загрузка пака «${title}» в Телемост: ${uploaded}/${total}.`,
+      text: `Начата загрузка пака «${title}» в Телемост: 0/${total}.`,
       state: snapshot(state),
     });
   }
 
   if (pack.status === "uploading") {
-    const reached = STEPS.reduce((max, step) => (pct >= step ? step : max), 0);
-    if (reached > state.step) {
-      state.step = reached;
+    const reached = STEPS.reduce((max, step) => (percent >= step ? step : max), 0);
+    const announce = percent >= 100 ? 100 : reached;
+    if (announce > state.step) {
+      state.step = announce;
       steps.push({
         kind: "subscribers",
-        text: `«${title}»: ${uploaded}/${total} (${reached} %).`,
+        text: `«${title}»: ${uploaded}/${total} (${percent} %).`,
         state: snapshot(state),
       });
     }

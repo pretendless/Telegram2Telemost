@@ -194,8 +194,12 @@ export async function deliverAdminStatus(io, chatId, prev, event, now) {
 
 function withSticker(event, previous) {
   const prev = previous && previous.event;
-  const samePack = Boolean(prev) && (prev.pack || '') === ((event && event.pack) || '');
-  const index = num(event && event.index) != null ? event.index : (samePack ? prev.index : event && event.index);
+  const phase = event && event.phase;
+  // A new pack must not inherit the previous pack's last sticker count.
+  const fresh = phase === 'start' || phase === 'newpack';
+  const samePack = !fresh && Boolean(prev) && (prev.pack || '') === ((event && event.pack) || '');
+  const explicit = num(event && event.index);
+  const index = fresh ? (explicit != null ? explicit : 0) : (explicit != null ? explicit : (samePack ? prev.index : event && event.index));
   const total = num(event && event.total) != null ? event.total : (samePack ? prev.total : event && event.total);
   return { ...event, index, total };
 }
