@@ -779,11 +779,45 @@ export function stagingBufferRows(rows) {
   return list;
 }
 
-export function stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount = null) {
+// Join staging: new uploads often lack hasImage while an older bubble still has it.
+export function stagingForwardBuffer(rows) {
+  const list = (rows || []).filter((row) => row);
+  const wide = list.filter((row) => row.hasImage || stagingImageOnlyRow(row));
+  if (wide.length) return wide;
+  return stagingBufferRows(list);
+}
+
+export function stagingForwardMessageIdFromBatch(buffer, imageIndex, stagingFilled, uploaded) {
+  const buf = buffer || [];
+  const filled = Number(stagingFilled) || 0;
+  const up = Number(uploaded) || 0;
+  const i = Number(imageIndex) || 0;
+  const batchSize = filled - up;
+  if (batchSize <= 0 || buf.length < batchSize) return null;
+  const pos = buf.length - batchSize + (i - up);
+  if (pos < 0 || pos >= buf.length) return null;
+  const row = buf[pos];
+  return row && row.id != null ? String(row.id) : null;
+}
+
+export function stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount = null, opts = null) {
   const list = rows || [];
   const idx = (Number(baseRowCount) || 0) + (Number(imageIndex) || 0);
   const direct = list[idx];
   if (direct && direct.id != null) return String(direct.id);
+
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const { stagingFilled, uploaded } = o;
+  let batchSize = 0;
+  if (stagingFilled != null && uploaded != null) {
+    batchSize = (Number(stagingFilled) || 0) - (Number(uploaded) || 0);
+    if (batchSize > 0) {
+      const batchBuf = stagingForwardBuffer(list);
+      if (batchBuf.length < batchSize) return null;
+      const fromBatch = stagingForwardMessageIdFromBatch(batchBuf, imageIndex, stagingFilled, uploaded);
+      if (fromBatch) return fromBatch;
+    }
+  }
 
   const buffer = stagingBufferRows(list);
   const bufBase = baseBufferCount != null ? Number(baseBufferCount) : Number(baseRowCount) || 0;
@@ -796,21 +830,48 @@ export function stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBuff
   return null;
 }
 
-export const STAGING_FORWARD_POLL_MS = 3000;
+export const STAGING_FORWARD_POLL_MS = 8000;
 
-export async function resolveStagingForwardId(bot, imageIndex, baseRowCount, baseBufferCount = null) {
-  const needRows = (Number(baseRowCount) || 0) + (Number(imageIndex) || 0) + 1;
-  const deadline = Date.now() + STAGING_FORWARD_POLL_MS;
+export async function stagingRowsForForward(bot) {
+  if (typeof bot.surveyChat === 'function') {
+    const surveyed = await bot.surveyChat();
+    const messages = surveyed.messages || [];
+    if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
+    const live = typeof bot.chatRows === 'function' ? await bot.chatRows() : [];
+    const byId = new Map((live || []).filter((row) => row && row.id != null).map((row) => [String(row.id), row]));
+    return messages.map((message) => {
+      const hit = byId.get(String(message.id));
+      if (hit) return hit;
+      return {
+        ...message,
+        hasImage: stagingImageOnlyRow(message),
+      };
+    });
+  }
+  if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
+  return bot.chatRows();
+}
+
+export async function resolveStagingForwardId(
+  bot,
+  imageIndex,
+  baseRowCount,
+  baseBufferCount = null,
+  opts = null,
+) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const { stagingFilled, uploaded } = o;
+  const resolveOpts = stagingFilled != null && uploaded != null ? { stagingFilled, uploaded } : null;
+  const pollMs = Number(o.pollMs) > 0 ? Number(o.pollMs) : STAGING_FORWARD_POLL_MS;
+  const deadline = Date.now() + pollMs;
   let rows = [];
   while (Date.now() <= deadline) {
-    if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
-    rows = await bot.chatRows();
-    const id = stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount);
+    rows = await stagingRowsForForward(bot);
+    const id = stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount, resolveOpts);
     if (id) return id;
-    if ((rows || []).length < needRows) await sleep(POLL_MS * 5);
-    else await sleep(POLL_MS * 5);
+    await sleep(POLL_MS * 5);
   }
-  return stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount);
+  return stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount, resolveOpts);
 }
 
 // Rows that appeared after a staging send (join buffer may omit .yamb-message-row_own).
@@ -1706,6 +1767,23 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   let stagingBaseRowCount = null;
   let stagingBaseBufferCount = null;
   let stagingJoinPreloaded = false;
+  let stagingPackStarted = false;
+
+  async function startStagingPack() {
+    if (!useStaging || stagingPackStarted) return;
+    stagingPackStarted = true;
+    await bot.openChat(stagingUrl);
+    try {
+      const removed = await bot.clearChatResidue();
+      console.log(dir, 'staging-pack-start', 'cleared', removed);
+    } catch (e) {
+      console.log(dir, 'staging-pack-start', 'cleanup-skip', e && e.message ? e.message : e);
+    }
+    stagingBaseRowCount = null;
+    stagingBaseBufferCount = null;
+    await ensureStagingBase();
+    console.log(dir, 'staging-base', stagingBaseRowCount, 'buffer', stagingBaseBufferCount);
+  }
 
   async function preloadStagingJoinChat() {
     if (!useStaging || stagingJoinPreloaded) return;
@@ -1731,6 +1809,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     if (!useStaging) return;
     const need = stagingFillTo(tm.uploaded, stagingFilled, m.images.length, urls.stagingWindow);
     if (!need.length) return;
+    await startStagingPack();
     await preloadStagingJoinChat();
     await bot.openChat(stagingUrl);
     await ensureStagingBase();
@@ -1761,7 +1840,10 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     const ownBeforeIds = ownIds(thread);
     await bot.openChat(stagingUrl);
     await ensureStagingBase();
-    const ownId = await resolveStagingForwardId(bot, index, stagingBaseRowCount, stagingBaseBufferCount);
+    const ownId = await resolveStagingForwardId(bot, index, stagingBaseRowCount, stagingBaseBufferCount, {
+      stagingFilled,
+      uploaded: tm.uploaded,
+    });
     if (!ownId) {
       const snap = await bot.chatRows();
       throw new Error(
