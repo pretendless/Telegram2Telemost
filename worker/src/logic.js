@@ -3,6 +3,7 @@
 // A completion note that already went out without a link is followed by that link once.
 
 export const MAX_STICKERS = 150;
+export const MAX_PACK_TITLE = 100;
 export const BOT_NAME = "Telegram2Telemost";
 export const CHANNEL = "https://t.me/tg2tm";
 export const CHANNEL_CHAT = "@tg2tm";
@@ -29,13 +30,14 @@ export const EXAMPLE =
   "https://t.me/addstickers/minty2_vk";
 
 export const FORMAT =
-  "Одно сообщение — один пак Телемоста.\n" +
+  "Новый пак — команда /create и два следующих сообщения.\n" +
   "\n" +
-  "1. Первая строка — название пака.\n" +
-  "2. Дальше ссылки t.me/addstickers/…, по одной в строке. Порядок ссылок = порядок стикеров.\n" +
-  `3. Всего не больше ${MAX_STICKERS} стикеров: это лимит Телемоста на пак.\n` +
+  "1. /create.\n" +
+  `2. Следующее сообщение — только название пака, без ссылок, не длиннее ${MAX_PACK_TITLE} символов.\n` +
+  "3. Затем ссылки t.me/addstickers/…, по одной в строке. Порядок ссылок = порядок стикеров.\n" +
+  `4. Всего не больше ${MAX_STICKERS} стикеров: это лимит Телемоста на пак.\n` +
   "\n" +
-  "Пример:\n" +
+  "Пример (название и ссылки — разными сообщениями):\n" +
   "\n" +
   EXAMPLE;
 
@@ -44,13 +46,13 @@ export const START =
   "\n" +
   FORMAT +
   `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
-  "\n\nСначала /create — затем одним сообщением название и ссылки (см. /format). Бот проверит набор и поставит его в очередь." +
+  "\n\nСначала /create — бот спросит название, затем ссылки (см. /format). Бот проверит набор и поставит его в очередь." +
   "\n\nБот пишет вам только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылает. /status — ваши запросы, /stop — отписаться.";
 
 export const DESCRIPTION =
   `${BOT_NAME} переносит стикеры из Telegram в Телемост.\n` +
   "\n" +
-  "Одно сообщение — один пак: первая строка — название, дальше ссылки t.me/addstickers/… по порядку, " +
+  "Команда /create: сначала только название, затем ссылки t.me/addstickers/… по порядку, " +
   `всего до ${MAX_STICKERS} стикеров.\n` +
   "\n" +
   "Пример:\n" +
@@ -61,11 +63,20 @@ export const DESCRIPTION =
 export const ABOUT = "Переносит стикеры из Telegram в Телемост.";
 
 export const CREATE_PROMPT =
-  "Жду описание пака одним сообщением.\n\n" +
-  "Первая строка — название, дальше ссылки t.me/addstickers/… (подробнее — /format).";
+  "Как назвать пак в Телемосте?\n\n" +
+  `Пришлите только название, одним сообщением, без ссылок. Не длиннее ${MAX_PACK_TITLE} символов.`;
+
+export function createLinksPrompt(title) {
+  return (
+    `Название: «${title}».\n\n` +
+    "Пришлите ссылки на наборы стикеров t.me/addstickers/… — одну или несколько, по одной в строке. " +
+    "Порядок ссылок — порядок стикеров.\n\n" +
+    `Всего стикеров во всех наборах должно быть не больше ${MAX_STICKERS}.`
+  );
+}
 
 export const NEED_CREATE =
-  "Сначала отправьте /create, затем одним сообщением название и ссылки t.me/addstickers/…\n\nПодробнее — /format.";
+  "Сначала отправьте /create. Бот спросит название, затем ссылки t.me/addstickers/….\n\nПодробнее — /format.";
 
 export const AWAIT_CREATE_PREFIX = "await:";
 
@@ -310,6 +321,154 @@ export function renderPackCheck(title, rows, total) {
       ? `Всего ${total} стикеров — укладывается в лимит ${MAX_STICKERS}.`
       : `Всего ${total} стикеров — больше лимита ${MAX_STICKERS}. Разбейте на два сообщения.`;
   return `Пак «${title}»\n\n${rows.join("\n")}\n\n${verdict}`;
+}
+
+// await:<chatId> is either {"step":"name"} or {"step":"links","title":"…"}.
+// Legacy value "1" (one combined pack message) is the name step.
+export function encodeAwaitCreate(state) {
+  if (!state || state.step !== "links") return JSON.stringify({ step: "name" });
+  const title = String(state.title || "").replace(/\s+/g, " ").trim();
+  return JSON.stringify({ step: "links", title });
+}
+
+export function decodeAwaitCreate(raw) {
+  if (raw == null || raw === "") return null;
+  const text = String(raw);
+  if (text === "1") return { step: "name" };
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (parsed.step === "name") return { step: "name" };
+  if (parsed.step === "links") {
+    const title = String(parsed.title || "").replace(/\s+/g, " ").trim();
+    if (!title || title.length > MAX_PACK_TITLE) return { step: "name" };
+    return { step: "links", title };
+  }
+  return null;
+}
+
+export function nameStepResult(text) {
+  const raw = String(text ?? "");
+  if (/(?:https?:\/\/)?t\.me\/addstickers\/[A-Za-z0-9_]+/i.test(raw) || /https?:\/\//i.test(raw)) {
+    return {
+      ok: false,
+      reason: "links",
+      text:
+        "На этом шаге нужно только название пака, без ссылок.\n\n" +
+        "Пришлите название одним сообщением. Ссылки t.me/addstickers/… — следующим шагом.",
+    };
+  }
+  const title = raw.replace(/\s+/g, " ").trim();
+  if (!title) return { ok: false, reason: "empty", text: CREATE_PROMPT };
+  if (title.length > MAX_PACK_TITLE) {
+    return {
+      ok: false,
+      reason: "long",
+      text:
+        `Название — ${title.length} ${ruChars(title.length)}, лимит ${MAX_PACK_TITLE}.\n\n` +
+        "Пришлите название ещё раз, без ссылок.",
+    };
+  }
+  return { ok: true, title };
+}
+
+function ruChars(n) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "символ";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "символа";
+  return "символов";
+}
+
+export function parseStickerSetNames(text) {
+  const names = [];
+  const re = /(?:https?:\/\/)?t\.me\/addstickers\/([A-Za-z0-9_]+)/gi;
+  for (const match of String(text || "").matchAll(re)) {
+    if (!names.includes(match[1])) names.push(match[1]);
+  }
+  return names;
+}
+
+function linksAgain(title, problem) {
+  return (
+    `${problem}\n\n` +
+    `Пришлите ссылки t.me/addstickers/… ещё раз — одну или несколько. Название «${title}» сохранено.`
+  );
+}
+
+// names are the sets in the message; lookups are { name, count } or { name, missing: true }.
+export function judgeCreateLinks(title, names, lookups) {
+  const list = Array.isArray(names) ? names : [];
+  const found = new Map();
+  for (const row of Array.isArray(lookups) ? lookups : []) {
+    if (row && row.name) found.set(row.name, row);
+  }
+  if (!list.length) {
+    return {
+      ok: false,
+      reason: "no-links",
+      missing: [],
+      total: 0,
+      rows: [],
+      text: linksAgain(title, "В сообщении нет ссылок t.me/addstickers/…."),
+    };
+  }
+  const rows = [];
+  const missing = [];
+  let total = 0;
+  for (const name of list) {
+    const row = found.get(name);
+    const count = row && Number.isFinite(Number(row.count)) ? Math.floor(Number(row.count)) : NaN;
+    if (!row || row.missing || !Number.isFinite(count) || count < 0) {
+      missing.push(name);
+      rows.push(`• ${name} — набор не найден`);
+    } else {
+      total += count;
+      rows.push(`• ${name} — ${count}`);
+    }
+  }
+  if (missing.length) {
+    const which =
+      missing.length === 1
+        ? `Набор «${missing[0]}» не найден.`
+        : `Не найдены наборы: ${missing.map((name) => `«${name}»`).join(", ")}.`;
+    return {
+      ok: false,
+      reason: "missing",
+      missing,
+      total,
+      rows,
+      text: linksAgain(title, `${which}\n\n${rows.join("\n")}`),
+    };
+  }
+  if (total <= 0) {
+    return {
+      ok: false,
+      reason: "empty",
+      missing: [],
+      total,
+      rows,
+      text: linksAgain(title, `Всего ${total} стикеров — нужен набор, в котором есть стикеры.\n\n${rows.join("\n")}`),
+    };
+  }
+  if (total > MAX_STICKERS) {
+    return {
+      ok: false,
+      reason: "over",
+      missing: [],
+      total,
+      rows,
+      text: linksAgain(
+        title,
+        `Всего ${total} стикеров — больше лимита ${MAX_STICKERS} (всего ${total} > ${MAX_STICKERS}).\n\n${rows.join("\n")}`,
+      ),
+    };
+  }
+  return { ok: true, reason: null, missing: [], total, rows, text: null };
 }
 
 export const QUEUE_KEY = "queue";
