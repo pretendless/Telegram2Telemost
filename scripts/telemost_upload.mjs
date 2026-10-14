@@ -1354,6 +1354,77 @@ export async function leaveUnpublishedDraft(say) {
   return reply;
 }
 
+// Zero accepted stickers on a picture-only draft: abandon, not /done (would publish empty).
+export function shouldAbandonOpenPack(liveText, messages = []) {
+  const body = String(liveText || '');
+  if (!unfinishedPack(body)) return false;
+  if (packDialogOpen(body)) return false;
+  const accepted = acceptedInOpenPack(messages);
+  if (accepted > 0) return false;
+  return wantsPicture(body) || (CREATED.test(body) && !READY.test(body));
+}
+
+export function closeOpenPackPlan(liveText, messages = []) {
+  if (!unfinishedPack(liveText)) return { action: 'idle' };
+  if (shouldAbandonOpenPack(liveText, messages)) return { action: 'abandon' };
+  if (finalizeDecision(liveText).action === 'done') return { action: 'done' };
+  if (packDialogOpen(liveText)) return { action: 'blocked' };
+  const accepted = acceptedInOpenPack(messages);
+  if (accepted > 0) return { action: 'done' };
+  return { action: 'abandon' };
+}
+
+export async function closeOpenBotPackBeforeNew(bot, note, { label = 'перезапуск', lastLine = '' } = {}) {
+  const history = await bot.surveyChat();
+  const live = await bot.recentIncoming(2);
+  const liveText = String(live.text || '');
+  if (!unfinishedPack(liveText)) {
+    return { action: 'idle', closedText: liveText, liveText, title: '' };
+  }
+
+  const plan = closeOpenPackPlan(liveText, history.messages);
+  await note({
+    phase: 'done',
+    pack: label,
+    lastLine: lastLine || screenLine(liveText),
+  });
+
+  let closedText = '';
+
+  async function tryAbandon() {
+    const abandoned = await withRetry('close-before-new-abandon', () =>
+      leaveUnpublishedDraft((cmd) => bot.say(cmd)),
+    );
+    return String(abandoned.text || '');
+  }
+
+  if (plan.action === 'abandon') {
+    closedText = await tryAbandon();
+    console.log('close-before-new-abandon', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
+  } else if (plan.action === 'done') {
+    const closed = await withRetry('close-before-new-done', () => bot.say('/done'));
+    closedText = String(closed.text || '');
+    console.log('close-before-new-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
+    if (restartAfterClose(closedText).action === 'stop' && shouldAbandonOpenPack(liveText, history.messages)) {
+      closedText = await tryAbandon();
+      console.log('close-before-new-abandon-fallback', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
+    }
+  } else {
+    throw new Error(`refusing /newpack while a pack is still open: ${liveText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+  }
+
+  if (restartAfterClose(closedText).action === 'stop') {
+    throw new Error(`refusing /newpack while a pack is still open: ${closedText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+  }
+
+  return {
+    action: plan.action,
+    closedText,
+    liveText,
+    title: statusPackName(savedPackTitle(closedText)),
+  };
+}
+
 function loadPack(dir) {
   const path = join(PACKS, dir, 'pack.json');
   return { path, meta: JSON.parse(readFileSync(path, 'utf8')) };
@@ -1384,6 +1455,9 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     dirRef.title = m.title;
     dirRef.queueRequestId = m.queueRequestId || '';
     dirRef.requesterChatId = m.requesterChatId || '';
+  }
+  if (restart) {
+    await closeOpenBotPackBeforeNew(bot, note, { label: m.title });
   }
   await note({ phase: 'start', pack: m.title, total: m.images.length });
 
@@ -1867,20 +1941,15 @@ async function restartRun(bot, note, dirRef) {
   const open = choice.unfinished || unfinishedPack(live.text);
   let closedText = '';
   if (open) {
-    await note({
-      phase: 'done',
-      pack: seenTitle || 'перезапуск',
+    const closed = await closeOpenBotPackBeforeNew(bot, note, {
+      label: seenTitle || 'перезапуск',
       lastLine: screenLine(live.text) || choice.lastLine || '',
     });
-    const closed = await withRetry('restart-done', () => bot.say('/done'));
-    closedText = String(closed.text || '');
-    console.log('restart-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
-    if (restartAfterClose(closedText).action === 'stop') {
-      throw new Error(`refusing /newpack while a pack is still open: ${closedText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+    closedText = String(closed.closedText || '');
+    if (closed.title) {
+      seenTitle = closed.title;
+      if (dirRef) dirRef.title = closed.title;
     }
-    const recovered = statusPackName(savedPackTitle(closedText));
-    if (recovered) seenTitle = recovered;
-    if (dirRef && recovered) dirRef.title = recovered;
   }
   if (selected.action === 'close') {
     console.log('restart-closed', JSON.stringify({ title: seenTitle, lastLine: screenLine(closedText) || choice.lastLine || '' }));
