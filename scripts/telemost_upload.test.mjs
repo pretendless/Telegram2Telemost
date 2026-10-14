@@ -54,6 +54,9 @@ import {
   statusPackName,
   stickerSetName,
   typedPackTitle,
+  shouldAbandonOpenPack,
+  closeOpenPackPlan,
+  acceptedInOpenPack,
 } from "./telemost_upload.mjs";
 
 const partial = {
@@ -658,4 +661,39 @@ test("restart follows the open pack, or the next stored request", () => {
   assert.equal(restartAfterClose("Набор «Юг» сохранён.").action, "newpack");
   assert.equal(restartAfterClose("Набор «Юг» сохранён.").uploaded, 0);
   assert.equal(stickerSetName("https://t.me/addstickers/vostok"), "vostok");
+});
+
+test("closeOpenPackPlan abandons a zero-sticker picture draft, not /done", () => {
+  const pictureOnly = "Создан набор стикеров «Маф, Изис и Агнес». Отправьте картинку для стикера.";
+  const messages = [
+    { own: false, text: pictureOnly },
+  ];
+  assert.equal(acceptedInOpenPack(messages), 0);
+  assert.equal(shouldAbandonOpenPack(pictureOnly, messages), true);
+  assert.deepEqual(closeOpenPackPlan(pictureOnly, messages), { action: "abandon" });
+  assert.equal(
+    closeOpenPackPlan("Отправьте картинку для стикера.\n/done — завершить действие", messages).action,
+    "abandon",
+  );
+});
+
+test("closeOpenPackPlan uses /done when stickers were accepted", () => {
+  const ready = "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done";
+  const messages = [
+    { own: false, text: "Создан набор «Юг»." },
+    { own: false, text: ready },
+  ];
+  assert.ok(acceptedInOpenPack(messages) >= 1);
+  assert.equal(shouldAbandonOpenPack(ready, messages), false);
+  assert.deepEqual(closeOpenPackPlan(ready, messages), { action: "done" });
+});
+
+test("closeOpenPackPlan blocks emoji dialog without publishing", () => {
+  const emoji = "Отправьте эмодзи для стикера.";
+  const messages = [
+    { own: false, text: "Создан набор «Маф»." },
+    { own: false, text: emoji },
+  ];
+  assert.equal(shouldAbandonOpenPack(emoji, messages), false);
+  assert.deepEqual(closeOpenPackPlan(emoji, messages), { action: "blocked" });
 });
