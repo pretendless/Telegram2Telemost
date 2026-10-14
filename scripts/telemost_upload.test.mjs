@@ -57,6 +57,9 @@ import {
   shouldAbandonOpenPack,
   closeOpenPackPlan,
   acceptedInOpenPack,
+  latestIncomingText,
+  incomingTailText,
+  unfinishedPackTail,
 } from "./telemost_upload.mjs";
 
 const partial = {
@@ -696,4 +699,39 @@ test("closeOpenPackPlan blocks emoji dialog without publishing", () => {
   ];
   assert.equal(shouldAbandonOpenPack(emoji, messages), false);
   assert.deepEqual(closeOpenPackPlan(emoji, messages), { action: "blocked" });
+});
+
+test("latestIncomingText ignores an older saved bubble when a draft is open", () => {
+  const saved =
+    "Набор «Старый» сохранён и доступен по ссылке https://t.me/addstickers/staryy\n09:00";
+  const open =
+    "Создан набор стикеров «Маф, Изис и Агнес». Отправьте картинку для стикера.\n/done — завершить действие\n10:25";
+  const combined = `${saved}\n${open}`;
+  const incoming = { text: combined, bubbles: [{ text: saved }, { text: open }] };
+
+  assert.equal(unfinishedPack(combined), false);
+  assert.equal(unfinishedPackTail(combined), true);
+  assert.equal(latestIncomingText(incoming), open);
+  assert.equal(unfinishedPack(latestIncomingText(incoming)), true);
+
+  const messages = [{ own: false, text: open }];
+  assert.equal(shouldAbandonOpenPack(open, messages), true);
+  assert.deepEqual(closeOpenPackPlan(open, messages), { action: "abandon" });
+  assert.deepEqual(closeOpenPackPlan(latestIncomingText(incoming), messages), { action: "abandon" });
+});
+
+test("incomingTailText splits joined bubbles without DOM bubbles", () => {
+  const saved = "Набор «Старый» сохранён и доступен по ссылке.";
+  const open = "Создан набор «Маф». Отправьте картинку для стикера.";
+  const combined = `${saved}\n${open}`;
+  assert.equal(incomingTailText(combined), open);
+  assert.equal(unfinishedPackTail(combined), true);
+});
+
+test("latestIncomingText skips a trailing command menu bubble", () => {
+  const open = "Создан набор «Юг». Отправьте картинку для стикера.";
+  const menu = "/newpack — создать набор\n/done — завершить\n/stickers — мои наборы";
+  const incoming = { text: `${open}\n${menu}`, bubbles: [{ text: open }, { text: menu }] };
+  assert.equal(latestIncomingText(incoming), open);
+  assert.equal(unfinishedPack(latestIncomingText(incoming)), true);
 });
