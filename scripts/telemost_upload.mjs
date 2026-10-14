@@ -196,6 +196,16 @@ class Bot {
     await this.ensureChat();
   }
 
+  /** Force navigation when the SPA kept the URL but unloaded the message list. */
+  async revisitChat(url) {
+    const target = String(url || this.chatUrl || '').trim();
+    if (!target) throw new Error('Telemost chat URL is empty');
+    delete this.settledByTarget[target];
+    this.chatUrl = target;
+    await this.c.send('Page.navigate', { url: target });
+    await this.ensureChat();
+  }
+
   async ensureChat() {
     const target = this.chatUrl || this.botUrl;
     const settled = this.settledByTarget[target];
@@ -805,13 +815,14 @@ class Bot {
     })()`);
   }
 
-  async openMessageMenu(ownId) {
+  async openMessageMenu(ownId, { maxCycles = 12 } = {}) {
     let sawRow = false;
     let menuOpened = false;
     await this.focusChatSurface();
     const id = JSON.stringify(String(ownId));
     const btnSel = JSON.stringify(STAGING_MESSAGE_ACTIONS_SELECTOR);
-    for (let attempt = 0; attempt < 12; attempt++) {
+    const cycles = Math.max(1, Math.min(12, Number(maxCycles) || 12));
+    for (let attempt = 0; attempt < cycles; attempt++) {
       const mode = attempt % 8;
       let geom = await this.messageRowGeometry(ownId);
       if (!geom || !geom.ok) {
@@ -906,8 +917,9 @@ class Bot {
     for (let attempt = 0; attempt < 4 && !pickedForward; attempt++) {
       if (attempt) await this.dismissOverlay();
       try {
-        await this.openMessageMenu(ownId);
+        await this.openMessageMenu(ownId, { maxCycles: attempt === 0 ? 8 : 4 });
       } catch (e) {
+        if (stagingForwardMenuBlocked(e)) throw e;
         if (attempt >= 3) throw e;
         continue;
       }
@@ -1312,6 +1324,44 @@ export const STAGING_FORWARD_POLL_MS = 8000;
 
 export const STAGING_FORWARD_MENU_LABELS = Object.freeze(['Переслать сообщение', 'Переслать', 'Forward']);
 
+export const STAGING_CHAT_WARM_ITERATIONS = 4;
+
+/** Scroll staging join chat so lazy history repaints after bot↔staging navigation. */
+export async function warmStagingChatView(bot, { iterations = STAGING_CHAT_WARM_ITERATIONS } = {}) {
+  const n = Math.max(1, Number(iterations) || STAGING_CHAT_WARM_ITERATIONS);
+  for (let i = 0; i < n; i++) {
+    if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
+    await sleep(200);
+    if (typeof bot.chatRows === 'function') await bot.chatRows();
+  }
+}
+
+/** Drop cached settlement and reload staging when the message list is empty. */
+export async function reopenStagingChat(bot, stagingUrl) {
+  const target = String(stagingUrl || bot.stagingUrl || '').trim();
+  if (!target) return;
+  if (typeof bot.revisitChat === 'function') await bot.revisitChat(target);
+  else {
+    if (bot.settledByTarget) delete bot.settledByTarget[target];
+    await bot.openChat(target);
+  }
+  await warmStagingChatView(bot, { iterations: STAGING_CHAT_WARM_ITERATIONS + 2 });
+}
+
+export function stagingForwardExpectsRows(opts) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const filled = Number(o.stagingFilled);
+  const up = Number(o.uploaded);
+  if (!Number.isFinite(filled) || !Number.isFinite(up)) return false;
+  return filled > up;
+}
+
+/** Forward-via-staging failed in a way direct sendImage from disk can recover. */
+export function stagingForwardMenuBlocked(err) {
+  const msg = err && typeof err === 'object' && err.message != null ? String(err.message) : String(err || '');
+  return /staging forward: (context menu did not open|Переслать not found|stickers chat not in picker)/i.test(msg);
+}
+
 // Match Telemost/Yamb context menu rows (exact label, prefix, or substring for RU/EN).
 export function menuLabelMatches(text, aria, labels = STAGING_FORWARD_MENU_LABELS) {
   const t = String(text || '').replace(/\s+/g, ' ').trim();
@@ -1358,10 +1408,24 @@ export async function resolveStagingForwardId(
   const pollMs = Number(o.pollMs) > 0 ? Number(o.pollMs) : STAGING_FORWARD_POLL_MS;
   const deadline = Date.now() + pollMs;
   let rows = [];
+  let reopened = false;
+  if (o.stagingUrl) {
+    await bot.openChat(o.stagingUrl);
+    await warmStagingChatView(bot);
+  }
   while (Date.now() <= deadline) {
     rows = await stagingRowsForForward(bot);
     const id = stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount, resolveOpts);
     if (id) return id;
+    if (
+      !reopened
+      && o.stagingUrl
+      && stagingForwardExpectsRows(o)
+      && !(rows || []).length
+    ) {
+      reopened = true;
+      await reopenStagingChat(bot, o.stagingUrl);
+    }
     await sleep(POLL_MS * 5);
   }
   return stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount, resolveOpts);
@@ -2282,11 +2346,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     if (!useStaging || stagingJoinPreloaded) return;
     stagingJoinPreloaded = true;
     await bot.openChat(stagingUrl);
-    for (let i = 0; i < 4; i++) {
-      await bot.scrollToBottom();
-      await sleep(200);
-      await bot.chatRows();
-    }
+    await warmStagingChatView(bot);
   }
 
   async function ensureStagingBase() {
@@ -2336,9 +2396,10 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     const ownId = await resolveStagingForwardId(bot, index, stagingBaseRowCount, stagingBaseBufferCount, {
       stagingFilled,
       uploaded: tm.uploaded,
+      stagingUrl,
     });
     if (!ownId) {
-      const snap = await bot.chatRows();
+      const snap = await stagingRowsForForward(bot);
       throw new Error(
         `staging forward: image ${index} not found (base rows ${stagingBaseRowCount}, `
         + `${(snap || []).length} rows, ${stagingImageRows(snap).length} with img, `
@@ -2349,10 +2410,16 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     try {
       await bot.forwardOwnToBot(ownId, botUrl);
     } catch (e) {
-      const msg = e && e.message ? String(e.message) : '';
-      const menuBlocked = /context menu did not open|Переслать not found/i.test(msg);
-      if (!menuBlocked) throw e;
+      if (!stagingForwardMenuBlocked(e)) throw e;
+      const msg = e && e.message ? String(e.message) : String(e);
       console.log(dir, 'forward-fallback-send', m.images[index].file, msg.replace(/\s+/g, ' ').slice(0, 240));
+      await note({
+        phase: 'sending',
+        pack: m.title,
+        index: index + 1,
+        total: m.images.length,
+        lastLine: 'пересылка недоступна — прямая отправка файла',
+      });
       await bot.openChat(botUrl);
       return bot.sendImage(file, { onWait });
     }

@@ -35,6 +35,11 @@ import {
   STAGING_FORWARD_POLL_MS,
   STAGING_FORWARD_MENU_LABELS,
   STAGING_MESSAGE_ACTIONS_SELECTOR,
+  STAGING_CHAT_WARM_ITERATIONS,
+  warmStagingChatView,
+  reopenStagingChat,
+  stagingForwardExpectsRows,
+  stagingForwardMenuBlocked,
   menuLabelMatches,
   botRepliesAfterOwn,
   loadTelemostUrls,
@@ -502,6 +507,58 @@ test("resolveStagingForwardId polls until staged rows appear", async () => {
   assert.ok(STAGING_FORWARD_POLL_MS >= 8000);
 });
 
+test("stagingForwardExpectsRows is true when staging batch still has uploads", () => {
+  assert.equal(stagingForwardExpectsRows({ stagingFilled: 5, uploaded: 2 }), true);
+  assert.equal(stagingForwardExpectsRows({ stagingFilled: 2, uploaded: 2 }), false);
+  assert.equal(stagingForwardExpectsRows(null), false);
+});
+
+test("warmStagingChatView scrolls staging chat before forward resolve", async () => {
+  let scrolls = 0;
+  const bot = {
+    scrollToBottom: async () => { scrolls += 1; },
+    chatRows: async () => [],
+  };
+  await warmStagingChatView(bot, { iterations: STAGING_CHAT_WARM_ITERATIONS });
+  assert.equal(scrolls, STAGING_CHAT_WARM_ITERATIONS);
+});
+
+test("resolveStagingForwardId reopens staging when DOM is empty but batch expects rows", async () => {
+  let opens = 0;
+  let revisited = 0;
+  const staged = [
+    { id: "1", own: false, text: "", hasImage: true },
+    { id: "2", own: false, text: "", hasImage: true },
+    { id: "3", own: false, text: "", hasImage: true },
+  ];
+  const bot = {
+    settledByTarget: {},
+    stagingUrl: "https://telemost.yandex.ru/join#test",
+    openChat: async () => { opens += 1; },
+    revisitChat: async () => { revisited += 1; },
+    scrollToBottom: async () => {},
+    chatRows: async () => (revisited ? staged : []),
+    surveyChat: async () => ({ messages: revisited ? staged.map(({ id, own, text }) => ({ id, own, text, links: [] })) : [], reachedTop: true }),
+  };
+  const id = await resolveStagingForwardId(bot, 2, 0, 0, {
+    stagingFilled: 5,
+    uploaded: 2,
+    stagingUrl: bot.stagingUrl,
+    pollMs: 15000,
+  });
+  assert.equal(id, "3");
+  assert.ok(opens >= 1);
+  assert.equal(revisited, 1);
+});
+
+test("stagingForwardMenuBlocked detects forward failures eligible for sendImage fallback", () => {
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: context menu did not open for 1")), true);
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: Переслать not found")), true);
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: stickers chat not in picker")), true);
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: message 9 not found")), false);
+  assert.equal(stagingForwardMenuBlocked(new Error("file input not found")), false);
+});
+
 test("menuLabelMatches accepts RU and EN forward menu labels", () => {
   assert.equal(menuLabelMatches("Переслать", ""), true);
   assert.equal(menuLabelMatches("Переслать сообщение", ""), true);
@@ -522,6 +579,9 @@ test("staging message menu uses deep press helpers and CDP hover", () => {
   assert.match(src, /async pressMessageRowActions/);
   assert.match(src, /async focusMessageRow/);
   assert.match(src, /stagingForwardDebugCapture/);
+  assert.match(src, /forward-fallback-send/);
+  assert.match(src, /stagingForwardMenuBlocked/);
+  assert.match(src, /warmStagingChatView/);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /Действия с сообщением/);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /MessageActions/i);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /yamb-message-row__actions/);

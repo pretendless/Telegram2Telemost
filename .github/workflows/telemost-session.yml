@@ -158,6 +158,7 @@ jobs:
             -v "$PWD/sessions:/var/lib/tg2tm/sessions" \
             -v "$PWD/packs:/opt/tg2tm/packs" \
             -v "$PWD/logs:/opt/tg2tm/logs" \
+            -v "$PWD/scripts:/opt/tg2tm/scripts:ro" \
             tg2tm-browser
 
       - name: Prepare the pack this restart will upload
@@ -210,6 +211,7 @@ jobs:
             -v "$PWD/sessions:/var/lib/tg2tm/sessions" \
             -v "$PWD/packs:/opt/tg2tm/packs" \
             -v "$PWD/logs:/opt/tg2tm/logs" \
+            -v "$PWD/scripts:/opt/tg2tm/scripts:ro" \
             tg2tm-browser
 
       # idle skips Run browser on purpose. Still tell admin why — a green run
