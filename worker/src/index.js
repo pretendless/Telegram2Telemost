@@ -29,8 +29,11 @@ import {
   QUEUE_KEY,
   acceptReply,
   aheadCount,
+  awaitCreateKey,
   claimNext,
+  CREATE_PROMPT,
   enqueueRequest,
+  NEED_CREATE,
   focusRequest,
   isPriorityChat,
   normalizeQueue,
@@ -459,9 +462,10 @@ async function handlePlan(request, env) {
   const secret = env.UPLOADER_SECRET || "";
   if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
   const queue = await readQueue(env.BOT_KV);
+  const active = queue.items.filter((item) => item.status === "queued" || item.status === "uploading");
   return json({
     ok: true,
-    items: queue.items.map((item) => ({
+    items: active.map((item) => ({
       id: item.id,
       chatId: item.chatId,
       title: item.title,
@@ -551,11 +555,19 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     if (known.subscribe === true) await env.BOT_KV.put(`sub:${chatId}`, "1");
     if (known.subscribe === false) await env.BOT_KV.delete(`sub:${chatId}`);
     out = known.text;
+  } else if (cmd === "/create") {
+    await env.BOT_KV.put(awaitCreateKey(chatId), "1");
+    out = CREATE_PROMPT;
   } else if (cmd === "/queue") {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";
     } else {
-      const queue = await readQueue(env.BOT_KV);
+      let queue = await readQueue(env.BOT_KV);
+      const reconciled = await reconcileTerminalUploadingQueue(env.BOT_KV, queue);
+      if (reconciled.changed) {
+        await writeQueue(env.BOT_KV, reconciled.queue);
+        queue = reconciled.queue;
+      }
       const uploading = queue.items.find((item) => item.status === "uploading");
       const activePack = uploading ? await readPackProgress(env.BOT_KV, uploading) : null;
       out = adminQueueOverviewText(queue, activePack);
@@ -632,7 +644,10 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       out = adminJobText(currentAdminJob(await listPacks(env.BOT_KV), queue));
     } else {
       const queue = await readQueue(env.BOT_KV);
-      out = queueStatusText(queue, chatId) || statusText(await listPacks(env.BOT_KV));
+      out =
+        queueStatusText(queue, chatId) ||
+        statusText(await listPacks(env.BOT_KV)) ||
+        "Активных запросов нет. Новый перенос — /create, затем сообщение с паком (/format).";
     }
   } else if (cmd === "/restart") {
     await handleRestart(env, message, {
@@ -656,6 +671,11 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   } else if (cmd) {
     return;
   } else {
+    const admin = isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
+    const awaiting = Boolean(await env.BOT_KV.get(awaitCreateKey(chatId)));
+    if (!admin && !awaiting) {
+      out = NEED_CREATE;
+    } else {
     const parsed = parsePackMessage(text);
     if (!parsed.ok) {
       out = NOT_A_PACK;
@@ -700,11 +720,13 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         }
         if (stored.created && stored.item) {
           userCardAfterAccept = { item: stored.item, queue: stored.queue };
+          await env.BOT_KV.delete(awaitCreateKey(chatId));
         }
         if (stored.duplicate !== "done") {
           schedulePipeline(env, queueAfter, deps, { dispatchReason: QUEUE_REASON.newRequest });
         }
       }
+    }
     }
   }
   if (out) await send(env, chatId, out);

@@ -488,10 +488,23 @@ test("restart follows the open pack, or the next stored request", () => {
     { id: "a", title: "Запад", status: "uploading", links: ["https://t.me/addstickers/zapad"], createdAt: "1", priority: false },
     { id: "b", title: "Восток", status: "queued", links: ["https://t.me/addstickers/vostok"], createdAt: "2", priority: true },
   ];
-  const open = restartTarget({ unfinished: true, title: "Юг", catalogs, requests });
+  const yugActive = [
+    ...requests,
+    {
+      id: "y",
+      title: "Юг",
+      status: "uploading",
+      links: ["https://t.me/addstickers/yug"],
+      createdAt: "3",
+      priority: false,
+    },
+  ];
+  const open = restartTarget({ unfinished: true, title: "Юг", catalogs, requests: yugActive });
   assert.equal(open.action, "restart");
   assert.equal(open.dir, "02-yug");
   assert.equal(open.title, "Юг");
+  const ghostCatalog = restartTarget({ unfinished: true, title: "Юг", catalogs, requests });
+  assert.equal(ghostCatalog.action, "close");
   const named = restartTarget({
     unfinished: true,
     title: "Запад",
@@ -519,7 +532,7 @@ test("restart follows the open pack, or the next stored request", () => {
   });
   assert.equal(next.title, "Восток");
   assert.equal(restartTarget({ unfinished: false, title: "", catalogs, requests: [] }).action, "idle");
-  const loose = restartTarget({ unfinished: true, title: "«юг» 🎉", catalogs, requests });
+  const loose = restartTarget({ unfinished: true, title: "«юг» 🎉", catalogs, requests: yugActive });
   assert.equal(loose.dir, "02-yug");
   assert.equal(packTitleKey("«Юг» 🎉"), "юг");
   const quoted = [

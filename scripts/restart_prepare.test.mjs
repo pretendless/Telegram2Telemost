@@ -68,6 +68,7 @@ test('empty or clock title on an open dialog closes or continues, not a hard fai
   });
   assert.equal(withActive.action, 'restart');
   assert.equal(withActive.title, 'Запад');
+  assert.equal(withActive.dir, '');
   const clockTitle = restartTarget({
     unfinished: true,
     title: '11:57',

@@ -870,13 +870,22 @@ function byRequestTime(left, right) {
 // resume the row already marked uploading.
 // A missing title (or a bare Telemost clock) is not a hard stop: close the
 // open dialog, then restart via the active request or the next queued one.
-export function restartTarget({ unfinished, title, liveText, catalogs, requests } = {}) {
-  const stored = requests || [];
+function activeQueueRow(item) {
+  return item && (item.status === 'queued' || item.status === 'uploading');
+}
+
+// Restart and /queue/plan only consider open work. Done rows must not resurrect.
+export function activeQueueRequests(requests) {
+  return (requests || []).filter((item) => activeQueueRow(item));
+}
+
+export function restartTarget({ unfinished, title, liveText, catalogs, requests, allowCatalog = false } = {}) {
+  const stored = activeQueueRequests(requests);
   const namedTitle = statusPackName(title);
   if (unfinished) {
     const catalogsHit = (catalogs || []).filter((pack) => pack && samePackTitle(pack.title, namedTitle));
     const requestsHit = stored.filter((item) => item && samePackTitle(item.title, namedTitle));
-    if (catalogsHit.length === 1) {
+    if (catalogsHit.length === 1 && (allowCatalog || requestsHit.length === 1)) {
       const named = requestsHit.length === 1 ? requestsHit[0] : null;
       return {
         action: 'restart',
@@ -886,6 +895,14 @@ export function restartTarget({ unfinished, title, liveText, catalogs, requests 
         links: named && named.links ? named.links : [],
         chatId: named ? named.chatId || '' : '',
       };
+    }
+    if (catalogsHit.length === 1 && !allowCatalog && !requestsHit.length) {
+      // Finished catalog folder (07, 08, …) with no queued/uploading row: close the dialog.
+      if (!packTitleKey(namedTitle)) {
+        // empty title — fall through below
+      } else {
+        return { action: 'close', title: '', liveText: liveText || '' };
+      }
     }
     if (catalogsHit.length === 0 && requestsHit.length === 1) {
       const named = requestsHit[0];

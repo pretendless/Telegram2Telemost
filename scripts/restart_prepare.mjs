@@ -3,7 +3,14 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { isClockLine, restartTarget, screenLine, statusPackName, stickerSetName } from './telemost_upload.mjs';
+import {
+  activeQueueRequests,
+  isClockLine,
+  restartTarget,
+  screenLine,
+  statusPackName,
+  stickerSetName,
+} from './telemost_upload.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -32,14 +39,22 @@ export function restartQuietReason({ action, queueReadable = true } = {}) {
   return action || '';
 }
 
+function catalogRestartable(meta) {
+  const tm = meta && meta.telemost && typeof meta.telemost === 'object' ? meta.telemost : {};
+  const url = tm.packUrl;
+  if (tm.status === 'done' && url && String(url).trim()) return false;
+  return true;
+}
+
 function catalogs() {
   const packs = join(ROOT, 'packs');
   return readdirSync(packs)
     .filter((dir) => /^\d\d-/.test(dir))
     .map((dir) => {
       const meta = JSON.parse(readFileSync(join(packs, dir, 'pack.json'), 'utf8'));
-      return { title: meta.title, dir };
-    });
+      return { title: meta.title, dir, restartable: catalogRestartable(meta) };
+    })
+    .filter((entry) => entry.restartable);
 }
 
 function queueReadable() {
@@ -54,7 +69,7 @@ async function storedRequests() {
   const response = await fetch(url, { headers: { authorization: 'Bearer ' + secret } });
   if (!response.ok) throw new Error('queue plan http ' + response.status);
   const data = await response.json();
-  return data.items || [];
+  return activeQueueRequests(data.items || []);
 }
 
 async function focusRequest(id) {
@@ -122,12 +137,14 @@ async function main() {
   // Keep diagnostics off stdout when that stream is GITHUB_OUTPUT.
   console.error('restart-seen', JSON.stringify(seen));
   const canReadQueue = queueReadable();
+  const allowCatalog = /^(1|true|yes)$/i.test(String(process.env.TG2TM_CATALOG_RETRY || ''));
   const target = restartTarget({
     unfinished: Boolean(choice.unfinished),
     title,
     liveText: choice.liveText || '',
     catalogs: catalogs(),
     requests: await storedRequests(),
+    allowCatalog,
   });
   mkdirSync(join(ROOT, 'logs'), { recursive: true });
   if (target.action === 'idle' || target.action === 'seen' || target.action === 'close') {
