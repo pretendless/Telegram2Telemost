@@ -74,6 +74,10 @@ import {
   notAnImageStop,
   pictureNotAskedError,
   canForwardBufferImage,
+  preNewpackAction,
+  newpackReplyAction,
+  doneClosedDialog,
+  doneDidNotClose,
   forwardSubmenuLogLine,
   botReplyLogLine,
   forwardTargetFromTitle,
@@ -864,6 +868,31 @@ test("«Это не картинка» stops the pack and only a real buffer ima
   assert.equal(canForwardBufferImage(ask, { id: "3", hasImage: false }), false);
   assert.equal(canForwardBufferImage(line, { id: "3", hasImage: true }), false);
   assert.equal(canForwardBufferImage("Напишите название набора.", { id: "3", hasImage: true }), false);
+});
+
+test("an open picture dialog gets one /done before /newpack, never a loop", () => {
+  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38619533883";
+  assert.equal(preNewpackAction("Отправьте картинку для стикера."), "done");
+  assert.equal(preNewpackAction("Стикеры Это не картинка :) 19:01"), "done");
+  assert.equal(preNewpackAction("Стикер готов. Отправьте картинку для следующего стикера."), "done");
+  assert.equal(preNewpackAction("Отправьте эмодзи для стикера."), "blocked");
+  assert.equal(preNewpackAction("Набор «Дьяволица» сохранён и доступен по ссылке."), "newpack");
+  assert.equal(preNewpackAction(""), "newpack");
+  assert.equal(newpackReplyAction("Напишите название набора.", false), "continue");
+  assert.equal(newpackReplyAction("Стикеры Это не картинка :) 19:01", false), "done-then-newpack");
+  assert.equal(newpackReplyAction("Стикеры Это не картинка :) 19:01", true), "stop");
+  assert.equal(doneClosedDialog("Набор «Дьяволица» сохранён и доступен по ссылке."), true);
+  assert.equal(doneClosedDialog("/start — показать команды\n/newpack — создать набор\n/done — завершить действие"), true);
+  assert.equal(doneClosedDialog("Отправьте картинку для стикера."), false);
+  assert.equal(doneClosedDialog("Это не картинка :)"), false);
+  assert.equal(doneClosedDialog(""), false);
+  assert.equal(
+    doneDidNotClose("Отправьте картинку для стикера.", runUrl),
+    `/done did not close the open sticker dialog: Отправьте картинку для стикера. ${runUrl}`,
+  );
+  const src = readFileSync(new URL("./telemost_upload.mjs", import.meta.url), "utf8");
+  assert.match(src, /pre-newpack-done/);
+  assert.equal((src.match(/sendDoneOnce\(/g) || []).length, 2);
 });
 
 test("devtools opens a buffer tab with PUT and keeps the URL hash", () => {
