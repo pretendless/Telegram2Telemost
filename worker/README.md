@@ -73,6 +73,6 @@ CONFIRM_STOP_POLLING=1 \
   node set-webhook.mjs
 ```
 
-Профиль бота (имя Telegram2Telemost, описание, команды): `TG2TMBOT_TOKEN=... npm run setup-bot`.
+Профиль бота (имя Telegram2Telemost, описание, команды): `TG2TMBOT_TOKEN=... npm run setup-bot`. Опционально `LOGIN_CHAT_IDS=8502935020,...` — те же id, что у воркера: для них в меню появятся админ-команды (`/queue`, `/unstick`, `/skip`, …). См. `docs/bot.md`.
 
 Машина переноса сообщает ход через `scripts/telemost_upload.mjs`. Тот же адрес и секрет можно передать переменными `TG2TM_PROGRESS_URL` и `UPLOADER_SECRET`.

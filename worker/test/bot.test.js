@@ -4,7 +4,9 @@ import { handle } from "../src/index.js";
 import {
   BOT_NAME,
   CHANNEL,
-  COMMANDS,
+  ADMIN_COMMANDS,
+  ADMIN_ONLY_COMMANDS,
+  USER_COMMANDS,
   EXAMPLE,
   INITIAL_SUBSCRIBER,
   START,
@@ -698,10 +700,12 @@ test("/start subscribes and replies with the format and the channel example", as
   assert.match(sent[0].text, new RegExp(CHANNEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(sent[0].text, /из канала/);
   assert.ok(sent[0].text.includes(EXAMPLE));
-  assert.equal(COMMANDS.find((item) => item.command === "create").description, "Новый запрос на перенос");
-  assert.equal(COMMANDS.find((item) => item.command === "start").description, "Как пользоваться");
-  assert.equal(COMMANDS.find((item) => item.command === "format").description, "Формат запроса");
-  assert.equal(COMMANDS.find((item) => item.command === "example").description, "Пример набора");
+  assert.equal(USER_COMMANDS.find((item) => item.command === "create").description, "Новый запрос на перенос");
+  assert.equal(USER_COMMANDS.find((item) => item.command === "start").description, "Как пользоваться");
+  assert.equal(USER_COMMANDS.find((item) => item.command === "format").description, "Формат и пример пака");
+  assert.equal(USER_COMMANDS.some((item) => item.command === "example"), false);
+  assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "queue").description, "Очередь и прогресс");
+  assert.equal(ADMIN_COMMANDS.length, USER_COMMANDS.length + ADMIN_ONLY_COMMANDS.length);
   assert.equal(await env.BOT_KV.get("sub:4242"), "1");
 });
 
@@ -805,9 +809,9 @@ test("an allowlisted /login and /connect dispatch the Telemost workflow", async 
   });
   assert.match(sent[0].text, /QR-код Яндекса/);
   assert.match(sent[1].text, /«work»/);
-  assert.equal(COMMANDS.find((item) => item.command === "login").description, "Войти в Яндекс");
-  assert.equal(COMMANDS.find((item) => item.command === "connect").description, "Войти в аккаунт с меткой");
-  assert.equal(COMMANDS.find((item) => item.command === "restart").description, "Перезапустить загрузку");
+  assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "login").description, "Войти в Яндекс");
+  assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "connect").description, "Войти в аккаунт с меткой");
+  assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "restart").description, "Перезапустить загрузку");
 });
 
 test("/restart is only for the admin chat, cancels the running job, and dispatches one restart from main", async () => {
@@ -1610,7 +1614,7 @@ test("admin /skip dispatches with afterSkip reason", async () => {
   assert.equal(stored.items.find((row) => row.id === "req-wave").status, "error");
 });
 
-test("/format and /stop", async () => {
+test("/format, /example and /stop", async () => {
   const sent = [];
   const env = envWith();
   const send = async (_env, chatId, text) => sent.push({ chatId, text });
@@ -1628,11 +1632,21 @@ test("/format and /stop", async () => {
     new Request("https://tg2tmbot.example/telegram", {
       method: "POST",
       headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret" },
+      body: JSON.stringify({ message: { chat: { id: INITIAL_SUBSCRIBER }, text: "/example" } }),
+    }),
+    env,
+    { sendMessage: send },
+  );
+  assert.equal(sent[1].text, sent[0].text);
+  await handle(
+    new Request("https://tg2tmbot.example/telegram", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret" },
       body: JSON.stringify({ message: { chat: { id: INITIAL_SUBSCRIBER }, text: "/stop" } }),
     }),
     env,
     { sendMessage: send },
   );
   assert.equal(await env.BOT_KV.get(`sub:${INITIAL_SUBSCRIBER}`), null);
-  assert.match(sent[1].text, /Уведомления выключены/);
+  assert.match(sent[2].text, /Уведомления выключены/);
 });

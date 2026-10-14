@@ -8,8 +8,7 @@
 | --- | --- |
 | `/start`, `/help` | Как прислать пак; включает подписку на общие уведомления |
 | `/create` | Начать новый запрос (после этого — одно сообщение с паком) |
-| `/format` | Формат одного сообщения с паком |
-| `/example` | Пример набора |
+| `/format` | Формат сообщения с паком и пример набора (`/example` — то же) |
 | `/status` | Ваши запросы в очереди |
 | `/stop` | Отписаться от общих уведомлений подписчиков |
 
@@ -37,3 +36,12 @@
 Повторная загрузка **старого каталогового** пака (папка `packs/NN-…` без строки в очереди) — только через dispatch с `TG2TM_CATALOG_RETRY=1` в окружении prepare (не через обычный `/restart`).
 
 Обычные пользователи **не** могут `/restart`, `/queue`, `/unstick`, `/skip`, `/login`, `/connect`, `/upload`.
+
+## Меню команд в Telegram
+
+Список у BotFather обновляет `worker/setup-bot.mjs` (`npm run setup-bot` в каталоге `worker/`).
+
+- **Все чаты** — `USER_COMMANDS`: `/start`, `/create`, `/format`, `/status`, `/stop`.
+- **Админ-чаты** из `LOGIN_CHAT_IDS` (воркер и переменная окружения при `setup-bot`) — полный список `ADMIN_COMMANDS`: пользовательские команды плюс `/queue`, `/unstick`, `/skip`, `/restart`, `/login`, `/connect`, `/upload` (scope `chat` в API Telegram).
+
+`/help` в меню нет — работает как `/start`.

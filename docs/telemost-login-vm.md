@@ -215,7 +215,7 @@ import { handleVmCommand } from "../../vm/worker_login.js";
 }
 ```
 
-В список команд (`COMMANDS` в `worker/src/logic.js`, его ставит `worker/setup-bot.mjs`) добавить:
+В список команд админ-меню (`ADMIN_ONLY_COMMANDS` / `ADMIN_COMMANDS` в `worker/src/logic.js`, их ставит `worker/setup-bot.mjs` для чатов из `LOGIN_CHAT_IDS`) добавить:
 
 | command | description |
 | --- | --- |
