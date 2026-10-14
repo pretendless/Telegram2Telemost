@@ -74,6 +74,7 @@ export const QUEUE_REASON = {
   newRequest: "очередь: новый запрос принят",
   afterFinish: "очередь: следующий пак после завершения",
   afterUnstick: "очередь: автозапуск после /unstick",
+  afterSkip: "очередь: автозапуск после /skip",
   autostart: "очередь: автозапуск pipeline (есть работа в KV)",
 };
 

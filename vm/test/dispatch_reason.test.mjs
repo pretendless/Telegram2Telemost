@@ -49,6 +49,10 @@ test("queuePipelineReason for autostart names next queued pack, not stale upload
     queuePipelineReason(QUEUE_REASON.afterUnstick, stuck, { preferQueued: true }),
     "очередь: автозапуск после /unstick — «ВолнаСветa»",
   );
+  assert.equal(
+    queuePipelineReason(QUEUE_REASON.afterSkip, stuck, { preferQueued: true }),
+    "очередь: автозапуск после /skip — «ВолнаСветa»",
+  );
 });
 
 test("adminRestartReason prefers next queued over stale uploading", () => {
