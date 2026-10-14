@@ -1399,26 +1399,28 @@ export async function leaveUnpublishedDraft(say) {
   return reply;
 }
 
-// Zero accepted stickers on a picture-only draft: abandon, not /done (would publish empty).
-export function shouldAbandonOpenPack(liveText, messages = []) {
+// /start only shows the command menu; never use it to close an open draft before /newpack.
+export function shouldAbandonOpenPack(liveText, _messages = []) {
   const body = String(liveText || '');
   if (!unfinishedPack(body)) return false;
+  // Emoji-waiting (packDialogOpen): closeOpenPackPlan returns blocked — no blind /done or /start.
   if (packDialogOpen(body)) return false;
-  const accepted = acceptedInOpenPack(messages);
-  if (accepted > 0) return false;
-  return wantsPicture(body) || (CREATED.test(body) && !READY.test(body));
+  return false;
 }
 
 export function closeOpenPackPlan(liveText, messages = []) {
   if (!unfinishedPack(liveText)) return { action: 'idle' };
-  if (shouldAbandonOpenPack(liveText, messages)) return { action: 'abandon' };
-  if (finalizeDecision(liveText).action === 'done') return { action: 'done' };
+  // ASK_EMOJI / NOT_EMOJI: bot expects an emoji; /done would not safely finish the step.
   if (packDialogOpen(liveText)) return { action: 'blocked' };
+  if (finalizeDecision(liveText).action === 'done') return { action: 'done' };
   const accepted = acceptedInOpenPack(messages);
   if (accepted > 0) return { action: 'done' };
-  return { action: 'abandon' };
+  const body = String(liveText || '');
+  if (wantsPicture(body) || (CREATED.test(body) && !READY.test(body))) return { action: 'done' };
+  return { action: 'done' };
 }
 
+// Before /newpack or the next queue item: one /done (with retry), never /start to «abandon».
 export async function closeOpenBotPackBeforeNew(bot, note, { label = 'перезапуск', lastLine = '' } = {}) {
   const history = await bot.surveyChat();
   const live = await bot.recentIncoming(2);
@@ -1437,27 +1439,12 @@ export async function closeOpenBotPackBeforeNew(bot, note, { label = 'перез
 
   let closedText = '';
 
-  async function tryAbandon() {
-    const abandoned = await withRetry('close-before-new-abandon', () =>
-      leaveUnpublishedDraft((cmd) => bot.say(cmd)),
-    );
-    return String(abandoned.text || '');
-  }
-
-  if (plan.action === 'abandon') {
-    closedText = await tryAbandon();
-    console.log('close-before-new-abandon', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
-  } else if (plan.action === 'done') {
-    const closed = await withRetry('close-before-new-done', () => bot.say('/done'));
-    closedText = String(closed.text || '');
-    console.log('close-before-new-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
-    if (restartAfterClose(closedText).action === 'stop' && shouldAbandonOpenPack(tailText, history.messages)) {
-      closedText = await tryAbandon();
-      console.log('close-before-new-abandon-fallback', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
-    }
-  } else {
+  if (plan.action !== 'done') {
     throw new Error(`refusing /newpack while a pack is still open: ${tailText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
   }
+  const closed = await withRetry('close-before-new-done', () => bot.say('/done'));
+  closedText = String(closed.text || '');
+  console.log('close-before-new-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
 
   if (restartAfterClose(closedText).action === 'stop') {
     throw new Error(`refusing /newpack while a pack is still open: ${closedText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
