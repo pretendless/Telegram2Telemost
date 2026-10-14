@@ -726,13 +726,11 @@ class Bot {
     return this.waitForReply(baseline, { until: 'sticker', ownBeforeIds, ...(opts || {}) });
   }
 
-  // Buffer channel: post the file and return only after the image-bubble count grows.
-  // A new tg2tmId on a recycled row is not a post. Channel posts often lack _own.
+  // Buffer channel: baseline is the image count immediately before this send.
+  // Growth from that baseline is a new post. Leftover bubbles are not this send.
   async sendImageNoWait(path, { timeoutMs = 60000 } = {}) {
     await this.ensureChat();
     await this.scrollToBottom();
-    const beforeRows = await this.chatRows();
-    const before = bufferImageCount(beforeRows);
     const nodeId = await this.fileInput();
     await this.c.send('DOM.setFileInputFiles', { nodeId, files: [path] });
     for (let i = 0; i < 80; i++) {
@@ -740,6 +738,9 @@ class Bot {
       if (open) break;
       await sleep(POLL_MS);
     }
+    await this.scrollToBottom();
+    const beforeRows = await this.chatRows();
+    const before = bufferImageCount(beforeRows);
     await this.clickSend(true);
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
@@ -751,7 +752,7 @@ class Bot {
     const rows = await this.chatRows();
     const after = bufferImageCount(rows);
     console.log('staging upload timeout', { before, msgCount: after, rowCount: (rows || []).length });
-    throw new Error(`staging upload: image count did not grow (msgCount=${before})`);
+    throw new Error(newImageDidNotAppear(before, after));
   }
 
   async chatTitle() {
@@ -1370,6 +1371,155 @@ class Bot {
     else await this.dismissOverlay();
   }
 
+  // Confirm «Удалить» only in a dialog that is not the message menu (that menu also contains Переслать).
+  async confirmBufferDelete() {
+    for (let i = 0; i < 8; i++) {
+      const clicked = await this.c.ev(`(() => {
+        ${TG2TM_DEEP_WALK}
+        const bare = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+        const vis = (e) => {
+          const r = e.getBoundingClientRect();
+          return r.width > 4 && r.height > 4;
+        };
+        const menus = tg2tmDeepMatch('[role="menu"], [role="dialog"], [class*="Popup" i], [class*="Dialog" i], [class*="Modal" i]').filter(vis);
+        for (const menu of menus) {
+          const text = bare(menu.innerText || '');
+          if (/Переслать|Ответить|Скачать изображение/.test(text)) continue;
+          const nodes = tg2tmDeepWithin(menu, 'button, [role="button"], [role="menuitem"]').filter(vis);
+          const el = nodes.find((n) => {
+            const t = bare(n.innerText || n.getAttribute('aria-label') || '');
+            return t === 'Удалить' || t === 'Удалить сообщение' || t === 'Удалить у всех';
+          });
+          if (!el) continue;
+          return tg2tmPress(el, 0);
+        }
+        return false;
+      })()`);
+      if (clicked) return true;
+      await sleep(POLL_MS);
+    }
+    return false;
+  }
+
+  // Exact «Удалить» inside the message menu (the same menu as «Переслать», above «Пожаловаться»).
+  async clickBufferDeleteItem() {
+    const point = await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const bare = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
+      const vis = (e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 8 && r.height > 8 && r.height < 80;
+      };
+      const menus = tg2tmDeepMatch('[role="menu"], [class*="Menu" i], [class*="menu" i], [class*="Popup" i], [class*="popup" i], [class*="Context" i]').filter((e) => {
+        const r = e.getBoundingClientRect();
+        if (r.width < 120 || r.width > 480 || r.height < 80 || r.height > 680) return false;
+        const text = bare(e.innerText || '');
+        return text.includes('Удалить') && (text.includes('Переслать') || text.includes('Пожаловаться'));
+      });
+      const hits = [];
+      for (const menu of menus) {
+        const nodes = tg2tmDeepWithin(menu, '[role="menuitem"], button, [role="button"], li, a, div, span').filter(vis);
+        for (const n of nodes) {
+          const lines = String(n.innerText || n.textContent || '').split(/\\n/).map(bare).filter(Boolean);
+          const aria = bare(n.getAttribute && n.getAttribute('aria-label'));
+          const label = aria || lines[0] || '';
+          if (label !== 'Удалить' || lines.length > 2) continue;
+          hits.push(n);
+        }
+      }
+      hits.sort((a, b) => b.getBoundingClientRect().y - a.getBoundingClientRect().y);
+      const el = hits[0];
+      if (!el) return null;
+      document.querySelectorAll('[data-tg2tm-delete-hit]').forEach((n) => { delete n.dataset.tg2tmDeleteHit; });
+      el.dataset.tg2tmDeleteHit = '1';
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    })()`);
+    if (!point) return false;
+    await this.cdpClickAt(point.x, point.y, 'left');
+    await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const el = tg2tmDeepMatch('[data-tg2tm-delete-hit="1"]')[0];
+      if (!el) return false;
+      delete el.dataset.tg2tmDeleteHit;
+      return tg2tmPress(el, 0);
+    })()`);
+    return true;
+  }
+
+  async deleteOneBufferImage(rowId) {
+    const id = String(rowId);
+    try {
+      await this.openMessageMenu(id, { maxCycles: 4 });
+    } catch {
+      return false;
+    }
+    const clicked = await this.clickBufferDeleteItem();
+    if (!clicked) {
+      await this.dismissOverlay();
+      return false;
+    }
+    await sleep(200);
+    await this.confirmBufferDelete();
+    await sleep(300);
+    await this.dismissOverlay();
+    return true;
+  }
+
+  // Delete each channel image via «Удалить». Stickers-bot tab is never used.
+  async clearBufferChannel() {
+    if (!bufferClearAllowed(this.dualTab)) {
+      throw new Error(bufferClearFailed(0, actionsRunUrl()));
+    }
+    await this.ensureChat();
+    await this.scrollToBottom();
+    let rows = await this.chatRows();
+    const start = bufferImageCount(rows);
+    console.log(bufferClearStartLine(start));
+    if (start === 0) {
+      console.log(bufferClearDoneLine());
+      return;
+    }
+    let deleted = 0;
+    let guard = 0;
+    const cap = start * BUFFER_DELETE_ATTEMPTS + 2;
+    while (guard < cap) {
+      guard += 1;
+      await this.scrollToBottom();
+      rows = await this.chatRows();
+      const before = bufferImageCount(rows);
+      if (before === 0) {
+        console.log(bufferClearDoneLine());
+        return;
+      }
+      const images = channelImageBubbles(rows);
+      const target = images[images.length - 1];
+      if (!target || target.id == null) {
+        throw new Error(bufferClearFailed(before, actionsRunUrl()));
+      }
+      let reduced = false;
+      for (let attempt = 0; attempt < BUFFER_DELETE_ATTEMPTS; attempt++) {
+        const countBefore = bufferImageCount(await this.chatRows());
+        await this.deleteOneBufferImage(target.id);
+        const countAfter = bufferImageCount(await this.chatRows());
+        if (bufferDeleteReduced(countBefore, countAfter)) {
+          deleted += countBefore - countAfter;
+          const known = Math.max(start, deleted + countAfter);
+          console.log(bufferClearDeletedLine(deleted, known));
+          reduced = true;
+          break;
+        }
+      }
+      if (!reduced) throw new Error(bufferClearFailed(before, actionsRunUrl()));
+    }
+    const remaining = bufferImageCount(await this.chatRows());
+    if (remaining === 0) {
+      console.log(bufferClearDoneLine());
+      return;
+    }
+    throw new Error(bufferClearFailed(remaining, actionsRunUrl()));
+  }
+
   // Best-effort residue cleanup: delete recent own bubbles (staging or bot chat).
   async clearChatResidue({ limit = 200 } = {}) {
     await this.ensureChat();
@@ -1742,8 +1892,64 @@ export function bufferBatchBubble(rows, batchStartCount, batchSize, indexInBatch
   return null;
 }
 
+export function bufferPostCount(rows) {
+  return (rows || []).filter((row) => row && row.id != null).length;
+}
+
 export function bufferUploadLogLine(index, total, msgCount) {
   return `buffer-upload ${index}/${total} ok msgCount=${msgCount}`;
+}
+
+export function bufferClearStartLine(msgCount) {
+  return `buffer-clear start msgCount=${msgCount}`;
+}
+
+export function bufferClearDeletedLine(deleted, total) {
+  return `buffer-clear deleted ${deleted}/${total}`;
+}
+
+export function bufferClearDoneLine() {
+  return 'buffer-clear done msgCount=0';
+}
+
+export const BUFFER_DELETE_ATTEMPTS = 3;
+
+export function bufferDeleteReduced(before, after) {
+  return Number(after) < Number(before);
+}
+
+// Message menu from the channel image: «Удалить» sits with «Переслать» and «Пожаловаться».
+export function messageMenuHasDelete(labels) {
+  const rows = (labels || []).map((s) => String(s || '').replace(/\s+/g, ' ').trim().replace(/[›>»]\s*$/, '').trim());
+  const hasDelete = rows.some((t) => t === 'Удалить');
+  const hasMenu = rows.some((t) => t === 'Переслать' || t === 'Пожаловаться');
+  return hasDelete && hasMenu;
+}
+
+export function bufferClearAllowed(dualTab) {
+  return Boolean(dualTab);
+}
+
+export function bufferClearFailed(msgCount, runUrl) {
+  const url = String(runUrl || '').trim();
+  const n = Number(msgCount);
+  const count = Number.isFinite(n) ? String(n) : 'unknown';
+  const msg = `staging upload: could not clear TG2TM (msgCount=${count}); not uploading`;
+  return url ? `${msg} ${url}` : msg;
+}
+
+export function newImageDidNotAppear(before, after) {
+  const prior = before == null || before === '' ? 'none' : String(before);
+  const seen = after == null || after === '' ? 'none' : String(after);
+  return `staging upload: new image did not appear (before ${prior}, msgCount=${seen})`;
+}
+
+// A short dialog with Удалить and without Переслать is the confirm step, not the message menu.
+export function menuIsDeleteConfirm(labels) {
+  const rows = (labels || []).map((s) => String(s || '').replace(/\s+/g, ' ').trim());
+  const hasDelete = rows.some((t) => t === 'Удалить' || t === 'Удалить сообщение' || t === 'Удалить у всех');
+  const hasForward = rows.some((t) => t === 'Переслать' || t === 'Forward' || t === 'Ответить');
+  return hasDelete && !hasForward;
 }
 
 export function forwardSubmenuLogLine(index, total, target) {
@@ -2867,9 +3073,16 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   async function startStagingPack() {
     if (!useStaging || stagingPackStarted) return;
     stagingPackStarted = true;
+    if (!bufferClearAllowed(bot.dualTab)) {
+      throw new Error(bufferClearFailed(0, actionsRunUrl()));
+    }
+    await bot.onStaging(() => bot.clearBufferChannel());
     await bot.onStaging(async () => {
       stagingBaseImageCount = null;
       await ensureStagingBase();
+      if (stagingBaseImageCount !== 0) {
+        throw new Error(bufferClearFailed(stagingBaseImageCount, actionsRunUrl()));
+      }
       console.log(dir, 'buffer-base', `msgCount=${stagingBaseImageCount}`);
     });
   }
@@ -2891,8 +3104,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   async function postBufferImage(idx, path) {
     const posted = await bot.sendImageNoWait(path);
     if (!posted || !posted.ok || !bufferCountGrew(posted.before, posted.msgCount)) {
-      const seen = posted && posted.msgCount != null ? posted.msgCount : 'none';
-      throw new Error(`staging upload: image count did not grow (msgCount=${seen})`);
+      throw new Error(newImageDidNotAppear(posted && posted.before, posted && posted.msgCount));
     }
     console.log(bufferUploadLogLine(idx + 1, m.images.length, posted.msgCount));
     stagedIndices.add(idx);

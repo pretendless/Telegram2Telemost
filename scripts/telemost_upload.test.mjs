@@ -48,6 +48,17 @@ import {
   bufferImagesGrown,
   bufferBatchBubble,
   bufferUploadLogLine,
+  bufferPostCount,
+  bufferClearStartLine,
+  bufferClearDeletedLine,
+  bufferClearDoneLine,
+  bufferClearAllowed,
+  bufferClearFailed,
+  newImageDidNotAppear,
+  menuIsDeleteConfirm,
+  BUFFER_DELETE_ATTEMPTS,
+  bufferDeleteReduced,
+  messageMenuHasDelete,
   forwardSubmenuLogLine,
   botReplyLogLine,
   forwardTargetFromTitle,
@@ -703,6 +714,9 @@ test("buffer channel counts image bubbles and ignores id churn and _own", () => 
   assert.equal(grown.before, 1);
   assert.equal(grown.id, "3");
   assert.equal(bufferUploadLogLine(1, 116, grown.msgCount), "buffer-upload 1/116 ok msgCount=2");
+  assert.equal(bufferImagesGrown(posted, posted).ok, false);
+  assert.equal(newImageDidNotAppear(6, 6), "staging upload: new image did not appear (before 6, msgCount=6)");
+  assert.equal(newImageDidNotAppear(6, 6).includes("leftover"), false);
   assert.equal(bufferBatchBubble(posted, 1, 1, 0).id, "3");
   assert.equal(bufferBatchBubble(posted, 1, 1, 1), null);
   const channel = [
@@ -755,6 +769,42 @@ test("forward submenu matches Переслать and the exact chat title", () =
   assert.equal(forwardTargetFromTitle("", "Стикеры"), "Стикеры");
   assert.equal(forwardSubmenuLogLine(1, 116, "Стикеры"), "forward 1/116 via submenu target=Стикеры");
   assert.equal(botReplyLogLine(1, 116, "image emoji hi"), "bot-reply 1/116 image emoji hi");
+});
+
+test("buffer clear empties TG2TM before upload and does not treat leftovers as this pack", () => {
+  const leftovers = [
+    { id: "1", hasImage: true, own: false },
+    { id: "2", hasImage: true, own: false },
+    { id: "3", hasImage: true, own: false },
+    { id: "4", hasImage: true, own: false },
+    { id: "5", hasImage: true, own: false },
+  ];
+  assert.equal(bufferPostCount(leftovers), 5);
+  assert.equal(bufferClearStartLine(5), "buffer-clear start msgCount=5");
+  assert.equal(bufferClearDeletedLine(2, 5), "buffer-clear deleted 2/5");
+  assert.equal(bufferClearDoneLine(), "buffer-clear done msgCount=0");
+  assert.equal(bufferClearAllowed(true), true);
+  assert.equal(bufferClearAllowed(false), false);
+  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38615179852";
+  assert.equal(
+    bufferClearFailed(6, runUrl),
+    `staging upload: could not clear TG2TM (msgCount=6); not uploading ${runUrl}`,
+  );
+  assert.equal(menuIsDeleteConfirm(["Удалить", "Отмена"]), true);
+  assert.equal(menuIsDeleteConfirm(["Ответить", "Переслать", "Удалить"]), false);
+  assert.equal(menuIsDeleteConfirm(["Ещё", "Настройки", "Аккаунт"]), false);
+  assert.equal(BUFFER_DELETE_ATTEMPTS, 3);
+  assert.equal(bufferDeleteReduced(6, 5), true);
+  assert.equal(bufferDeleteReduced(6, 6), false);
+  const deleteMenu = ["Ответить", "Переслать", "Обсудить", "Скачать изображение", "Выбрать", "Удалить", "Пожаловаться"];
+  assert.equal(messageMenuHasDelete(deleteMenu), true);
+  assert.equal(messageMenuHasDelete(["Ещё", "Настройки", "Аккаунт"]), false);
+  assert.equal(messageMenuHasDelete(["Выбрать"]), false);
+  const src = readFileSync(new URL("./telemost_upload.mjs", import.meta.url), "utf8");
+  assert.match(src, /buffer-clear start msgCount=/);
+  assert.match(src, /onStaging\(\(\) => bot\.clearBufferChannel\(\)\)/);
+  assert.match(src, /new image did not appear/);
+  assert.equal(src.includes("image count did not grow"), false);
 });
 
 test("devtools opens a buffer tab with PUT and keeps the URL hash", () => {
