@@ -26,9 +26,12 @@ import {
   stagingNewRows,
   stagingImageRows,
   stagingBufferRows,
+  stagingForwardBuffer,
   stagingImageOnlyRow,
   stagingForwardMessageId,
+  stagingForwardMessageIdFromBatch,
   resolveStagingForwardId,
+  stagingRowsForForward,
   STAGING_FORWARD_POLL_MS,
   botRepliesAfterOwn,
   loadTelemostUrls,
@@ -431,6 +434,53 @@ test("staging forward uses row index when join chat omits hasImage", () => {
   assert.equal(stagingImageOnlyRow({ text: "caption" }), false);
 });
 
+test("batch buffer index maps pack slot when join history is collapsed", () => {
+  const buffer = [
+    { id: "a", text: "", hasImage: false },
+    { id: "b", text: "", hasImage: false },
+    { id: "c", text: "", hasImage: false },
+    { id: "d", text: "", hasImage: false },
+    { id: "e", text: "", hasImage: false },
+  ];
+  assert.equal(stagingForwardMessageIdFromBatch(buffer, 0, 5, 0), "a");
+  assert.equal(stagingForwardMessageIdFromBatch(buffer, 4, 5, 0), "e");
+  assert.equal(stagingForwardMessageIdFromBatch(buffer, 2, 5, 0), "c");
+  const collapsed = [{ id: "left", text: "old", hasImage: true }];
+  assert.equal(stagingForwardMessageId(collapsed, 0, 1, 0, { stagingFilled: 5, uploaded: 0 }), null);
+  const withLeftover = [{ id: "left", text: "old", hasImage: true }, ...buffer];
+  assert.equal(stagingForwardMessageId(withLeftover, 0, 1, 0, { stagingFilled: 5, uploaded: 0 }), "a");
+  assert.equal(
+    stagingForwardMessageIdFromBatch(stagingForwardBuffer(withLeftover), 0, 5, 0),
+    "a",
+  );
+  assert.equal(
+    stagingForwardMessageIdFromBatch(buffer, 3, 7, 2),
+    "b",
+  );
+});
+
+test("resolveStagingForwardId uses surveyChat when chatRows sees too few rows", async () => {
+  let surveyed = 0;
+  const full = [
+    { id: "1", own: false, text: "leftover", hasImage: true },
+    { id: "2", own: false, text: "", hasImage: false },
+    { id: "3", own: false, text: "", hasImage: false },
+  ];
+  const bot = {
+    scrollToBottom: async () => {},
+    chatRows: async () => full.slice(0, 1),
+    surveyChat: async () => {
+      surveyed += 1;
+      return { messages: full.map(({ id, own, text }) => ({ id, own, text, links: [] })), reachedTop: true };
+    },
+  };
+  assert.equal(
+    await resolveStagingForwardId(bot, 0, 1, 0, { stagingFilled: 2, uploaded: 0 }),
+    "2",
+  );
+  assert.ok(surveyed >= 1);
+});
+
 test("resolveStagingForwardId polls until staged rows appear", async () => {
   let calls = 0;
   const bot = {
@@ -446,7 +496,22 @@ test("resolveStagingForwardId polls until staged rows appear", async () => {
   };
   assert.equal(await resolveStagingForwardId(bot, 0, 1), "2");
   assert.ok(calls >= 3);
-  assert.ok(STAGING_FORWARD_POLL_MS >= 2000);
+  assert.ok(STAGING_FORWARD_POLL_MS >= 8000);
+});
+
+test("stagingRowsForForward prefers survey then merges live hasImage", async () => {
+  const bot = {
+    surveyChat: async () => ({
+      messages: [{ id: "5", own: false, text: "", links: [] }],
+      reachedTop: true,
+    }),
+    scrollToBottom: async () => {},
+    chatRows: async () => [{ id: "5", own: false, text: "", hasImage: true }],
+  };
+  const rows = await stagingRowsForForward(bot);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "5");
+  assert.equal(rows[0].hasImage, true);
 });
 
 test("staging own-id detection falls back when join chat omits row_own", () => {
