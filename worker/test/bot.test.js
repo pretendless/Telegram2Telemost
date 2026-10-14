@@ -30,6 +30,8 @@ import {
   realPackUrl,
   shouldSchedulePipelineAfterProgress,
   shouldStartPipeline,
+  skipAllowedWhileActions,
+  SKIP_START_GRACE_MS,
   sortQueuedItems,
   terminalProgress,
   unstickUploadingQueue,
@@ -1905,6 +1907,111 @@ test("admin /skip dispatches with afterSkip reason", async () => {
   assert.match(dispatch.body.inputs.dispatch_reason, /Дьяволица/);
   const stored = JSON.parse(env.BOT_KV.store.get("queue"));
   assert.equal(stored.items.find((row) => row.id === "req-wave").status, "error");
+});
+
+test("/skip releases a hung upload even while Actions still looks active", async () => {
+  const now = Date.parse("2026-10-14T22:00:00.000Z");
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  env.BOT_KV.store.set("meta:seeded", "1");
+  env.BOT_KV.store.set(
+    "meta:telemost-session",
+    JSON.stringify({
+      runId: "38644156549",
+      url: "https://github.com/pretendless/tg2tm/actions/runs/38644156549",
+      at: new Date(now - 3 * 60 * 60 * 1000).toISOString(),
+    }),
+  );
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-wool",
+          chatId: "8502935020",
+          title: "Шерсть Ебаная",
+          links: ["https://t.me/addstickers/piidarasy"],
+          priority: false,
+          createdAt: "2026-10-14T18:00:00.000Z",
+          status: "uploading",
+          stickers: 109,
+        },
+        {
+          id: "req-tst",
+          chatId: "8502935020",
+          title: "tst",
+          links: ["https://t.me/addstickers/tst"],
+          priority: false,
+          createdAt: "2026-10-14T19:00:00.000Z",
+          status: "queued",
+          stickers: 4,
+        },
+      ],
+    }),
+  );
+  const calls = [];
+  const sent = [];
+  const fetchHung = async (url, init) => {
+    calls.push({ url: String(url), method: init && init.method, body: init && init.body ? JSON.parse(init.body) : null });
+    if (String(url).includes("/runs?")) {
+      return {
+        status: 200,
+        json: async () => ({
+          workflow_runs: [{ id: 38644156549, status: "in_progress", html_url: "https://github.com/pretendless/tg2tm/actions/runs/38644156549" }],
+        }),
+      };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  const pipe = trackPipelineWait({
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+    fetch: fetchHung,
+    now: () => now,
+  });
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/skip"), env, pipe);
+  await pipe.flushPipeline();
+  assert.match(sent[0], /Шерсть Ебаная/);
+  assert.match(sent[0], /зависла/);
+  assert.doesNotMatch(sent[0], /не выполняю/);
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items.find((row) => row.id === "req-wool").status, "error");
+  assert.match(stored.items.find((row) => row.id === "req-wool").error, /зависла/);
+  assert.equal(stored.items.find((row) => row.id === "req-tst").status, "queued");
+  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
+  assert.ok(dispatch);
+  assert.match(dispatch.body.inputs.dispatch_reason, /tst/);
+  assert.equal(calls.some((call) => String(call.url).endsWith("/cancel")), false);
+  assert.equal(env.BOT_KV.store.get("meta:telemost-session"), undefined);
+
+  const fresh = skipAllowedWhileActions({
+    item: { status: "uploading", title: "Шерсть Ебаная", stickers: 109 },
+    pack: null,
+    session: { at: new Date(now - 3000).toISOString() },
+    now,
+  });
+  assert.equal(fresh.allow, false);
+  assert.equal(fresh.reason, "starting");
+  assert.ok(SKIP_START_GRACE_MS >= 3000);
+
+  const live = skipAllowedWhileActions({
+    item: { status: "uploading", stickers: 109 },
+    pack: { status: "uploading", uploaded: 8, total: 109, progressAt: new Date(now - 5000).toISOString() },
+    session: { at: new Date(now - 60 * 60 * 1000).toISOString() },
+    now,
+  });
+  assert.equal(live.allow, false);
+  assert.equal(live.reason, "progress");
+
+  const done = skipAllowedWhileActions({
+    item: { status: "uploading", stickers: 109 },
+    pack: { status: "done", uploaded: 109, total: 109, url: PACK_URL, progressAt: new Date(now - 60 * 60 * 1000).toISOString() },
+    session: { at: new Date(now - 60 * 60 * 1000).toISOString() },
+    now,
+  });
+  assert.equal(done.allow, true);
+  assert.equal(done.reason, "finished");
 });
 
 test("/format, /example and /stop", async () => {

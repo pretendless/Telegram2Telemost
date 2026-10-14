@@ -49,6 +49,7 @@ import {
   matchedProgressRequester,
   queueStatusText,
   RETIRED_COMMAND,
+  skipAllowedWhileActions,
   skipReply,
   skipUploadingQueue,
   releaseRequest,
@@ -280,7 +281,10 @@ async function applyProgress(env, pack, deps) {
   let notified = 0;
   let posted = false;
   const writePack = (cursor) =>
-    kv.put(packKey, JSON.stringify({ ...pack, notice: cursor, admin, userCard, adminByChat }));
+    kv.put(
+      packKey,
+      JSON.stringify({ ...pack, progressAt: new Date().toISOString(), notice: cursor, admin, userCard, adminByChat }),
+    );
   if (needsToken) {
     await writePack(notice);
     return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false, waitingForUrl };
@@ -344,7 +348,7 @@ function schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps) {
   }
 }
 
-function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
+function schedulePipeline(env, queue, deps, { dispatchReason, force = false } = {}) {
   const run = async () => {
     try {
       let q = queue;
@@ -355,7 +359,7 @@ function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
           q = reconciled.queue;
         }
       }
-      await startPipelineIfIdle(deps.fetch || fetch, env, q, { dispatchReason });
+      await startPipelineIfIdle(deps.fetch || fetch, env, q, { dispatchReason, force });
     } catch (err) {
       console.error("pipeline start failed", err && err.message);
     }
@@ -675,15 +679,36 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       out = "Эта команда только для администратора.";
     } else {
       const fetchImpl = deps.fetch || fetch;
+      const queue = await readQueue(env.BOT_KV);
+      const uploading = queue.items.find((item) => item.status === "uploading");
+      const pack = uploading ? await readPackProgress(env.BOT_KV, uploading) : null;
+      const session = readLiveSession(await env.BOT_KV.get(LIVE_SESSION_KEY));
       const actionsRunning = await telemostRunActive(fetchImpl, env);
-      if (actionsRunning) {
-        out = skipReply({ reason: "none", skipped: [], actionsRunning: true });
+      const now = typeof deps.now === "function" ? deps.now() : Date.now();
+      const decision =
+        uploading && actionsRunning
+          ? skipAllowedWhileActions({ item: uploading, pack, session, now })
+          : { allow: true, reason: uploading ? "idle" : "none" };
+      if (uploading && actionsRunning && !decision.allow) {
+        out =
+          decision.reason === "progress"
+            ? "Сейчас идёт загрузка стикеров — /skip не выполняю."
+            : skipReply({ reason: "none", skipped: [], actionsRunning: true });
       } else {
-        const queue = await readQueue(env.BOT_KV);
-        const skipped = skipUploadingQueue(queue);
+        const why =
+          decision.reason === "finished"
+            ? "пак уже был готов, строка зависла"
+            : decision.reason === "hung"
+              ? "загрузка зависла, стикеры не идут"
+              : "пропущено";
+        const skipped = skipUploadingQueue(queue, why);
         if (skipped.changed) {
           await writeQueue(env.BOT_KV, skipped.queue);
-          schedulePipeline(env, skipped.queue, deps, { dispatchReason: QUEUE_REASON.afterSkip });
+          if (actionsRunning) await env.BOT_KV.delete(LIVE_SESSION_KEY);
+          schedulePipeline(env, skipped.queue, deps, {
+            dispatchReason: QUEUE_REASON.afterSkip,
+            force: Boolean(actionsRunning),
+          });
         }
         out = skipReply({
           reason: skipped.reason,

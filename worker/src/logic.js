@@ -546,6 +546,7 @@ export function normalizeQueue(raw) {
     if (item.notifyMessageId && /^[0-9]{1,16}$/.test(String(item.notifyMessageId))) {
       row.notifyMessageId = Number(item.notifyMessageId);
     }
+    if (item.error) row.error = String(item.error).slice(0, 300);
     items.push(row);
   }
   return { priority, items };
@@ -713,17 +714,61 @@ export function unstickUploadingQueue(queue, { packForItem = null, terminalOnly 
   };
 }
 
+export const SKIP_START_GRACE_MS = 20000;
+export const SKIP_PROGRESS_STALE_MS = 120000;
+
+function ageMs(stamp, now) {
+  if (!stamp) return null;
+  const at = Date.parse(stamp);
+  if (!Number.isFinite(at)) return null;
+  return now - at;
+}
+
+// While Actions still looks active, /skip may release a row that is not actually
+// moving stickers. A dispatch only a few seconds old stays protected.
+export function skipAllowedWhileActions({ item, pack, session, now = Date.now() } = {}) {
+  if (!item || item.status !== "uploading") return { allow: false, reason: "none" };
+  const uploaded = pack && Number.isFinite(Number(pack.uploaded)) ? Number(pack.uploaded) : null;
+  const total = pack && Number.isFinite(Number(pack.total)) && Number(pack.total) > 0 ? Number(pack.total) : null;
+  const finished =
+    pack &&
+    (pack.status === "done" ||
+      pack.status === "error" ||
+      (pack.url && pack.status !== "uploading") ||
+      (uploaded != null && total != null && uploaded >= total && pack.status !== "uploading"));
+  if (finished) return { allow: true, reason: "finished" };
+  const reporting =
+    pack &&
+    pack.status === "uploading" &&
+    uploaded != null &&
+    total != null &&
+    uploaded > 0 &&
+    uploaded < total;
+  const progressAge = ageMs(pack && pack.progressAt, now);
+  const started = ageMs(session && session.at, now);
+  if (reporting) {
+    const fresh = progressAge == null ? started != null && started < SKIP_PROGRESS_STALE_MS : progressAge < SKIP_PROGRESS_STALE_MS;
+    return fresh ? { allow: false, reason: "progress" } : { allow: true, reason: "hung" };
+  }
+  if (started != null && started >= 0 && started < SKIP_START_GRACE_MS) {
+    return { allow: false, reason: "starting" };
+  }
+  return { allow: true, reason: "hung" };
+}
+
 // Admin /skip: drop the current uploading row and advance the queue.
-export function skipUploadingQueue(queue) {
+export function skipUploadingQueue(queue, reason) {
   const stuck = (queue.items || []).filter((item) => item.status === "uploading");
   if (!stuck.length) return { queue, changed: false, reason: "none", skipped: [] };
+  const error = String(reason || "пропущено").slice(0, 300);
   let changed = false;
   const skipped = [];
   const items = queue.items.map((item) => {
     if (item.status !== "uploading") return item;
     changed = true;
-    skipped.push(item);
-    return { ...item, status: "error" };
+    const next = { ...item, status: "error", error };
+    skipped.push(next);
+    return next;
   });
   return {
     queue: changed ? { priority: queue.priority.slice(), items } : queue,
@@ -741,16 +786,17 @@ export function skipReply({ reason, skipped, actionsRunning }) {
     return "Нет строки «загружается» — /skip не к чему применить.";
   }
   const titles = skipped.map((item) => `«${item.title}»`).join(", ");
-  return `Пропустил ${titles} (ошибка в очереди). Запускаю следующий пак, если очередь не пуста.`;
+  const why = skipped.map((item) => item.error).find((text) => text && text !== "пропущено") || "ошибка в очереди";
+  return `Пропустил ${titles}: ${why}. Запускаю следующий пак, если очередь не пуста.`;
 }
 
 export function unstickReply({ reason, released, finished, actionsRunning, cleanedWhileRunning = false }) {
   if (actionsRunning) {
     if (cleanedWhileRunning && (finished || []).length) {
       const titles = finished.map((item) => `«${item.title}»`).join(", ");
-      return `Сейчас идёт Actions — строку «загружается» не снимаю. Закрыл в очереди как готовый: ${titles} (прогресс в KV уже был завершён). Когда run закончится, при необходимости снова /unstick или /skip.`;
+      return `Сейчас идёт Actions — строку «загружается» не снимаю. Закрыл в очереди как готовый: ${titles} (прогресс в KV уже был завершён).`;
     }
-    return "Сейчас идёт запуск Actions — строку «загружается» не трогаю. Если run оборвётся, повторите /unstick (или /skip).";
+    return "Сейчас идёт запуск Actions — строку «загружается» не трогаю.";
   }
   if (reason === "none" || (!released.length && !(finished || []).length)) {
     return "Зависших строк «загружается» нет.";
