@@ -108,12 +108,23 @@ async function telegram(env, method, params) {
   return body.result;
 }
 
+function outgoingText(text) {
+  const value = String(text ?? "");
+  if (/<a href="https?:\/\/t\.me\/addstickers\//.test(value)) {
+    return { text: value, parse_mode: "HTML" };
+  }
+  return { text: value };
+}
+
 async function defaultSend(env, chatId, text) {
-  return telegram(env, "sendMessage", {
+  const body = outgoingText(text);
+  const payload = {
     chat_id: chatId,
-    text,
+    text: body.text,
     link_preview_options: { is_disabled: true },
-  });
+  };
+  if (body.parse_mode) payload.parse_mode = body.parse_mode;
+  return telegram(env, "sendMessage", payload);
 }
 
 function adminIo(env, deps) {
@@ -613,7 +624,7 @@ async function acceptCountedRequest(env, chatId, { title, names, rows, total }, 
   } else {
     const item = stored.item;
     const ahead = item ? aheadCount(stored.created ? stored.queue : queue, item) : 0;
-    out = acceptReply({ title, rows, total, priority, ahead });
+    out = acceptReply({ title, links: stickerLinks(names), rows, total, priority, ahead });
   }
   let userCardAfterAccept = null;
   if (stored.created && stored.item) {

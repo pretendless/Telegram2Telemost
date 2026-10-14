@@ -14,6 +14,8 @@ import {
   judgeCreateLinks,
   nameStepResult,
   parseStickerSetNames,
+  requestSourceLine,
+  userRequestEvent,
 } from "../src/logic.js";
 
 function memoryKv() {
@@ -155,8 +157,10 @@ test("valid links enqueue the saved title and clear the dialog", async () => {
   });
   assert.match(accepted[0].reply, /Запрос принят/);
   assert.match(accepted[0].reply, /«Лисёнок»/);
-  assert.match(accepted[0].reply, /fox_one — 3/);
-  assert.match(accepted[0].reply, /fox_two — 4/);
+  assert.match(accepted[0].reply, /href="https:\/\/t\.me\/addstickers\/fox_one">#<\/a>/);
+  assert.match(accepted[0].reply, /href="https:\/\/t\.me\/addstickers\/fox_two">#<\/a>/);
+  assert.ok(accepted[0].reply.indexOf("fox_one") < accepted[0].reply.indexOf("fox_two"));
+  assert.doesNotMatch(accepted[0].reply, /fox_one —/);
   assert.match(accepted[0].reply, /Всего 7 стикеров/);
   assert.equal(env.BOT_KV.store.get("await:7"), undefined);
   const queue = JSON.parse(env.BOT_KV.store.get("queue"));
@@ -399,6 +403,80 @@ test("/stop clears the name step, the links step, and answers when idle", async 
   assert.equal(idle[0].reply, STOP_IDLE);
   assert.match(idle[0].reply, /нечего прерывать/);
   assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].title, "Шерсть");
+});
+
+test("queue rows keep the user title and one hash per source link", () => {
+  const one = requestSourceLine({
+    title: "Шерсть Ебаная",
+    links: ["https://t.me/addstickers/piidarasy"],
+    stickers: 109,
+  });
+  assert.match(one, /«Шерсть Ебаная»/);
+  assert.match(one, /<a href="https:\/\/t\.me\/addstickers\/piidarasy">#<\/a> — 109/);
+  assert.doesNotMatch(one, /piidarasy —/);
+
+  const many = requestSourceLine(
+    {
+      title: "Моё название",
+      links: ["https://t.me/addstickers/one", "t.me/addstickers/two"],
+      stickers: 142,
+    },
+    { index: 1 },
+  );
+  assert.match(many, /^1\. «Моё название» /);
+  assert.ok(many.indexOf("addstickers/one") < many.indexOf("addstickers/two"));
+  assert.match(many, /— 142$/);
+
+  const escaped = requestSourceLine({
+    title: `A <B> & "C"`,
+    links: ["https://t.me/addstickers/ok"],
+    stickers: 1,
+  });
+  assert.match(escaped, /«A &lt;B&gt; &amp; &quot;C&quot;»/);
+  assert.doesNotMatch(escaped, /<B>/);
+
+  const missing = requestSourceLine({ title: "Без ссылок", links: ["not-a-url"], stickers: 3 });
+  assert.equal(missing.includes("#"), false);
+  assert.equal(missing, "«Без ссылок» — 3");
+
+  const event = userRequestEvent({
+    item: { title: "Шерсть Ебаная", status: "uploading", stickers: 109, id: "1" },
+    pack: { title: "piidarasy", status: "uploading", uploaded: 8, total: 109 },
+    queue: { items: [] },
+  });
+  assert.equal(event.pack, "Шерсть Ебаная");
+});
+
+test("admin /queue and user /status show the typed title and source hashes", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = "8502935020";
+  env.BOT_KV.store.set("meta:seeded", "1");
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-wool",
+          chatId: "7",
+          title: "Шерсть Ебаная",
+          links: ["https://t.me/addstickers/piidarasy"],
+          priority: false,
+          createdAt: "2026-10-14T00:00:00.000Z",
+          status: "queued",
+          stickers: 109,
+        },
+      ],
+    }),
+  );
+  const queued = await say(env, 8502935020, "/queue");
+  assert.match(queued[0].reply, /«Шерсть Ебаная»/);
+  assert.match(queued[0].reply, /href="https:\/\/t\.me\/addstickers\/piidarasy">#<\/a>/);
+  assert.doesNotMatch(queued[0].reply, /piidarasy —/);
+  const status = await say(env, 7, "/status");
+  assert.match(status[0].reply, /«Шерсть Ебаная»/);
+  assert.match(status[0].reply, /addstickers\/piidarasy">#<\/a>/);
+  assert.doesNotMatch(status[0].reply, /piidarasy —/);
 });
 
 test("admin /status names a starting run and an upload instead of idle", () => {

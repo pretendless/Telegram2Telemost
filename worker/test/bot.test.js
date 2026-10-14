@@ -745,7 +745,7 @@ test("an accepted priority request is one KV write and /status does not list", a
   await handle(packMessage(111, "/status"), env, {
     sendMessage: async (_env, _chatId, reply) => sent.push(reply),
   });
-  assert.match(sent[0], /«Лисёнок» с приоритетом: в очереди, перед ним 0/);
+  assert.match(sent[0], /«Лисёнок»[\s\S]*с приоритетом: в очереди, перед ним 0/);
   assert.equal(env.BOT_KV.ops.list, 0);
   assert.equal(env.BOT_KV.ops.put, 0);
 
@@ -1071,7 +1071,7 @@ test("/queue lists priority queued rows before normal ones", () => {
   const text = adminQueueOverviewText(queue, null);
   const block = text.split("В очереди:")[1].split("Недавно:")[0];
   assert.ok(block.indexOf("ВолнаСветa") < block.indexOf("Дьяволица"));
-  assert.ok(block.indexOf("Дьяволица") < block.indexOf("Tom & Jerry"));
+  assert.ok(block.indexOf("Дьяволица") < block.indexOf("Tom &amp; Jerry"));
 });
 
 test("/unstick and /upload reply once that they are gone and do not dispatch", async () => {

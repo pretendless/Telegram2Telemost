@@ -830,16 +830,51 @@ export function aheadCount(queue, item) {
   return ahead;
 }
 
+export function htmlEscape(text) {
+  return String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// One https URL per supplied link, in the user's order. Non-links are skipped.
+export function stickerSourceUrls(links) {
+  const urls = [];
+  const re = /(?:https?:\/\/)?t\.me\/addstickers\/([A-Za-z0-9_]+)/i;
+  for (const link of Array.isArray(links) ? links : []) {
+    const match = String(link || "").match(re);
+    if (!match) continue;
+    urls.push(`https://t.me/addstickers/${match[1]}`);
+  }
+  return urls;
+}
+
+// User-entered title plus one clickable # per source pack. HTML for Telegram.
+export function requestSourceLine(item, { index } = {}) {
+  const rawTitle = String((item && item.title) || "").replace(/\s+/g, " ").trim();
+  const title = htmlEscape(rawTitle || "пак");
+  const hashes = stickerSourceUrls(item && item.links).map(
+    (url) => `<a href="${htmlEscape(url)}">#</a>`,
+  );
+  const prefix = index ? `${index}. ` : "";
+  const head = `${prefix}«${title}»`;
+  const linked = hashes.length ? `${head} ${hashes.join(" ")}` : head;
+  const stickers = Number(item && item.stickers);
+  return Number.isFinite(stickers) && stickers > 0 ? `${linked} — ${stickers}` : linked;
+}
+
 export function queueStatusText(queue, chatId) {
   const mine = queue.items.filter((item) => item.chatId === String(chatId));
   if (!mine.length) return null;
   const lines = mine.map((item) => {
+    const label = requestSourceLine(item);
     const priority = item.priority ? " с приоритетом" : "";
-    if (item.status === "uploading") return `«${item.title}»${priority}: загружается`;
-    if (item.status === "done") return `«${item.title}»${priority}: готов`;
-    if (item.status === "error") return `«${item.title}»${priority}: ошибка, можно прислать набор ещё раз`;
+    if (item.status === "uploading") return `${label}${priority}: загружается`;
+    if (item.status === "done") return `${label}${priority}: готов`;
+    if (item.status === "error") return `${label}${priority}: ошибка, можно прислать набор ещё раз`;
     const ahead = aheadCount(queue, item);
-    return `«${item.title}»${priority}: в очереди, перед ним ${ahead}`;
+    return `${label}${priority}: в очереди, перед ним ${ahead}`;
   });
   return `Ваши запросы:\n\n${lines.join("\n")}`;
 }
@@ -851,17 +886,20 @@ export function alreadyQueuedReply({ title, priority }) {
   return head;
 }
 
-export function acceptReply({ title, rows, total, priority, ahead }) {
+export function acceptReply({ title, links, rows, total, priority, ahead }) {
   const head = priority
-    ? `Запрос принят с приоритетом. «${title}» встанет в очередь сразу после набора, который уже загружается.`
-    : `Запрос принят. «${title}» в очереди.`;
+    ? `Запрос принят с приоритетом. «${htmlEscape(title)}» встанет в очередь сразу после набора, который уже загружается.`
+    : `Запрос принят. «${htmlEscape(title)}» в очереди.`;
   const position =
     typeof ahead === "number"
       ? ahead === 0
         ? "\n\nСейчас перед вами никого — ждём свободный запуск Actions."
         : `\n\nПеред вами в очереди: ${ahead}.`
       : "";
-  return `${head}${position}\n\n${rows.join("\n")}\n\nВсего ${total} стикеров.`;
+  const sources = Array.isArray(links) && links.length
+    ? requestSourceLine({ title, links, stickers: total })
+    : (rows || []).map((row) => htmlEscape(row)).join("\n");
+  return `${head}${position}\n\n${sources}\n\nВсего ${total} стикеров.`;
 }
 
 export function queueItemSlug(item) {
@@ -893,12 +931,10 @@ export function adminQueueOverviewText(queue, activePack) {
   const lines = ["Очередь переноса:", ""];
   const uploading = items.find((item) => item.status === "uploading");
   if (uploading) {
-    let line = `Сейчас загружается: «${uploading.title}»`;
-    if (uploading.chatId) line += ` (chat ${uploading.chatId})`;
+    let line = `Сейчас загружается: ${requestSourceLine(uploading)}`;
+    if (uploading.chatId) line += ` (chat ${htmlEscape(uploading.chatId)})`;
     if (activePack && Number.isFinite(activePack.uploaded) && Number.isFinite(activePack.total)) {
       line += ` — стикер ${activePack.uploaded} из ${activePack.total}`;
-    } else if (uploading.stickers) {
-      line += ` — всего ${uploading.stickers} стикеров`;
     }
     lines.push(line);
   } else {
@@ -912,8 +948,8 @@ export function adminQueueOverviewText(queue, activePack) {
     lines.push("В очереди:");
     waiting.forEach((item, index) => {
       const pri = item.priority ? ", приоритет" : "";
-      const who = item.chatId ? `, chat ${item.chatId}` : "";
-      lines.push(`${index + 1}. «${item.title}»${pri}${who}`);
+      const who = item.chatId ? `, chat ${htmlEscape(item.chatId)}` : "";
+      lines.push(`${requestSourceLine(item, { index: index + 1 })}${pri}${who}`);
     });
   }
   const recent = items
@@ -927,7 +963,7 @@ export function adminQueueOverviewText(queue, activePack) {
     lines.push("Недавно:");
     for (const item of recent) {
       const mark = item.status === "done" ? "готово" : "ошибка";
-      lines.push(`• ${mark}: «${item.title}»`);
+      lines.push(`• ${mark}: ${requestSourceLine(item)}`);
     }
   }
   return lines.join("\n");
@@ -946,7 +982,7 @@ function userCardKey(event) {
 }
 
 export function userRequestEvent({ item, pack, queue }) {
-  const title = (pack && pack.title) || (item && item.title) || "";
+  const title = (item && item.title) || (pack && pack.title) || "";
   if (pack && pack.status === "error") {
     return {
       phase: "error",
