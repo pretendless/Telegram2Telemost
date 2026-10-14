@@ -49,6 +49,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Fresh repos and clones have no custom labels. --force creates
+          # tg-project-prompt when missing and refreshes it when present, so
+          # issue create can keep the label and issues stay filterable.
+          gh label create tg-project-prompt \
+            --description "Telegram /project prompt for the Project coordinator" \
+            --color 5319E7 \
+            --force
           title="$(cat project-prompt-title.txt)"
           body="$(cat project-prompt-body.md)"
           url="$(gh issue create --title "$title" --body "$body" --label "tg-project-prompt")"
