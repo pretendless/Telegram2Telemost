@@ -24,6 +24,9 @@ import {
   ownIds,
   stagingOwnIdAfterSend,
   stagingNewRows,
+  stagingImageRows,
+  stagingForwardMessageId,
+  resolveStagingForwardId,
   botRepliesAfterOwn,
   loadTelemostUrls,
   stagingFillTo,
@@ -369,6 +372,39 @@ test("stall timer ignores busy flicker in the progress key", () => {
   assert.equal(stallDue(1000, 0, STALL_MS), false);
   assert.equal(stallDue(STALL_MS, 0, STALL_MS), true);
   assert.equal(stallDue(STALL_MS + 1, 1, STALL_MS), true);
+});
+
+test("staging forward resolves by image index after navigation reassigns ids", () => {
+  const beforeNav = [
+    { id: "1", own: true, hasImage: true, text: "leftover" },
+    { id: "2", own: true, hasImage: true, text: "001" },
+    { id: "3", own: true, hasImage: true, text: "002" },
+  ];
+  assert.equal(stagingForwardMessageId(beforeNav, 0, 1), "2");
+  assert.equal(stagingForwardMessageId(beforeNav, 1, 1), "3");
+  // openChat resets tg2tmId in the DOM; index into image rows is unchanged.
+  const afterNav = [
+    { id: "9", own: true, hasImage: true, text: "leftover" },
+    { id: "10", own: true, hasImage: true, text: "001" },
+    { id: "11", own: true, hasImage: true, text: "002" },
+  ];
+  assert.deepEqual(stagingImageRows(afterNav).map((r) => r.id), ["9", "10", "11"]);
+  assert.equal(stagingForwardMessageId(afterNav, 0, 1), "10");
+  assert.equal(stagingForwardMessageId(afterNav, 1, 1), "11");
+  assert.equal(stagingForwardMessageId(afterNav, 2, 1), null);
+});
+
+test("resolveStagingForwardId reads fresh ids from bot.chatRows", async () => {
+  const rows = [
+    { id: "20", own: true, hasImage: true },
+    { id: "21", own: true, hasImage: true },
+  ];
+  const bot = {
+    chatRows: async () => rows,
+  };
+  assert.equal(await resolveStagingForwardId(bot, 1, 0), "21");
+  rows[1].id = "99";
+  assert.equal(await resolveStagingForwardId(bot, 1, 0), "99");
 });
 
 test("staging own-id detection falls back when join chat omits row_own", () => {

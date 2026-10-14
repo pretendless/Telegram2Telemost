@@ -743,6 +743,23 @@ export function rowIds(rows) {
   return (rows || []).filter((row) => row && row.id != null).map((row) => String(row.id));
 }
 
+// Staging buffer: image bubbles in chat order (not tg2tmId captured before navigation).
+export function stagingImageRows(rows) {
+  return (rows || []).filter((row) => row && row.hasImage);
+}
+
+export function stagingForwardMessageId(rows, imageIndex, baseCount) {
+  const images = stagingImageRows(rows);
+  const idx = (Number(baseCount) || 0) + (Number(imageIndex) || 0);
+  const row = images[idx];
+  return row ? String(row.id) : null;
+}
+
+export async function resolveStagingForwardId(bot, imageIndex, baseCount) {
+  const rows = await bot.chatRows();
+  return stagingForwardMessageId(rows, imageIndex, baseCount);
+}
+
 // Rows that appeared after a staging send (join buffer may omit .yamb-message-row_own).
 export function stagingNewRows(beforeCount, beforeAllIds, rows) {
   const list = rows || [];
@@ -1631,20 +1648,30 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   const useStaging = Boolean(urls.stagingEnabled && (bot.stagingUrl || urls.stagingUrl));
   const stagingUrl = bot.stagingUrl || urls.stagingUrl;
   const botUrl = bot.botUrl || urls.botUrl;
-  const stagedOwn = new Map();
+  const stagedIndices = new Set();
   let stagingFilled = tm.uploaded;
+  let stagingBaseImageCount = null;
+
+  async function ensureStagingBaseImageCount() {
+    if (stagingBaseImageCount != null) return;
+    await bot.openChat(stagingUrl);
+    await bot.scrollToBottom();
+    const rows = await bot.chatRows();
+    stagingBaseImageCount = stagingImageRows(rows).length;
+  }
 
   async function fillStagingWindow() {
     if (!useStaging) return;
     const need = stagingFillTo(tm.uploaded, stagingFilled, m.images.length, urls.stagingWindow);
     if (!need.length) return;
     await bot.openChat(stagingUrl);
+    await ensureStagingBaseImageCount();
     for (const idx of need) {
       const item = m.images[idx];
       const path = join(PACKS, dir, item.file);
       console.log(dir, 'stage', item.file);
-      const ownId = await bot.sendImageNoWait(path);
-      stagedOwn.set(idx, ownId);
+      await bot.sendImageNoWait(path);
+      stagedIndices.add(idx);
       stagingFilled = idx + 1;
     }
     await bot.openChat(botUrl);
@@ -1653,11 +1680,11 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   async function deliverImage(file, index, onWait) {
     if (!useStaging) return bot.sendImage(file, { onWait });
     await fillStagingWindow();
-    let ownId = stagedOwn.get(index);
-    if (!ownId) {
+    if (!stagedIndices.has(index)) {
       await bot.openChat(stagingUrl);
-      ownId = await bot.sendImageNoWait(file);
-      stagedOwn.set(index, ownId);
+      await ensureStagingBaseImageCount();
+      await bot.sendImageNoWait(file);
+      stagedIndices.add(index);
       stagingFilled = Math.max(stagingFilled, index + 1);
     }
     await bot.openChat(botUrl);
@@ -1665,7 +1692,15 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     const baseline = (thread || []).filter((row) => row && !row.own).map(({ id, text, links }) => ({ id, text, links }));
     const ownBeforeIds = ownIds(thread);
     await bot.openChat(stagingUrl);
-    console.log(dir, 'forward', m.images[index].file);
+    await ensureStagingBaseImageCount();
+    const ownId = await resolveStagingForwardId(bot, index, stagingBaseImageCount);
+    if (!ownId) {
+      throw new Error(
+        `staging forward: image ${index} not found (base ${stagingBaseImageCount}, `
+        + `${stagingImageRows(await bot.chatRows()).length} images in chat)`,
+      );
+    }
+    console.log(dir, 'forward', m.images[index].file, 'id', ownId);
     await bot.forwardOwnToBot(ownId, botUrl);
     return bot.waitForReply(baseline, { until: 'sticker', ownBeforeIds, onWait });
   }
@@ -1703,7 +1738,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
         seconds: Math.round(reply.seconds || 0),
         lastLine: waitLastLine(30, reply.text || 'нет ответа, перезагрузка'),
       });
-      if (useStaging && outboundStep === 'image') stagedOwn.delete(i);
+      if (useStaging && outboundStep === 'image') stagedIndices.delete(i);
       await bot.openChat(botUrl);
       await bot.recoverChat();
     };
@@ -1734,7 +1769,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
           savePack(p);
           break;
         }
-        if (useStaging && outboundStep === 'image') stagedOwn.delete(i);
+        if (useStaging && outboundStep === 'image') stagedIndices.delete(i);
         outboundStep = 'image';
         await sleep(1000);
         continue;
@@ -1775,7 +1810,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
             savePack(p);
             break;
           }
-          if (useStaging) stagedOwn.delete(i);
+          if (useStaging) stagedIndices.delete(i);
           outboundStep = 'image';
           await sleep(1000);
           continue;
@@ -1787,7 +1822,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       await note({ phase: 'ready', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
       accepted = true;
       tm.pendingFile = null;
-      stagedOwn.delete(i);
+      stagedIndices.delete(i);
     }
     if (!accepted) continue;
     tm.uploaded = i + 1;
