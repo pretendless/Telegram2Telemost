@@ -25,6 +25,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-noto-color-emoji \
       locales \
       procps \
+      python3 \
+      python3-pil \
+      python3-pip \
     && sed -i 's/^# *\(ru_RU.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
     && locale-gen ru_RU.UTF-8 \
     && rm -rf /var/lib/apt/lists/* \
@@ -35,7 +38,10 @@ WORKDIR /opt/tg2tm
 
 # All runtime .mjs under scripts/ (queue drain, restart, upload). Test files are harmless in the image.
 COPY scripts/*.mjs scripts/
-COPY scripts/fetch_and_convert.py scripts/
+COPY scripts/fetch_and_convert.py scripts/fetch_and_convert.py
+COPY scripts/requirements-fetch.txt scripts/requirements-fetch.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r scripts/requirements-fetch.txt \
+    && rm -rf /root/.cache/pip
 COPY worker/src/logic.js worker/src/logic.js
 COPY vm/ vm/
 COPY config/settings.json config/settings.json

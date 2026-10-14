@@ -32,6 +32,8 @@ uploader  --Bearer-->   POST /progress   Worker  --KV-->           подпис�
 
 `scripts/telemost_upload.mjs` пишет ход в админ-чат напрямую. Если заданы `TG2TM_PROGRESS_URL` и `UPLOADER_SECRET`, тот же ход уходит в `POST /progress` с `adminDelivered`, чтобы `/status` видел задачу и не слал вторую карточку. Без этих переменных загрузка в Телемост продолжается.
 
+В режиме drain VM перед загрузкой вызывает `scripts/fetch_and_convert.py` (анимированные `.tgs` через `rlottie-python`). Образ `tg2tm-browser` ставит `python3`, `python3-pil` и pip-зависимости из `scripts/requirements-fetch.txt`; на runner Actions то же перед fetch в шагах upload/restart.
+
 ## Локальные тесты
 
 Из каталога `worker/`, Node 22, без Cloudflare и без токенов:
