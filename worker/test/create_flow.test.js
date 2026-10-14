@@ -198,7 +198,7 @@ test("another command keeps its reply and the half-finished create state", async
   await say(env, 7, "/create");
   await say(env, 7, "Лис");
   const status = await say(env, 7, "/status");
-  assert.match(status[0].reply, /активных паков нет/);
+  assert.match(status[0].reply, /Активных запросов нет/);
   assert.doesNotMatch(status[0].reply, /название/);
   assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Лис" });
 
