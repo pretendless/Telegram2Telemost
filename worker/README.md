@@ -73,6 +73,31 @@ CONFIRM_STOP_POLLING=1 \
   node set-webhook.mjs
 ```
 
-Профиль бота (имя Telegram2Telemost, описание, команды): `TG2TMBOT_TOKEN=... npm run setup-bot`. Опционально `LOGIN_CHAT_IDS=8502935020,...` — те же id, что у воркера: для них в меню появятся админ-команды (`/queue`, `/unstick`, `/skip`, …). См. `docs/bot.md`.
+### Доступ к api.telegram.org с корпоративной машины
+
+Скрипты `setup-bot.mjs` и `set-webhook.mjs` ходят в Bot API через `telegram_fetch.mjs`. Если `PROXY_HOST` не задан (как на GitHub Actions), используется обычный `fetch`.
+
+Локально, когда `api.telegram.org` доступен только через прокси (тот же формат, что в `vm/proxy.mjs` и секрете `PROXY_HOST`):
+
+```bash
+export PROXY_HOST=proxy.example.com:50100
+export PROXY_LOGIN=...
+export PROXY_PASSWORD=...
+TG2TMBOT_TOKEN=... npm run setup-bot
+```
+
+Альтернатива без `PROXY_HOST`: стандартные переменные окружения Node и undici:
+
+```bash
+export NODE_USE_ENV_PROXY=1
+export HTTPS_PROXY=http://user:pass@proxy.example.com:50100
+TG2TMBOT_TOKEN=... npm run setup-bot
+```
+
+### Профиль бота и команды
+
+Локально: `TG2TMBOT_TOKEN=... npm run setup-bot`. Опционально `LOGIN_CHAT_IDS=8502935020,...` — те же id, что у воркера: для них в меню появятся админ-команды (`/queue`, `/unstick`, `/skip`, …). См. `docs/bot.md`.
+
+С корпоративного ПК, где Telegram недоступен, проще запустить workflow **Setup bot** в GitHub Actions (`workflow_dispatch`): runner достаёт `api.telegram.org` напрямую, секрет `TG2TMBOT_TOKEN`, переменная репозитория `LOGIN_CHAT_IDS` (по умолчанию `8502935020`, как в `wrangler.toml`).
 
 Машина переноса сообщает ход через `scripts/telemost_upload.mjs`. Тот же адрес и секрет можно передать переменными `TG2TM_PROGRESS_URL` и `UPLOADER_SECRET`.
