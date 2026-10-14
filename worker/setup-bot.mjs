@@ -9,6 +9,7 @@ import {
   INITIAL_SUBSCRIBER,
   USER_COMMANDS,
 } from "./src/logic.js";
+import { telegramFetch } from "./telegram_fetch.mjs";
 
 const token = process.env.TG2TMBOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
@@ -17,7 +18,7 @@ if (!token) {
 }
 
 async function call(method, params) {
-  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const res = await telegramFetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(params),

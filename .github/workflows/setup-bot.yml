@@ -1,0 +1,28 @@
+# Refresh @tg2tmbot name, descriptions and command menu from GitHub (direct Telegram access).
+name: Setup bot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Install worker dependencies
+        working-directory: worker
+        run: npm ci
+      - name: Apply bot profile and commands
+        working-directory: worker
+        run: npm run setup-bot
+        env:
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          LOGIN_CHAT_IDS: ${{ vars.LOGIN_CHAT_IDS || '8502935020' }}

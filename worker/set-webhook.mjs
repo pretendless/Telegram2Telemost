@@ -4,6 +4,8 @@
 //   CONFIRM_STOP_POLLING=1 TG2TMBOT_TOKEN=... WEBHOOK_SECRET=... \
 //     TG2TM_WEBHOOK_URL=https://<worker>/telegram node set-webhook.mjs
 
+import { telegramFetch } from "./telegram_fetch.mjs";
+
 if (process.env.CONFIRM_STOP_POLLING !== "1") {
   console.error("Polling must be stopped first. Set CONFIRM_STOP_POLLING=1 only after that.");
   process.exit(1);
@@ -22,7 +24,7 @@ const body = new URLSearchParams({
   secret_token: secret,
   allowed_updates: JSON.stringify(["message"]),
 });
-const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, { method: "POST", body });
+const res = await telegramFetch(`https://api.telegram.org/bot${token}/setWebhook`, { method: "POST", body });
 const json = await res.json();
 if (!json.ok) {
   console.error(json.description || "setWebhook failed");
