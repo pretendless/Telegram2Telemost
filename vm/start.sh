@@ -190,14 +190,25 @@ elif [ "$MODE" = "restart-peek" ]; then
 elif [ "$MODE" = "restart" ]; then
   node vm/login.mjs restore || status=$?
   if [ "$status" -eq 0 ]; then
-    node scripts/telemost_upload.mjs --restart || status=$?
+    export TG2TM_QUEUE_DRAIN="${TG2TM_QUEUE_DRAIN:-1}"
+    export TG2TM_DRAIN_IDLE_MS="${TG2TM_DRAIN_IDLE_MS:-90000}"
+    node scripts/telemost_upload.mjs --restart --drain-queue || status=$?
     node vm/login.mjs save || true
   fi
 else
   node vm/login.mjs restore || status=$?
   if [ "$status" -eq 0 ]; then
-    # Always close the pack after upload. Title and stickers come from pack.json.
-    node scripts/telemost_upload.mjs --close "${pack_args[@]}" || status=$?
+    export TG2TM_QUEUE_DRAIN="${TG2TM_QUEUE_DRAIN:-1}"
+    if [ -n "$PACKS" ]; then
+      export TG2TM_DRAIN_IDLE_MS="${TG2TM_DRAIN_IDLE_MS:-0}"
+      # Always close the pack after upload. Title and stickers come from pack.json.
+      node scripts/telemost_upload.mjs --close "${pack_args[@]}" || status=$?
+    else
+      export TG2TM_DRAIN_IDLE_MS="${TG2TM_DRAIN_IDLE_MS:-90000}"
+    fi
+    if [ "${TG2TM_QUEUE_DRAIN}" = "1" ]; then
+      node scripts/telemost_upload.mjs --drain-queue-only || status=$?
+    fi
     node vm/login.mjs save || true
   fi
 fi

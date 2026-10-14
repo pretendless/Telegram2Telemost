@@ -25,6 +25,7 @@ import {
   queueItemBySlug,
   userRequestEvent,
   realPackUrl,
+  shouldSchedulePipelineAfterProgress,
   shouldStartPipeline,
   sortQueuedItems,
   terminalProgress,
@@ -477,6 +478,110 @@ test("progress done releases the uploading row and dispatches the next restart",
   await pipe.flushPipeline();
   const stored = JSON.parse(env.BOT_KV.store.get("queue"));
   assert.equal(stored.items[0].status, "done");
+  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
+  assert.ok(dispatch);
+  assert.match(dispatch.body.inputs.dispatch_reason, /Восток/);
+});
+
+test("sessionDrain terminal progress releases but does not dispatch another Actions run", async () => {
+  const env = envWith();
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-1",
+          chatId: "99",
+          title: "Запад",
+          links: ["https://t.me/addstickers/zapad"],
+          priority: false,
+          createdAt: "2026-10-13T12:00:00.000Z",
+          status: "uploading",
+          stickers: 10,
+        },
+        {
+          id: "req-2",
+          chatId: "100",
+          title: "Восток",
+          links: ["https://t.me/addstickers/vostok"],
+          priority: false,
+          createdAt: "2026-10-13T12:01:00.000Z",
+          status: "queued",
+          stickers: 8,
+        },
+      ],
+    }),
+  );
+  const calls = [];
+  const fetch = async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  const body = {
+    slug: "request-req-1",
+    title: "Запад",
+    status: "done",
+    uploaded: 10,
+    total: 10,
+    packUrl: PACK_URL,
+    queueRequestId: "req-1",
+    adminDelivered: true,
+    sessionDrain: true,
+  };
+  assert.equal(shouldSchedulePipelineAfterProgress(normalizeProgress(body)), false);
+  const pipe = trackPipelineWait({ sendMessage: async () => ({ message_id: 1 }), fetch });
+  await handle(progressRequest(body), env, pipe);
+  await pipe.flushPipeline();
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items[0].status, "done");
+  assert.equal(calls.some((url) => url.endsWith("/dispatches")), false);
+});
+
+test("drain-complete schedules when queued work remains after session ends", async () => {
+  const env = envWith();
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-2",
+          chatId: "100",
+          title: "Восток",
+          links: ["https://t.me/addstickers/vostok"],
+          priority: false,
+          createdAt: "2026-10-13T12:01:00.000Z",
+          status: "queued",
+          stickers: 8,
+        },
+      ],
+    }),
+  );
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push({
+      url: String(url),
+      body: init && init.body ? JSON.parse(init.body) : null,
+    });
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  const pipe = trackPipelineWait({ sendMessage: async () => ({}), fetch });
+  const req = new Request("https://tg2tmbot.example/queue/drain-complete", {
+    method: "POST",
+    headers: { authorization: "Bearer uploader-secret" },
+    body: "{}",
+  });
+  await handle(req, env, pipe);
+  await pipe.flushPipeline();
   const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
   assert.ok(dispatch);
   assert.match(dispatch.body.inputs.dispatch_reason, /Восток/);

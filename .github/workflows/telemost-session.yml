@@ -186,6 +186,8 @@ jobs:
           PROXY_HOST: ${{ secrets.PROXY_HOST }}
           UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
           TG2TM_PROGRESS_URL: https://tg2tmbot.prtndz.workers.dev/progress
+          TG2TM_QUEUE_DRAIN: "1"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
         run: |
           mkdir -p sessions logs
           chmod a+rwx logs

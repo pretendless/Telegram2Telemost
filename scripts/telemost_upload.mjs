@@ -7,6 +7,8 @@ import { readFileSync, writeFileSync, readdirSync, appendFileSync, mkdirSync } f
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createAdminFeed, postProgress, telegramIo } from './admin_status.mjs';
+import { drainRemainingQueue } from './queue_drain.mjs';
+import { queueCredentialsReadable } from './queue_client.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKS = join(ROOT, 'packs');
@@ -1023,9 +1025,17 @@ function openAdminFeed(dirRef) {
         requester: dirRef.requesterChatId || null,
         requesterChatId: dirRef.requesterChatId || null,
         queueRequestId: dirRef.queueRequestId || null,
+        sessionDrain: Boolean(dirRef.sessionDrain),
       });
     },
   });
+}
+
+function queueDrainEnabled(argv) {
+  if (argv.includes('--drain-queue') || argv.includes('--drain-queue-only')) return true;
+  if (!queueCredentialsReadable()) return false;
+  const flag = String(process.env.TG2TM_QUEUE_DRAIN ?? '1').trim();
+  return /^(1|true|yes)$/i.test(flag);
 }
 
 export async function postPackLink(fetchImpl, token, title, url) {
@@ -1588,11 +1598,14 @@ export function dirsForRun(dirs, { finalize = false, close = false } = {}) {
 }
 
 async function main() {
-  const finalize = process.argv.includes('--finalize');
-  const peek = process.argv.includes('--restart-peek');
-  const restart = process.argv.includes('--restart');
-  const close = process.argv.includes('--close') || restart;
-  const wanted = process.argv.slice(2).filter((arg) => !['--finalize', '--close', '--restart', '--restart-peek'].includes(arg));
+  const argv = process.argv.slice(2);
+  const finalize = argv.includes('--finalize');
+  const peek = argv.includes('--restart-peek');
+  const restart = argv.includes('--restart');
+  const drainOnly = argv.includes('--drain-queue-only');
+  const drainQueue = queueDrainEnabled(argv);
+  const close = argv.includes('--close') || restart;
+  const wanted = argv.filter((arg) => !['--finalize', '--close', '--restart', '--restart-peek', '--drain-queue', '--drain-queue-only'].includes(arg));
   let dirs = readdirSync(PACKS).filter(d => /^\d\d-/.test(d)).sort().filter(d => !wanted.length || wanted.includes(d.slice(0, 2)) || wanted.includes(d));
   const skipped = dirs.filter((dir) => !dirsForRun([dir], { finalize, close }).length);
   if (skipped.length) console.log('skip', skipped.join(' '));
@@ -1611,9 +1624,24 @@ async function main() {
     c.close();
     return;
   }
+  if (drainOnly) {
+    try {
+      dirRef.sessionDrain = true;
+      await drainRemainingQueue({ bot, note, dirRef, uploadPack });
+    } catch (e) {
+      log('drain', '', 'остановлено', e.message);
+      process.exitCode = 1;
+    }
+    c.close();
+    return;
+  }
   if (restart) {
     try {
+      if (drainQueue) dirRef.sessionDrain = true;
       await restartRun(bot, note, dirRef);
+      if (drainQueue) {
+        await drainRemainingQueue({ bot, note, dirRef, uploadPack });
+      }
     } catch (e) {
       log('restart', '', 'остановлено', e.message);
       await note({ phase: 'error', pack: dirRef.title || 'перезапуск', error: e.message });
@@ -1632,6 +1660,15 @@ async function main() {
       await note({ phase: 'error', pack: dirRef.title || d, error: e.message });
       process.exitCode = 1;
       break;
+    }
+  }
+  if (drainQueue) {
+    try {
+      dirRef.sessionDrain = true;
+      await drainRemainingQueue({ bot, note, dirRef, uploadPack });
+    } catch (e) {
+      log('drain', '', 'остановлено', e.message);
+      process.exitCode = 1;
     }
   }
   c.close();

@@ -237,7 +237,14 @@ export function normalizeProgress(body) {
     requester: body.requester ? String(body.requester).slice(0, 32) : null,
     requesterChatId: body.requesterChatId ? String(body.requesterChatId).slice(0, 16) : null,
     queueRequestId: body.queueRequestId ? String(body.queueRequestId).slice(0, 64) : null,
+    sessionDrain: Boolean(body.sessionDrain),
   };
+}
+
+// While a Telemost Actions job drains the queue in-browser, terminal progress still
+// releases the row (same as bc-c3fb423d) but must not dispatch another workflow.
+export function shouldSchedulePipelineAfterProgress(pack) {
+  return !pack.sessionDrain;
 }
 
 export function commandOf(text) {
