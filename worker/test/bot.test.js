@@ -1755,3 +1755,84 @@ test("/format, /example and /stop", async () => {
   assert.equal(await env.BOT_KV.get(`sub:${INITIAL_SUBSCRIBER}`), null);
   assert.match(sent[2].text, /Уведомления выключены/);
 });
+
+test("/project is admin-only and dispatches project-prompt workflow", async () => {
+  const sent = [];
+  const calls = [];
+  const env = { ...envWith(), LOGIN_CHAT_IDS: String(INITIAL_SUBSCRIBER), GH_DISPATCH_TOKEN: "dispatch-token" };
+  const fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return new Response(null, { status: 204 });
+  };
+  const sendMessage = async (_env, chatId, text) => sent.push({ chatId, text });
+  await handle(telegramRequest(111, "/project test"), env, { sendMessage, fetch });
+  assert.equal(sent[0].text, "Эта команда только для администратора.");
+  assert.equal(calls.length, 0);
+  sent.length = 0;
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/project"), env, { sendMessage, fetch });
+  assert.match(sent[0].text, /\/project/);
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/project статус очереди"), env, {
+    sendMessage,
+    fetch,
+    now: () => new Date("2026-10-14T12:00:00.000Z"),
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].url,
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/project-prompt.yml/dispatches",
+  );
+  assert.deepEqual(calls[0].body.inputs, {
+    prompt_id: "tg-2026-10-14T12-00-00-000Z",
+    chat_id: String(INITIAL_SUBSCRIBER),
+  });
+  const key = "project:prompt:tg-2026-10-14T12-00-00-000Z";
+  const stored = JSON.parse(env.BOT_KV.store.get(key));
+  assert.equal(stored.prompt, "статус очереди");
+  assert.equal(stored.status, "dispatched");
+  const texts = sent.map((item) => item.text);
+  assert.ok(texts.some((t) => /принят/.test(t)));
+  assert.ok(texts.some((t) => /Cursor Project/.test(t)));
+});
+
+test("POST /project/reply sends summary to admin chat", async () => {
+  const env = envWith();
+  const id = "tg-test-reply";
+  env.BOT_KV.store.set(
+    `project:prompt:${id}`,
+    JSON.stringify({ id, chatId: String(INITIAL_SUBSCRIBER), prompt: "q", status: "dispatched", createdAt: "2026-10-14T00:00:00.000Z" }),
+  );
+  const sent = [];
+  const res = await handle(
+    new Request("https://tg2tmbot.example/project/reply", {
+      method: "POST",
+      headers: { authorization: "Bearer uploader-secret", "content-type": "application/json" },
+      body: JSON.stringify({ id, summary: "Агент проверяет drain." }),
+    }),
+    env,
+    { sendMessage: async (_env, chatId, text) => sent.push({ chatId, text }) },
+  );
+  assert.equal(res.status, 200);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /Агент проверяет drain/);
+  const stored = JSON.parse(env.BOT_KV.store.get(`project:prompt:${id}`));
+  assert.equal(stored.status, "done");
+});
+
+test("GET /project/prompt returns stored prompt for uploader secret", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set(
+    "project:prompt:tg-fetch",
+    JSON.stringify({ id: "tg-fetch", chatId: "1", prompt: "hello", status: "pending", createdAt: "2026-10-14T00:00:00.000Z" }),
+  );
+  const ok = await handle(
+    new Request("https://tg2tmbot.example/project/prompt?id=tg-fetch", {
+      headers: { authorization: "Bearer uploader-secret" },
+    }),
+    env,
+  );
+  assert.equal(ok.status, 200);
+  const body = await ok.json();
+  assert.equal(body.prompt, "hello");
+  const denied = await handle(new Request("https://tg2tmbot.example/project/prompt?id=tg-fetch"), env);
+  assert.equal(denied.status, 401);
+});

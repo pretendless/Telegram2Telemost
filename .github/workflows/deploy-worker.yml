@@ -1,0 +1,48 @@
+# Deploy @tg2tmbot Cloudflare Worker (wrangler). Run manually after merging worker changes.
+name: Deploy worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Wrangler environment (leave empty for default)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Require Cloudflare credentials
+        run: |
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::Repository secret CLOUDFLARE_API_TOKEN is not set."
+            exit 1
+          fi
+          if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+            echo "::error::Repository secret CLOUDFLARE_ACCOUNT_ID is not set."
+            exit 1
+          fi
+      - name: Install worker dependencies
+        working-directory: worker
+        run: npm ci
+      - name: Deploy with wrangler
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "${{ inputs.environment }}" ]; then
+            npx wrangler deploy --env "${{ inputs.environment }}"
+          else
+            npx wrangler deploy
+          fi
