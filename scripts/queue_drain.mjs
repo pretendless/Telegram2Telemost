@@ -6,9 +6,10 @@
 import { spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { clearPackProgress } from './admin_status.mjs';
+import { actionsRunUrl, clearPackProgress } from './admin_status.mjs';
 import { claimQueueItem, postDrainComplete, queueCredentialsReadable } from './queue_client.mjs';
 import { writeRequestPack } from './restart_prepare.mjs';
+import { POST_SAVE_STEP_MS, POST_SAVE_STEPS, isStepTimeout, withStepTimeout } from './step_timeout.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -157,9 +158,15 @@ export async function drainRemainingQueue(ctx) {
     clearPackProgress(ctx.dirRef);
     let claim;
     try {
-      claim = await claimQueueItem(fetchImpl, progressUrl, secret);
+      claim = await withStepTimeout(
+        POST_SAVE_STEPS.nextPack,
+        POST_SAVE_STEP_MS,
+        (signal) => claimQueueItem(fetchImpl, progressUrl, secret, {}, { signal }),
+        { runUrl: actionsRunUrl() },
+      );
     } catch (err) {
       console.log('queue-drain claim failed', err && err.message);
+      if (isStepTimeout(err)) throw err;
       break;
     }
     const step = nextDrainWait({
@@ -216,6 +223,7 @@ export async function drainRemainingQueue(ctx) {
       finishedIds.add(String(item.id));
       packs++;
     } catch (err) {
+      if (isStepTimeout(err)) throw err;
       const message = err && err.message ? err.message : String(err);
       console.log('queue-drain pack error', item.title, message);
       try {
@@ -234,9 +242,15 @@ export async function drainRemainingQueue(ctx) {
   }
 
   try {
-    await postDrainComplete(fetchImpl, progressUrl, secret);
+    await withStepTimeout(
+      POST_SAVE_STEPS.nextPack,
+      POST_SAVE_STEP_MS,
+      (signal) => postDrainComplete(fetchImpl, progressUrl, secret, { signal }),
+      { runUrl: actionsRunUrl() },
+    );
   } catch (err) {
     console.log('queue-drain complete signal failed', err && err.message);
+    if (isStepTimeout(err)) throw err;
   }
   return { packs, reason: packs ? 'drained' : 'idle' };
 }

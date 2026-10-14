@@ -7,6 +7,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { activeUploadJob, sortQueuedItems } from '../worker/src/logic.js';
+import { isStepTimeout } from './step_timeout.mjs';
 
 export const ADMIN_CHAT_ID = '8502935020';
 
@@ -296,7 +297,8 @@ export function createAdminFeed({ io, requester, writeState, onDelivered, now, e
     if (onDelivered) {
       try {
         await onDelivered(full, delivery);
-      } catch {
+      } catch (err) {
+        if (isStepTimeout(err)) throw err;
         console.log('progress skipped');
       }
     }
@@ -321,7 +323,7 @@ export function telegramIo(fetchImpl, token) {
   };
 }
 
-export async function postProgress(fetchImpl, url, secret, body) {
+export async function postProgress(fetchImpl, url, secret, body, opts = {}) {
   if (!url || !secret || !fetchImpl) return;
   const response = await fetchImpl(url, {
     method: 'POST',
@@ -331,6 +333,7 @@ export async function postProgress(fetchImpl, url, secret, body) {
       'user-agent': 'tg2tm-upload',
     },
     body: JSON.stringify({ ...body, adminDelivered: true }),
+    signal: opts && opts.signal,
   });
   if (!response.ok) throw new Error('progress http ' + response.status);
 }
