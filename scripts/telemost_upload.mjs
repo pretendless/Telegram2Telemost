@@ -182,12 +182,18 @@ async function listDevToolsPages() {
 
 async function findOrCreatePage(list, targetUrl) {
   const target = String(targetUrl || '').trim();
-  let page = (list || []).find((t) => t.type === 'page' && telemostUrlMatches(t.url, target));
-  if (page) return page;
-  const created = await fetch(`${DEVTOOLS}/json/new?${encodeURIComponent(target)}`);
-  if (!created.ok) throw new Error(`could not open Telemost tab for ${target}`);
-  page = await created.json();
-  return page;
+  let pages = list || [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) {
+      await sleep(400 * attempt);
+      pages = await listDevToolsPages();
+    }
+    const hit = pages.find((t) => t.type === 'page' && telemostUrlMatches(t.url, target));
+    if (hit) return hit;
+    const created = await fetch(`${DEVTOOLS}/json/new?${encodeURIComponent(target)}`);
+    if (created.ok) return created.json();
+  }
+  throw new Error(`could not open Telemost tab for ${target}`);
 }
 
 async function warmPageChat(c, targetUrl) {
@@ -204,7 +210,7 @@ async function warmPageChat(c, targetUrl) {
 }
 
 /** One CDP session per browser tab: stickers bot + optional staging join chat. */
-async function connect(urls = loadTelemostUrls()) {
+async function connect(urls = loadTelemostUrls(), { openStagingTab = true } = {}) {
   const list = await listDevToolsPages();
   const botUrl = urls.botUrl || DEFAULT_BOT_URL;
   let botPage = list.find((t) => t.type === 'page' && telemostUrlMatches(t.url, botUrl));
@@ -215,7 +221,7 @@ async function connect(urls = loadTelemostUrls()) {
   const bot = await attachCdp(botPage);
   await warmPageChat(bot, botUrl);
 
-  if (!urls.stagingEnabled || !urls.stagingUrl) {
+  if (!urls.stagingEnabled || !urls.stagingUrl || !openStagingTab) {
     return {
       bot,
       staging: bot,
@@ -225,7 +231,18 @@ async function connect(urls = loadTelemostUrls()) {
   }
 
   const freshList = await listDevToolsPages();
-  const stagingPage = await findOrCreatePage(freshList, urls.stagingUrl);
+  let stagingPage;
+  try {
+    stagingPage = await findOrCreatePage(freshList, urls.stagingUrl);
+  } catch (e) {
+    console.log('staging tab unavailable, single-tab fallback', e.message || e);
+    return {
+      bot,
+      staging: bot,
+      dualTab: false,
+      close: () => bot.close(),
+    };
+  }
   const staging = await attachCdp(stagingPage);
   await warmPageChat(staging, urls.stagingUrl);
   console.log('dual-tab', 'bot', botPage.url || botUrl, 'staging', stagingPage.url || urls.stagingUrl);
@@ -3001,7 +3018,7 @@ async function main() {
   if (skipped.length) console.log('skip', skipped.join(' '));
   dirs = dirsForRun(dirs, { finalize, close });
   const urls = loadTelemostUrls();
-  const sessions = await connect(urls);
+  const sessions = await connect(urls, { openStagingTab: !peek });
   const bot = new Bot(sessions, urls);
   if (urls.stagingEnabled) {
     console.log('staging', urls.stagingUrl, 'window', urls.stagingWindow, sessions.dualTab ? 'dual-tab' : 'single-tab');

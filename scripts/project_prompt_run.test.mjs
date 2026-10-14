@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { issueBody, issueLinkReplySummary, issueTitle } from "./project_prompt_run.mjs";
+import {
+  issueBody,
+  issueLinkReplySummary,
+  issueTitle,
+  missingWorkerConfigError,
+} from "./project_prompt_run.mjs";
 import { projectFastAckSummary } from "../vm/project_prompt.js";
 
 test("issueTitle uses TG Project prefix and 60 char head", () => {
@@ -27,6 +32,12 @@ test("projectFastAckSummary truncates at 200 chars", () => {
   assert.match(summary, /^Принято: /);
   assert.match(summary, /Обработка в Project начата\.$/);
   assert.ok(summary.length < 300);
+});
+
+test("missingWorkerConfigError names TG2TM_PROGRESS_URL when empty", () => {
+  const msg = missingWorkerConfigError({ progressUrl: "", secret: "s", promptId: "tg-1" });
+  assert.match(msg, /TG2TM_PROGRESS_URL/);
+  assert.match(msg, /project\/prompt/);
 });
 
 test("issueLinkReplySummary mentions issue url", () => {

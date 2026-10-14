@@ -20,7 +20,29 @@ export function workerBaseFromProgressUrl(url) {
   return String(url || "").trim().replace(/\/progress\/?$/i, "");
 }
 
-export async function fetchPromptFromWorker({ workerBase: base, secret: bearer, promptId: id }) {
+export function missingWorkerConfigError({ progressUrl, secret, promptId }) {
+  const url = String(progressUrl || "").trim();
+  const bearer = String(secret || "").trim();
+  const id = String(promptId || "").trim();
+  if (!url) {
+    return (
+      "TG2TM_PROGRESS_URL is empty: set GitHub repo secret TG2TM_PROGRESS_URL to the worker progress endpoint " +
+      "(for example https://tg2tmbot.prtndz.workers.dev/progress). " +
+      "project-prompt uses the same base URL as telemost-session (script strips /progress for GET /project/prompt)."
+    );
+  }
+  if (!bearer) return "UPLOADER_SECRET is empty: set GitHub repo secret UPLOADER_SECRET to match the worker.";
+  if (!id) return "PROMPT_ID is empty: workflow must pass prompt_id from Worker KV.";
+  return "";
+}
+
+export async function fetchPromptFromWorker({ workerBase: base, secret: bearer, promptId: id, progressUrl } = {}) {
+  const cfgErr = missingWorkerConfigError({
+    progressUrl: progressUrl ?? (base ? `${base}/progress` : ""),
+    secret: bearer,
+    promptId: id,
+  });
+  if (cfgErr) throw new Error(cfgErr);
   if (!base || !bearer || !id) {
     throw new Error("missing worker url, secret, or prompt id");
   }
@@ -125,10 +147,12 @@ async function runIssueNotify() {
 
 async function main() {
   if (mode === "issue-notify") {
+    const notifyErr = missingWorkerConfigError({ progressUrl, secret, promptId });
+    if (notifyErr) throw new Error(notifyErr);
     await runIssueNotify();
     return;
   }
-  const loaded = await fetchPromptFromWorker({ workerBase, secret, promptId });
+  const loaded = await fetchPromptFromWorker({ workerBase, secret, promptId, progressUrl });
   if (mode === "fast-ack" || mode === "ack") {
     await runFastAck(loaded);
     return;
