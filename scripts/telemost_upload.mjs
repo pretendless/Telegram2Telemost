@@ -1861,6 +1861,34 @@ export function pictureNotAskedError(text, runUrl) {
   return url ? `${msg} ${url}` : msg;
 }
 
+// Before /newpack: an open picture dialog gets one /done. An emoji wait is not closed blindly.
+export function preNewpackAction(tailText) {
+  const body = String(tailText || '');
+  if (packDialogOpen(body)) return 'blocked';
+  if (unfinishedPack(body) || notAnImageReply(body) || wantsPicture(body)) return 'done';
+  return 'newpack';
+}
+
+// «Это не картинка» to /newpack: one /done, then one more /newpack. Never a loop.
+export function newpackReplyAction(text, doneSent) {
+  if (!notAnImageReply(text)) return 'continue';
+  return doneSent ? 'stop' : 'done-then-newpack';
+}
+
+export function doneClosedDialog(text) {
+  const body = String(text || '');
+  if (!body.trim()) return false;
+  if (notAnImageReply(body) || packDialogOpen(body)) return false;
+  return !unfinishedPack(body);
+}
+
+export function doneDidNotClose(text, runUrl) {
+  const shown = String(text || '').replace(/\s+/g, ' ').trim();
+  const url = String(runUrl || '').trim();
+  const msg = `/done did not close the open sticker dialog: ${shown}`;
+  return url ? `${msg} ${url}` : msg;
+}
+
 // Forward only a real buffer image, and only after the bot asked for one.
 export function canForwardBufferImage(botText, bubble) {
   if (!bubble || bubble.hasImage !== true || bubble.id == null) return false;
@@ -3209,7 +3237,8 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   if (!restart && plan.action === 'newpack' && !history.reachedTop && !unfinishedPack(tailText)) {
     throw new Error('chat history did not load; not sending images');
   }
-  if (plan.action === 'newpack' && unfinishedPack(tailText)) {
+  if (plan.action === 'newpack' && unfinishedPack(tailText)
+    && !(mustOpenNewPack(tm) && preNewpackAction(tailText) === 'done')) {
     throw new Error(`refusing /newpack while a pack is still open: ${tailText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
   }
   if (plan.action === 'saved') {
@@ -3296,13 +3325,35 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   } else if (mustOpenNewPack(tm)) {
     const before = await bot.recentIncoming(1);
     const beforeTail = latestIncomingText(before);
-    if (nextCommand(beforeTail, '/newpack') !== '/newpack') {
-      throw new Error(`refusing /newpack while a pack is still open: ${beforeTail.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+    let doneSent = false;
+    const sendDoneOnce = async (why) => {
+      if (doneSent) return;
+      doneSent = true;
+      console.log(dir, 'pre-newpack-done', why);
+      await note({ phase: 'done', pack: m.title, lastLine: screenLine(beforeTail) });
+      const closed = await bot.say('/done');
+      const closedText = String(closed.text || '').replace(/\s+/g, ' ').trim();
+      console.log(dir, 'pre-newpack-done-reply', closedText.slice(0, 400));
+      if (!doneClosedDialog(closedText)) {
+        throw new Error(doneDidNotClose(closedText, actionsRunUrl()));
+      }
+    };
+    const pre = preNewpackAction(beforeTail);
+    if (pre === 'blocked') {
+      throw new Error(`refusing /newpack while the bot waits for an emoji: ${beforeTail.replace(/\s+/g, ' ').trim().slice(0, 200)} ${actionsRunUrl()}`.trim());
     }
+    if (pre === 'done') await sendDoneOnce('open dialog before /newpack');
     await note({ phase: 'newpack', pack: m.title, lastLine: beforeTail });
-    const opened = await withRetry('newpack', () => bot.say('/newpack'));
-    const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
+    let opened = await withRetry('newpack', () => bot.say('/newpack'));
+    let openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'newpack-reply', openedText.slice(0, 400));
+    const after = newpackReplyAction(openedText, doneSent);
+    if (after === 'done-then-newpack') {
+      await sendDoneOnce('«Это не картинка» after /newpack');
+      opened = await bot.say('/newpack');
+      openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
+      console.log(dir, 'newpack-reply', openedText.slice(0, 400));
+    }
     if (notAnImageReply(openedText)) {
       throw new Error(notAnImageStop(openedText, actionsRunUrl()));
     }
