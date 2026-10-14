@@ -34,6 +34,7 @@ import {
   stagingRowsForForward,
   STAGING_FORWARD_POLL_MS,
   STAGING_FORWARD_MENU_LABELS,
+  STAGING_MESSAGE_ACTIONS_SELECTOR,
   menuLabelMatches,
   botRepliesAfterOwn,
   loadTelemostUrls,
@@ -508,6 +509,17 @@ test("menuLabelMatches accepts RU and EN forward menu labels", () => {
   assert.equal(menuLabelMatches("Forward to…", "Forward"), true);
   assert.equal(menuLabelMatches("Удалить", ""), false);
   assert.deepEqual([...STAGING_FORWARD_MENU_LABELS], ["Переслать сообщение", "Переслать", "Forward"]);
+});
+
+test("staging message menu uses deep press helpers and CDP hover", () => {
+  const src = readFileSync(new URL("./telemost_upload.mjs", import.meta.url), "utf8");
+  assert.match(src, /function tg2tmDeepWithin/);
+  assert.match(src, /function tg2tmPress/);
+  assert.match(src, /async cdpHover/);
+  assert.match(src, /async messageRowGeometry/);
+  assert.match(src, /async focusChatSurface/);
+  assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /Действия с сообщением/);
+  assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /MessageActions/i);
 });
 
 test("stagingRowsForForward prefers survey then merges live hasImage", async () => {

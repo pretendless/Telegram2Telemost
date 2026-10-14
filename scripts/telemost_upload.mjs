@@ -36,7 +36,63 @@ function tg2tmDeepMatch(sel) {
   tg2tmWalkDeep((node) => { if (node.matches && node.matches(sel)) out.push(node); });
   return out;
 }
+function tg2tmDeepWithin(root, sel) {
+  const out = [];
+  if (!root || root.nodeType !== 1) return out;
+  const stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || node.nodeType !== 1) continue;
+    if (node.matches && node.matches(sel)) out.push(node);
+    if (node.shadowRoot) stack.push(node.shadowRoot);
+    const ch = node.children;
+    if (ch) for (let i = ch.length - 1; i >= 0; i--) stack.push(ch[i]);
+  }
+  return out;
+}
+function tg2tmPress(el, button = 0) {
+  if (!el || !el.getBoundingClientRect) return false;
+  const b = el.getBoundingClientRect();
+  if (!b.width || !b.height) return false;
+  const clientX = b.x + b.width / 2;
+  const clientY = b.y + b.height / 2;
+  const buttons = button === 2 ? 2 : 1;
+  const o = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    clientX,
+    clientY,
+    button,
+    buttons,
+    pointerId: 1,
+    pointerType: 'mouse',
+    isPrimary: true,
+  };
+  el.dispatchEvent(new PointerEvent('pointerdown', { ...o, buttons }));
+  el.dispatchEvent(new MouseEvent(button === 2 ? 'mousedown' : 'mousedown', { ...o, buttons }));
+  if (button === 2) {
+    el.dispatchEvent(new MouseEvent('contextmenu', { ...o, buttons: 2 }));
+  } else {
+    el.dispatchEvent(new PointerEvent('pointerup', { ...o, buttons: 0 }));
+    el.dispatchEvent(new MouseEvent('mouseup', { ...o, buttons: 0 }));
+    el.dispatchEvent(new MouseEvent('click', { ...o, buttons: 0 }));
+  }
+  return true;
+}
 `;
+
+export const STAGING_MESSAGE_ACTIONS_SELECTOR = [
+  '[aria-label="Действия с сообщением"]',
+  '[aria-label="Ещё"]',
+  '[aria-label="More actions"]',
+  '[aria-label="Message actions"]',
+  '[aria-label="Дополнительно"]',
+  'button[aria-haspopup="menu"]',
+  '[class*="MessageActions" i] button',
+  '[class*="message-actions" i] button',
+  'button[aria-label*="Действия" i]',
+].join(', ');
 
 // Bot + staging chat URLs live in config/settings.json (overridable by env).
 export function loadTelemostUrls(env = process.env, settingsPath = join(ROOT, 'config', 'settings.json')) {
@@ -444,9 +500,9 @@ class Bot {
     const lit = JSON.stringify(String(label));
     for (let i = 0; i < 40; i++) {
       const ok = await this.c.ev(`(() => {
+        ${TG2TM_DEEP_WALK}
         const want = ${lit};
-        const nodes = [...document.querySelectorAll('button, [role="menuitem"], [role="button"], [aria-label], span, div')];
-        const el = nodes.find((e) => {
+        const match = (e) => {
           const aria = (e.getAttribute('aria-label') || '').trim();
           const text = (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim();
           if (aria === want || text === want) {
@@ -454,10 +510,11 @@ class Bot {
             return r.width > 0 && r.height > 0;
           }
           return false;
-        });
+        };
+        const nodes = tg2tmDeepMatch('button, [role="menuitem"], [role="button"], [aria-label], span, div');
+        const el = nodes.find(match);
         if (!el) return false;
-        el.click();
-        return true;
+        return tg2tmPress(el, 0);
       })()`);
       if (ok) return true;
       await sleep(POLL_MS);
@@ -471,6 +528,83 @@ class Bot {
       document.body && document.body.click();
     })()`);
     await sleep(80);
+  }
+
+  async focusChatSurface() {
+    await this.c.ev(`(() => {
+      const scroll = document.querySelector('.ui-InfiniteList-ScrollContainer');
+      if (scroll && scroll.focus) scroll.focus();
+      const input = document.querySelector('[contenteditable=true]');
+      if (input) input.focus();
+    })()`);
+    await sleep(60);
+  }
+
+  async cdpMouse(type, x, y, { button = 'none', clickCount = 0 } = {}) {
+    const bx = Math.round(Number(x) || 0);
+    const by = Math.round(Number(y) || 0);
+    const btn = button === 'right' ? 'right' : button === 'left' ? 'left' : 'none';
+    let buttons = 0;
+    if (type === 'mousePressed') buttons = btn === 'right' ? 2 : btn === 'left' ? 1 : 0;
+    await this.c.send('Input.dispatchMouseEvent', {
+      type,
+      x: bx,
+      y: by,
+      button: btn,
+      buttons,
+      clickCount: type === 'mouseMoved' ? 0 : clickCount || 1,
+    });
+  }
+
+  async cdpHover(x, y) {
+    await this.cdpMouse('mouseMoved', x, y);
+  }
+
+  async cdpClickAt(x, y, button = 'left') {
+    await this.cdpHover(x, y);
+    await sleep(40);
+    await this.cdpMouse('mousePressed', x, y, { button, clickCount: 1 });
+    await this.cdpMouse('mouseReleased', x, y, { button, clickCount: 1 });
+  }
+
+  async messageRowGeometry(ownId) {
+    const id = JSON.stringify(String(ownId));
+    const btnSel = JSON.stringify(STAGING_MESSAGE_ACTIONS_SELECTOR);
+    return this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const want = ${id};
+      const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+      if (!row) return { ok: false, reason: 'missing' };
+      row.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const media = row.querySelector('.yamb-message-row__attachment, .yamb-message-row__body, .yamb-message-row__content, img[src], video, canvas, [class*="attachment" i], [class*="Attachment" i]');
+      const target = media && media.getBoundingClientRect().width > 2 ? media : row;
+      const r = target.getBoundingClientRect();
+      const x = r.x + Math.min(r.width - 4, Math.max(4, r.width * 0.5));
+      const y = r.y + Math.min(r.height - 4, Math.max(4, r.height * 0.5));
+      const btnSel = ${btnSel};
+      const btns = tg2tmDeepWithin(row, btnSel).filter((e) => {
+        const b = e.getBoundingClientRect();
+        return b.width > 2 && b.height > 2;
+      });
+      let btn = btns[0] || null;
+      if (!btn) {
+        const near = tg2tmDeepMatch(btnSel).filter((e) => {
+          const b = e.getBoundingClientRect();
+          if (b.width < 2 || b.height < 2) return false;
+          return Math.abs(b.y + b.height / 2 - y) < 48;
+        });
+        btn = near[0] || null;
+      }
+      const br = btn ? btn.getBoundingClientRect() : null;
+      return {
+        ok: true,
+        x,
+        y,
+        hasBtn: !!btn,
+        btnX: br ? br.x + br.width / 2 : null,
+        btnY: br ? br.y + br.height / 2 : null,
+      };
+    })()`);
   }
 
   async waitForContextMenu(maxMs = 2500) {
@@ -488,8 +622,14 @@ class Bot {
           const items = [...menu.querySelectorAll('[role="menuitem"], button, [role="button"], li, a')].filter(vis);
           if (items.length >= 2) return true;
         }
-        const looseItems = tg2tmDeepMatch('[role="menuitem"]').filter(vis);
-        return looseItems.length >= 2;
+        const looseItems = tg2tmDeepMatch('[role="menuitem"], button, [role="button"]').filter(vis);
+        if (looseItems.length >= 2) return true;
+        const forwardish = looseItems.some((e) => {
+          const t = (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim();
+          const a = (e.getAttribute('aria-label') || '').trim();
+          return /пересл|forward|удал|delete|копир|copy/i.test(t + ' ' + a);
+        });
+        return forwardish;
       })()`);
       if (open) return true;
       await sleep(POLL_MS);
@@ -526,10 +666,7 @@ class Bot {
             ? tg2tmDeepMatch('button, [role="menuitem"], [role="button"], [aria-label], a, li, span, div')
             : nodes;
           const el = deepNodes.find(match);
-          if (el) {
-            el.click();
-            return true;
-          }
+          if (el) return tg2tmPress(el, 0);
         }
         return false;
       })()`);
@@ -557,50 +694,97 @@ class Bot {
   }
 
   async openMessageMenu(ownId) {
-    const id = JSON.stringify(String(ownId));
     let sawRow = false;
     let menuOpened = false;
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const mode = attempt % 4;
-      const step = await this.c.ev(`(() => {
-        const want = ${id};
-        const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
-        if (!row) return { ok: false, reason: 'missing' };
-        row.scrollIntoView({ block: 'center' });
-        const media = row.querySelector('.yamb-message-row__attachment, .yamb-message-row__body, .yamb-message-row__content, img[src], video, canvas, [class*="attachment" i], [class*="Attachment" i]');
-        const target = media && media.getBoundingClientRect().width > 2 ? media : row;
-        const r = target.getBoundingClientRect();
-        const x = r.x + Math.min(r.width - 4, Math.max(4, r.width * 0.5));
-        const y = r.y + Math.min(r.height - 4, Math.max(4, r.height * 0.5));
-        for (const type of ['mouseover', 'mouseenter', 'mousemove']) {
-          target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
-          row.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
-        }
-        const btnSel = '[aria-label="Действия с сообщением"], [aria-label="Ещё"], [aria-label="More actions"], [aria-label="Message actions"], [aria-label="Дополнительно"], button[aria-haspopup="menu"]';
-        const mode = ${mode};
-        const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2, buttons: 2 };
-        if (mode === 0 || mode === 2) {
-          const btn = row.querySelector(btnSel);
-          if (btn) btn.click();
-          else target.dispatchEvent(new MouseEvent('contextmenu', opts));
-        } else if (mode === 1) {
-          target.dispatchEvent(new MouseEvent('contextmenu', opts));
-        } else {
-          target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
-        }
-        return { ok: true, reason: 'opened' };
-      })()`);
-      if (!step || !step.ok) {
-        if (step && step.reason === 'missing') break;
+    await this.focusChatSurface();
+    const id = JSON.stringify(String(ownId));
+    const btnSel = JSON.stringify(STAGING_MESSAGE_ACTIONS_SELECTOR);
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const mode = attempt % 5;
+      const geom = await this.messageRowGeometry(ownId);
+      if (!geom || !geom.ok) {
+        if (geom && geom.reason === 'missing') break;
         continue;
       }
       sawRow = true;
-      if (await this.waitForContextMenu(attempt < 2 ? 2200 : 3200)) {
+      await this.cdpHover(geom.x, geom.y);
+      await sleep(mode === 4 ? 520 : 160);
+      if (mode === 0 && geom.hasBtn && geom.btnX != null && geom.btnY != null) {
+        await this.cdpClickAt(geom.btnX, geom.btnY, 'left');
+      } else if (mode === 1) {
+        await this.cdpClickAt(geom.x, geom.y, 'right');
+      } else if (mode === 2) {
+        await this.c.ev(`(() => {
+          ${TG2TM_DEEP_WALK}
+          const want = ${id};
+          const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+          if (!row) return false;
+          const media = row.querySelector('.yamb-message-row__attachment, .yamb-message-row__body, .yamb-message-row__content, img[src], video, canvas, [class*="attachment" i], [class*="Attachment" i]');
+          const target = media && media.getBoundingClientRect().width > 2 ? media : row;
+          const r = target.getBoundingClientRect();
+          const x = r.x + Math.min(r.width - 4, Math.max(4, r.width * 0.5));
+          const y = r.y + Math.min(r.height - 4, Math.max(4, r.height * 0.5));
+          for (const type of ['pointerover', 'pointerenter', 'pointermove', 'mouseover', 'mouseenter', 'mousemove']) {
+            const o = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse' };
+            target.dispatchEvent(new PointerEvent(type, o));
+            row.dispatchEvent(new PointerEvent(type, o));
+          }
+          const btnSel = ${btnSel};
+          const btn = tg2tmDeepWithin(row, btnSel).find((e) => e.getBoundingClientRect().width > 2);
+          if (btn) return tg2tmPress(btn, 0);
+          return tg2tmPress(target, 2);
+        })()`);
+      } else if (mode === 3) {
+        await this.c.ev(`(() => {
+          ${TG2TM_DEEP_WALK}
+          const want = ${id};
+          const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+          if (!row) return false;
+          const media = row.querySelector('.yamb-message-row__attachment, .yamb-message-row__body, .yamb-message-row__content, img[src], video, canvas, [class*="attachment" i], [class*="Attachment" i]');
+          const target = media && media.getBoundingClientRect().width > 2 ? media : row;
+          const b = target.getBoundingClientRect();
+          const clientX = b.x + b.width / 2;
+          const clientY = b.y + b.height / 2;
+          const o = { bubbles: true, cancelable: true, composed: true, clientX, clientY, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+          target.dispatchEvent(new PointerEvent('pointerdown', o));
+          target.dispatchEvent(new MouseEvent('mousedown', o));
+          return true;
+        })()`);
+        await sleep(650);
+        await this.c.ev(`(() => {
+          ${TG2TM_DEEP_WALK}
+          const want = ${id};
+          const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+          if (!row) return false;
+          const media = row.querySelector('.yamb-message-row__attachment, .yamb-message-row__body, .yamb-message-row__content, img[src], video, canvas, [class*="attachment" i], [class*="Attachment" i]');
+          const target = media && media.getBoundingClientRect().width > 2 ? media : row;
+          const b = target.getBoundingClientRect();
+          const clientX = b.x + b.width / 2;
+          const clientY = b.y + b.height / 2;
+          const o = { bubbles: true, cancelable: true, composed: true, clientX, clientY, button: 0, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+          target.dispatchEvent(new PointerEvent('pointerup', o));
+          target.dispatchEvent(new MouseEvent('mouseup', o));
+          target.dispatchEvent(new MouseEvent('contextmenu', { ...o, button: 2, buttons: 2 }));
+          return true;
+        })()`);
+      } else {
+        await this.c.ev(`(() => {
+          ${TG2TM_DEEP_WALK}
+          const want = ${id};
+          const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+          if (!row) return false;
+          const btnSel = ${btnSel};
+          const btn = tg2tmDeepWithin(row, btnSel).find((e) => e.getBoundingClientRect().width > 2)
+            || tg2tmDeepMatch(btnSel).find((e) => e.getBoundingClientRect().width > 2);
+          return btn ? tg2tmPress(btn, 0) : false;
+        })()`);
+      }
+      if (await this.waitForContextMenu(attempt < 3 ? 2400 : 3600)) {
         menuOpened = true;
         return;
       }
       await this.dismissOverlay();
-      await sleep(150);
+      await sleep(120);
     }
     if (!sawRow) throw new Error(`staging forward: message ${ownId} not found`);
     if (!menuOpened) throw new Error(`staging forward: context menu did not open for ${ownId}`);
