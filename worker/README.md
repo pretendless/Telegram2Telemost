@@ -16,6 +16,8 @@ uploader  --Bearer-->   POST /progress   Worker  --KV-->           подпис�
 - `POST /telegram` — обновления Telegram. Заголовок `X-Telegram-Bot-Api-Secret-Token` равен секрету `WEBHOOK_SECRET`.
 - `POST /progress` — ход загрузки. Заголовок `Authorization: Bearer <UPLOADER_SECRET>`. Тело: `slug`, `title`, `source`, `status` (`pending` / `uploading` / `done` / `error`), `uploaded`, `total`, `packUrl`, `error`, `requesterChatId`, `queueRequestId`. Можно прислать и блок `telemost` из `pack.json`.
 - `POST /session-started` — один раз на run Actions: `runId`, `url`, `reason` (или `mode` для подписи по умолчанию).
+- `GET /project/prompt?id=<prompt_id>` — текст запроса из `/project` (Bearer `UPLOADER_SECRET`). Workflow `project-prompt.yml` читает перед созданием issue.
+- `POST /project/reply` — краткий ответ в админ-чат Telegram: `{ "id": "<prompt_id>", "summary": "…", "chatId"?: "…", "issueUrl"?: "…" }` (Bearer `UPLOADER_SECRET`). Вызывают Actions или cloud agent после обработки в Cursor Project.
 - «Готово» подписчику и пост в канал уходят только когда `packUrl` — настоящая ссылка `http(s)`. Пока её нет, воркер лишь помнит статус. Если «готово» уже уходило без ссылки, следующее сообщение со ссылкой досылает её и тогда же публикует пост.
 - Пост в канале — название и ссылка Телемоста, без `t.me/addstickers`.
 - KV `BOT_KV`: `sub:<chat id>`, `await:<chat id>` (ждёт сообщение после `/create`), `state:<slug>`, `pack:<slug>`, `meta:seeded`, один ключ `queue` (приоритетные chat id и очередь запросов).

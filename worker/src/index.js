@@ -56,6 +56,8 @@ import {
   queueHasQueuedWork,
 } from "./logic.js";
 import { loadAdminQueueState, reconcileTerminalUploadingFromProgress } from "./queue_view.js";
+import { applyProjectReply, handleProjectCommand, readProjectPrompt } from "./project_prompt.js";
+import { normalizeProjectReplyBody } from "../../vm/project_prompt.js";
 
 export function botToken(env) {
   return env.TG2TMBOT_TOKEN || env.TELEGRAM_BOT_TOKEN || "";
@@ -394,6 +396,46 @@ async function finishQueueItem(env, pack, prev, deps) {
   return released.queue;
 }
 
+async function handleProjectPromptGet(request, env) {
+  const secret = env.UPLOADER_SECRET || "";
+  if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
+  const id = new URL(request.url).searchParams.get("id") || "";
+  if (!id) return json({ ok: false, error: "id" }, 400);
+  const record = await readProjectPrompt(env.BOT_KV, id);
+  if (!record) return json({ ok: false, error: "not found" }, 404);
+  return json({
+    ok: true,
+    id: record.id,
+    chatId: record.chatId,
+    prompt: record.prompt,
+    status: record.status,
+    createdAt: record.createdAt,
+    issueUrl: record.issueUrl || null,
+  });
+}
+
+async function handleProjectReply(request, env, deps) {
+  const secret = env.UPLOADER_SECRET || "";
+  if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
+  const raw = await request.text();
+  if (raw.length > 16384) return new Response("too big", { status: 413 });
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ ok: false, error: "bad json" }, 400);
+  }
+  let reply;
+  try {
+    reply = normalizeProjectReplyBody(body);
+  } catch (err) {
+    return json({ ok: false, error: err.message }, 400);
+  }
+  const sendMessage = deps.sendMessage || defaultSend;
+  const result = await applyProjectReply(env, reply, { sendMessage, ...deps });
+  return json({ ok: result.ok, error: result.error, chatId: result.chatId }, result.status);
+}
+
 async function handleDrainComplete(request, env, deps) {
   const secret = env.UPLOADER_SECRET || "";
   if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
@@ -685,6 +727,9 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
     await handleVmCommand(env, message, { send, fetch: deps.fetch });
     return;
+  } else if (cmd === "/project") {
+    await handleProjectCommand(env, message, { send, fetch: deps.fetch, now: deps.now });
+    return;
   } else if (cmd) {
     return;
   } else {
@@ -798,6 +843,12 @@ export async function handle(request, env, deps = {}) {
   if (request.method === "GET" && url.pathname === "/queue/plan") return handlePlan(request, env);
   if (request.method === "POST" && url.pathname === "/queue/drain-complete") {
     return handleDrainComplete(request, env, deps);
+  }
+  if (request.method === "GET" && url.pathname === "/project/prompt") {
+    return handleProjectPromptGet(request, env);
+  }
+  if (request.method === "POST" && url.pathname === "/project/reply") {
+    return handleProjectReply(request, env, deps);
   }
   if (request.method === "POST" && url.pathname === "/telegram") return handleTelegram(request, env, send, stickerCount, deps);
   return new Response("not found", { status: 404 });

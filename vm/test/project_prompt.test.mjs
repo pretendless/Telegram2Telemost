@@ -1,0 +1,48 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  buildProjectPromptDispatch,
+  newPromptId,
+  normalizeProjectReplyBody,
+  parseProjectCommand,
+  projectPromptKey,
+} from "../project_prompt.js";
+
+test("parseProjectCommand requires non-empty body", () => {
+  assert.deepEqual(parseProjectCommand("/project"), { error: "empty" });
+  assert.deepEqual(parseProjectCommand("/project   "), { error: "empty" });
+  assert.deepEqual(parseProjectCommand("/project@tg2tmbot что нового?"), { prompt: "что нового?" });
+  assert.equal(parseProjectCommand("/restart"), null);
+});
+
+test("newPromptId is stable prefix", () => {
+  const id = newPromptId(() => new Date("2026-10-14T12:00:00.000Z"));
+  assert.match(id, /^tg-2026-10-14T12-00-00-000Z/);
+});
+
+test("buildProjectPromptDispatch targets project-prompt workflow", () => {
+  const built = buildProjectPromptDispatch({
+    repo: "pretendless/tg2tm",
+    promptId: "tg-1",
+    chatId: 8502935020,
+  });
+  assert.equal(
+    built.url,
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/project-prompt.yml/dispatches",
+  );
+  assert.deepEqual(built.body.inputs, { prompt_id: "tg-1", chat_id: "8502935020" });
+});
+
+test("normalizeProjectReplyBody", () => {
+  assert.deepEqual(normalizeProjectReplyBody({ id: "tg-1", summary: "ok" }), {
+    id: "tg-1",
+    summary: "ok",
+    chatId: null,
+    issueUrl: null,
+  });
+  assert.throws(() => normalizeProjectReplyBody({ summary: "x" }), /id/);
+});
+
+test("projectPromptKey", () => {
+  assert.equal(projectPromptKey("tg-1"), "project:prompt:tg-1");
+});

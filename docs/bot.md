@@ -27,6 +27,7 @@
 | `/skip` | Пометить текущую «загружается» как ошибку и перейти к следующему в очереди (если Actions не идут) |
 | `/status` | Кратко: `идёт` / `простаивает` и текущий пак |
 | `/restart` | Прервать текущий Actions и один новый запуск с `main`; выбор пака — только **queued/uploading** из KV, не «призраки» из каталога `packs/07…` без активной строки очереди |
+| `/project` | Вопрос или задача для Cursor Project: текст сохраняется в KV, дублируется в чат для копирования, запускается workflow `project-prompt.yml` (issue в GitHub). Краткий ответ приходит отдельным сообщением после `POST /project/reply` |
 | `/login`, `/connect`, `/upload` | Запуск браузера / ручная загрузка (как раньше) |
 
 При **каждом новом** запуске workflow Telemost в админ-чат приходит одно сообщение: **причина** (новый запрос в очереди, следующий пак, `/restart`, `/login`, …) и ссылка на run Actions. Ход загрузки по-прежнему правит одну **карточку** «стикер N из TOTAL».
@@ -44,6 +45,6 @@
 Список у BotFather обновляет `worker/setup-bot.mjs` (`npm run setup-bot` в каталоге `worker/`).
 
 - **Все чаты** — `USER_COMMANDS`: `/start`, `/create`, `/format`, `/status`, `/stop`.
-- **Админ-чаты** из `LOGIN_CHAT_IDS` (воркер и переменная окружения при `setup-bot`) — полный список `ADMIN_COMMANDS`: пользовательские команды плюс `/queue`, `/unstick`, `/skip`, `/restart`, `/login`, `/connect`, `/upload` (scope `chat` в API Telegram).
+- **Админ-чаты** из `LOGIN_CHAT_IDS` (воркер и переменная окружения при `setup-bot`) — полный список `ADMIN_COMMANDS`: пользовательские команды плюс `/queue`, `/unstick`, `/skip`, `/restart`, `/project`, `/login`, `/connect`, `/upload` (scope `chat` в API Telegram).
 
 `/help` в меню нет — работает как `/start`.
