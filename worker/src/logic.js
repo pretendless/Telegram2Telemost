@@ -34,7 +34,7 @@ export const START =
   "\n" +
   FORMAT +
   `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
-  "\n\nПришлите сообщение в таком виде — бот проверит название, ссылки и число стикеров." +
+  "\n\nСначала /create — затем одним сообщением название и ссылки (см. /format). Бот проверит набор и поставит его в очередь." +
   "\n\nВы подписаны на ход переноса: бот напишет, когда пак начнёт загружаться, как идёт загрузка и пришлёт ссылку на готовый пак в Телемосте. /status — текущее состояние, /stop — отписаться.";
 
 export const DESCRIPTION =
@@ -50,8 +50,22 @@ export const DESCRIPTION =
 
 export const ABOUT = "Переносит стикеры из Telegram в Телемост.";
 
+export const CREATE_PROMPT =
+  "Жду описание пака одним сообщением.\n\n" +
+  "Первая строка — название, дальше ссылки t.me/addstickers/… (подробнее — /format).";
+
+export const NEED_CREATE =
+  "Сначала отправьте /create, затем одним сообщением название и ссылки t.me/addstickers/…\n\nПодробнее — /format.";
+
+export const AWAIT_CREATE_PREFIX = "await:";
+
+export function awaitCreateKey(chatId) {
+  return `${AWAIT_CREATE_PREFIX}${chatId}`;
+}
+
 export const COMMANDS = [
   { command: "start", description: "Как пользоваться" },
+  { command: "create", description: "Новый запрос на перенос" },
   { command: "status", description: "Ход переноса" },
   { command: "format", description: "Формат запроса" },
   { command: "example", description: "Пример набора" },
@@ -320,6 +334,15 @@ function sameRequest(left, right) {
   );
 }
 
+function duplicateDoneRequest(queue, request) {
+  const title = String(request.title || "").trim();
+  return queue.items.find(
+    (item) =>
+      item.status === "done" &&
+      (item.title === title || sameLinks(item.links, request.links)),
+  );
+}
+
 // One document, so accepting a request is one KV write. Identical open or finished requests are not written again.
 export function enqueueRequest(queue, request) {
   const open = queue.items.find(
@@ -330,6 +353,8 @@ export function enqueueRequest(queue, request) {
   if (open) return { queue, item: open, created: false, duplicate: "open" };
   const done = queue.items.find((item) => sameRequest(item, request) && item.status === "done");
   if (done) return { queue, item: done, created: false, duplicate: "done" };
+  const doneGlobally = duplicateDoneRequest(queue, request);
+  if (doneGlobally) return { queue, item: doneGlobally, created: false, duplicate: "done" };
   const createdAt = request.createdAt;
   const item = {
     id: `${createdAt}-${queue.items.length}`,
@@ -791,9 +816,13 @@ export function resolveRequesterChatId(pack, item) {
   return null;
 }
 
+export function activeProgressPacks(packs) {
+  return (packs || []).filter((pack) => pack && !terminalProgress(pack));
+}
+
 export function statusText(packs) {
-  const sorted = [...packs].sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
-  if (!sorted.length) return "Перенос в Телемост: паков пока нет.";
+  const sorted = activeProgressPacks(packs).sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
+  if (!sorted.length) return "Перенос в Телемост: активных паков нет.";
   const rows = sorted.map((pack) => {
     let line = `${STATUS_RU[pack.status] || pack.status}: «${pack.title}» — ${pack.uploaded}/${pack.total}`;
     if (pack.url) line += `\n   ${pack.url}`;

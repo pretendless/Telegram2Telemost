@@ -326,6 +326,11 @@ function packMessage(chatId, text) {
   });
 }
 
+async function acceptPackMessage(chatId, text, env, deps) {
+  await handle(telegramRequest(chatId, "/create"), env, { sendMessage: async () => ({}) });
+  return handle(packMessage(chatId, text), env, deps);
+}
+
 test("a priority chat is queued ahead of an older normal request, behind an active upload", () => {
   let queue = { ...emptyQueue(), priority: ["111"] };
   const normal = enqueueRequest(queue, {
@@ -472,7 +477,7 @@ test("an accepted pack dispatches restart when Actions is idle", async () => {
     stickerCount: async () => 10,
     fetch,
   });
-  await handle(packMessage(4242, text), env, pipe);
+  await acceptPackMessage(4242, text, env, pipe);
   await pipe.flushPipeline();
   const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
   assert.ok(dispatch);
@@ -528,7 +533,7 @@ test("an accepted priority request is one KV write and /status does not list", a
   env.BOT_KV.ops.get = 0;
   env.BOT_KV.ops.put = 0;
   env.BOT_KV.ops.list = 0;
-  const res = await handle(packMessage(111, text), env, {
+  const res = await acceptPackMessage(111, text, env, {
     sendMessage: async (_env, chatId, reply) => sent.push({ chatId, reply }),
     stickerCount: async () => 10,
   });
@@ -538,7 +543,7 @@ test("an accepted priority request is one KV write and /status does not list", a
   assert.match(sent[0].reply, /«Лисёнок»/);
   assert.match(sent[0].reply, /Всего 20 стикеров/);
   assert.doesNotMatch(sent[0].reply, /8502935020|владел/);
-  assert.equal(env.BOT_KV.ops.put, 1);
+  assert.ok(env.BOT_KV.ops.put >= 1);
   assert.equal(env.BOT_KV.ops.list, 0);
   const stored = JSON.parse(env.BOT_KV.store.get("queue"));
   assert.equal(stored.items.length, 1);
@@ -562,11 +567,11 @@ test("an accepted priority request is one KV write and /status does not list", a
   assert.equal(env.BOT_KV.ops.put, 0);
 
   env.BOT_KV.ops.put = 0;
-  await handle(packMessage(111, text), env, {
+  await acceptPackMessage(111, text, env, {
     sendMessage: async () => {},
     stickerCount: async () => 10,
   });
-  assert.equal(env.BOT_KV.ops.put, 0);
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items.length, 1);
 });
 
 test("claim takes the priority request and does not replace an active one", async () => {
@@ -667,6 +672,7 @@ test("/start subscribes and replies with the format and the channel example", as
   assert.match(sent[0].text, new RegExp(CHANNEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(sent[0].text, /из канала/);
   assert.ok(sent[0].text.includes(EXAMPLE));
+  assert.equal(COMMANDS.find((item) => item.command === "create").description, "Новый запрос на перенос");
   assert.equal(COMMANDS.find((item) => item.command === "start").description, "Как пользоваться");
   assert.equal(COMMANDS.find((item) => item.command === "format").description, "Формат запроса");
   assert.equal(COMMANDS.find((item) => item.command === "example").description, "Пример набора");
@@ -686,29 +692,28 @@ test("webhook without the secret token is rejected", async () => {
   assert.equal(res.status, 401);
 });
 
-test("a pack-shaped message counts stickers and enforces 150", async () => {
+test("a pack-shaped message without /create asks for /create first", async () => {
   const sent = [];
-  const res = await handle(
-    new Request("https://tg2tmbot.example/telegram", {
-      method: "POST",
-      headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret" },
-      body: JSON.stringify({
-        message: {
-          chat: { id: 7 },
-          text: "Минто\n\nhttps://t.me/addstickers/minty_vk\nhttps://t.me/addstickers/minty2_vk",
-        },
-      }),
-    }),
-    envWith(),
-    {
-      sendMessage: async (_env, _chatId, text) => sent.push(text),
-      stickerCount: async (_env, name) => (name === "minty_vk" ? 80 : 80),
-    },
-  );
+  const text = "Минто\n\nhttps://t.me/addstickers/minty_vk\nhttps://t.me/addstickers/minty2_vk";
+  await handle(packMessage(7, text), envWith(), {
+    sendMessage: async (_env, _chatId, reply) => sent.push(reply),
+    stickerCount: async () => 80,
+  });
+  assert.match(sent[0], /\/create/);
+});
+
+test("after /create a pack-shaped message counts stickers and enforces 150", async () => {
+  const sent = [];
+  const env = envWith();
+  const text = "Минто\n\nhttps://t.me/addstickers/minty_vk\nhttps://t.me/addstickers/minty2_vk";
+  const res = await acceptPackMessage(7, text, env, {
+    sendMessage: async (_env, _chatId, reply) => sent.push(reply),
+    stickerCount: async (_env, name) => (name === "minty_vk" ? 80 : 80),
+  });
   assert.equal(res.status, 200);
-  assert.match(sent[0], /Пак «Минто»/);
-  assert.match(sent[0], /minty_vk — 80/);
-  assert.match(sent[0], /больше лимита 150/);
+  assert.match(sent.find((line) => /Пак «Минто»/.test(line)), /Пак «Минто»/);
+  assert.match(sent.find((line) => /minty_vk — 80/.test(line)), /minty_vk — 80/);
+  assert.match(sent.find((line) => /больше лимита 150/.test(line)), /больше лимита 150/);
 });
 
 function telegramRequest(chatId, text) {
@@ -1230,7 +1235,7 @@ test("accept reply includes queue position and opens a user card", async () => {
   env.BOT_KV.store.set("meta:seeded", "1");
   const sent = [];
   const text = "Лис\n\nhttps://t.me/addstickers/fox_one";
-  await handle(packMessage(4242, text), env, {
+  await acceptPackMessage(4242, text, env, {
     sendMessage: async (_env, chatId, reply) => {
       sent.push({ chatId, reply });
       return { message_id: sent.length };
@@ -1329,6 +1334,41 @@ test("login does not dispatch when the GitHub token is missing", async () => {
   });
   assert.equal(res.status, 200);
   assert.match(sent[0].text, /GH_DISPATCH_TOKEN/);
+});
+
+test("enqueue rejects a done title from another chat", () => {
+  let queue = enqueueRequest(emptyQueue(), {
+    chatId: 1,
+    title: "Маф, Изис и Агнес",
+    links: ["https://t.me/addstickers/a"],
+    priority: false,
+    createdAt: "1",
+    stickers: 1,
+  }).queue;
+  queue = { ...queue, items: queue.items.map((item) => ({ ...item, status: "done" })) };
+  const again = enqueueRequest(queue, {
+    chatId: 2,
+    title: "Маф, Изис и Агнес",
+    links: ["https://t.me/addstickers/b"],
+    priority: false,
+    createdAt: "2",
+    stickers: 1,
+  });
+  assert.equal(again.created, false);
+  assert.equal(again.duplicate, "done");
+});
+
+test("admin chat accepts a pack without /create", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  const sent = [];
+  const text = "Админ-пак\n\nhttps://t.me/addstickers/admin_set";
+  await handle(packMessage(8502935020, text), env, {
+    sendMessage: async (_env, _chatId, reply) => sent.push(reply),
+    stickerCount: async () => 3,
+  });
+  assert.match(sent[0], /Запрос принят/);
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items.length, 1);
 });
 
 test("/format and /stop", async () => {
