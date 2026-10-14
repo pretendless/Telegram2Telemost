@@ -33,6 +33,8 @@ import {
   resolveStagingForwardId,
   stagingRowsForForward,
   STAGING_FORWARD_POLL_MS,
+  STAGING_FORWARD_MENU_LABELS,
+  menuLabelMatches,
   botRepliesAfterOwn,
   loadTelemostUrls,
   stagingFillTo,
@@ -497,6 +499,15 @@ test("resolveStagingForwardId polls until staged rows appear", async () => {
   assert.equal(await resolveStagingForwardId(bot, 0, 1), "2");
   assert.ok(calls >= 3);
   assert.ok(STAGING_FORWARD_POLL_MS >= 8000);
+});
+
+test("menuLabelMatches accepts RU and EN forward menu labels", () => {
+  assert.equal(menuLabelMatches("Переслать", ""), true);
+  assert.equal(menuLabelMatches("Переслать сообщение", ""), true);
+  assert.equal(menuLabelMatches("", "Forward"), true);
+  assert.equal(menuLabelMatches("Forward to…", "Forward"), true);
+  assert.equal(menuLabelMatches("Удалить", ""), false);
+  assert.deepEqual([...STAGING_FORWARD_MENU_LABELS], ["Переслать", "Forward"]);
 });
 
 test("stagingRowsForForward prefers survey then merges live hasImage", async () => {
