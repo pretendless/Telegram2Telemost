@@ -218,11 +218,18 @@ function countOf(value, label) {
   return Math.floor(n);
 }
 
+function optionalHttpUrl(value) {
+  const text = String(value || "").trim();
+  if (!/^https?:\/\//i.test(text)) return null;
+  return text.slice(0, 300);
+}
+
 export function normalizeProgress(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("body");
   const telemost = body.telemost && typeof body.telemost === "object" ? body.telemost : {};
   const slug = String(body.slug || "").trim();
-  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) throw new Error("slug");
+  // Request ids keep the ISO "T" and "Z" (request-2026-10-13T180955555Z-2).
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(slug)) throw new Error("slug");
   const title = String(body.title || "").replace(/\s+/g, " ").trim();
   if (!title || title.length > 200) throw new Error("title");
   const status = body.status || telemost.status || "pending";
@@ -241,6 +248,7 @@ export function normalizeProgress(body) {
     ),
     url: realPackUrl(body.packUrl !== undefined ? body.packUrl : telemost.packUrl),
     error: error ? String(error).slice(0, 500) : null,
+    runUrl: optionalHttpUrl(body.runUrl),
     adminDelivered: Boolean(body.adminDelivered),
     lastLine: body.lastLine ? String(body.lastLine).slice(0, 300) : null,
     phase: typeof body.phase === "string" ? body.phase.slice(0, 40) : null,

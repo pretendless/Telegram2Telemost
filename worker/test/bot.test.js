@@ -165,6 +165,25 @@ test("nested pack.json telemost block is accepted", () => {
   assert.equal(waiting.url, null);
 });
 
+test("request pack slugs from ISO ids are accepted and keep the run url", () => {
+  const slug = "request-2026-10-13T180955555Z-2";
+  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38602403732";
+  const normalized = normalizeProgress({
+    slug,
+    title: "Дьяволица",
+    status: "error",
+    uploaded: 0,
+    total: 116,
+    error: "fetch failed for /opt/tg2tm/packs/request-2026-10-13T180955555Z-2",
+    runUrl,
+  });
+  assert.equal(normalized.slug, slug);
+  assert.equal(normalized.uploaded, 0);
+  assert.equal(normalized.total, 116);
+  assert.equal(normalized.runUrl, runUrl);
+  assert.throws(() => normalizeProgress({ slug: "../etc", title: "x", status: "error", uploaded: 0, total: 1 }), /slug/);
+});
+
 function progressRequest(body, secret = "uploader-secret") {
   return new Request("https://tg2tmbot.example/progress", {
     method: "POST",

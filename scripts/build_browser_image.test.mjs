@@ -31,6 +31,15 @@ test('browser Dockerfile copies telemost upload and queue-drain scripts', () => 
   assert.match(dockerfile, /requirements-fetch\.txt/, 'fetch pip deps are installed in the browser image');
   assert.match(dockerfile, /python3-pil/, 'Pillow comes from apt for fetch_and_convert.py');
   assert.match(dockerfile, /worker\/src\/logic\.js/, 'admin_status.mjs imports worker/src/logic.js');
+  assert.match(dockerfile, /chmod 777 \.cache/, 'queue drain fetch runs as the runner uid and must write .cache');
+});
+
+test('the Telemost session mounts a writable sticker cache and forwards the Actions run id', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/telemost-session.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /\$PWD\/\.cache:\/opt\/tg2tm\/\.cache/);
+  assert.match(workflow, /-e GITHUB_RUN_ID/);
+  assert.match(workflow, /-e RUN_URL/);
+  assert.match(workflow, /github\.server_url.*actions\/runs/);
 });
 
 test('the image build reuses one GitHub Actions cache scope', () => {

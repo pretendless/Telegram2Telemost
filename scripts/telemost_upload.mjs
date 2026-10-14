@@ -2198,6 +2198,7 @@ function openAdminFeed(dirRef) {
         total: Number.isFinite(total) ? total : 0,
         packUrl: event.link || null,
         error: event.error || null,
+        runUrl: event.runUrl || null,
         lastLine: event.lastLine || null,
         phase: event.phase,
         requester: dirRef.requesterChatId || null,
