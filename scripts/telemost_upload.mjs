@@ -308,17 +308,19 @@ class Bot {
     await this.ensureChat();
     await this.c.ev(`(() => { const s = document.querySelector('.ui-InfiniteList-ScrollContainer'); if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight; })()`);
     const slice = Math.max(1, Number(limit) || 4);
-    const text = await this.c.ev(`(() => {
+    const bubbles = await this.c.ev(`(() => {
       const rows = [...document.querySelectorAll('article.message')].filter(a => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
-      return rows.slice(-${slice}).map(a => (a.innerText || '').trim()).filter(Boolean).join('\\n');
+      return rows.slice(-${slice}).map((row) => ({
+        text: (row.innerText || '').trim(),
+        links: [...row.querySelectorAll('a[href]')].map((a) => a.href),
+      })).filter((b) => b.text);
     })()`);
+    const list = bubbles || [];
+    const text = list.map((b) => b.text).join('\n');
     // The command menu can be the last bubble. The pack URL sits on the
     // «сохранён» message just above it, so scan the whole recent window.
-    const links = await this.c.ev(`(() => {
-      const rows = [...document.querySelectorAll('article.message')].filter(a => a.querySelector('.yamb-message-row') && !a.querySelector('.yamb-message-row_own'));
-      return rows.slice(-${slice}).flatMap((row) => [...row.querySelectorAll('a[href]')].map((a) => a.href));
-    })()`);
-    return { text: text || '', links: links || [] };
+    const links = list.flatMap((b) => b.links || []);
+    return { text: text || '', links: links || [], bubbles: list };
   }
 
   async clickSend(inDialog) {
@@ -1019,6 +1021,49 @@ export function unfinishedPack(text) {
   return false;
 }
 
+const INCOMING_BLOCK_START = /^(?:Набор\s|[\u00AB"\u201C\u201E']|Создан набор|Стикер готов|Отправьте|Пришлите|Это не|Напишите название|\/newpack)/;
+
+// When recentIncoming joins several bot bubbles, SAVED on an older line must not
+// hide an open draft in the newest bubble.
+export function incomingTailText(text) {
+  const body = String(text || '').trim();
+  if (!body) return '';
+  const lines = body.split('\n');
+  let start = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].replace(/\s+/g, ' ').trim();
+    if (!line || isClockLine(line)) continue;
+    if (INCOMING_BLOCK_START.test(line) || SAVED.test(line) || CREATED.test(line) || COMMAND_MENU.test(line)) {
+      start = i;
+    }
+  }
+  return lines.slice(start).join('\n').trim();
+}
+
+export function unfinishedPackTail(text) {
+  return unfinishedPack(incomingTailText(text));
+}
+
+function isCommandMenuBubble(text) {
+  const body = String(text || '');
+  return COMMAND_MENU.test(body) && /\/done/.test(body);
+}
+
+// Open/idle decisions use only the newest bot bubble (skip a trailing menu).
+export function latestIncomingText(incoming) {
+  const bubbles = incoming?.bubbles;
+  if (Array.isArray(bubbles) && bubbles.length) {
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const t = String(bubbles[i].text || '').trim();
+      if (!t) continue;
+      if (isCommandMenuBubble(t)) continue;
+      return t;
+    }
+    return String(bubbles[bubbles.length - 1].text || '').trim();
+  }
+  return incomingTailText(String(incoming?.text || incoming || ''));
+}
+
 const CREATED_TITLE = /Создан набор(?: стикеров)?\s*[\u00AB"\u201C\u201E']([^»"\u201D']+)[\u00BB"\u201D']/;
 
 // The last created title that has not been saved. Any pack, not one fixed name.
@@ -1378,15 +1423,16 @@ export async function closeOpenBotPackBeforeNew(bot, note, { label = 'перез
   const history = await bot.surveyChat();
   const live = await bot.recentIncoming(2);
   const liveText = String(live.text || '');
-  if (!unfinishedPack(liveText)) {
+  const tailText = latestIncomingText(live);
+  if (!unfinishedPack(tailText)) {
     return { action: 'idle', closedText: liveText, liveText, title: '' };
   }
 
-  const plan = closeOpenPackPlan(liveText, history.messages);
+  const plan = closeOpenPackPlan(tailText, history.messages);
   await note({
     phase: 'done',
     pack: label,
-    lastLine: lastLine || screenLine(liveText),
+    lastLine: lastLine || screenLine(tailText),
   });
 
   let closedText = '';
@@ -1405,12 +1451,12 @@ export async function closeOpenBotPackBeforeNew(bot, note, { label = 'перез
     const closed = await withRetry('close-before-new-done', () => bot.say('/done'));
     closedText = String(closed.text || '');
     console.log('close-before-new-done', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
-    if (restartAfterClose(closedText).action === 'stop' && shouldAbandonOpenPack(liveText, history.messages)) {
+    if (restartAfterClose(closedText).action === 'stop' && shouldAbandonOpenPack(tailText, history.messages)) {
       closedText = await tryAbandon();
       console.log('close-before-new-abandon-fallback', closedText.replace(/\s+/g, ' ').trim().slice(0, 400));
     }
   } else {
-    throw new Error(`refusing /newpack while a pack is still open: ${liveText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+    throw new Error(`refusing /newpack while a pack is still open: ${tailText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
   }
 
   if (restartAfterClose(closedText).action === 'stop') {
@@ -1465,14 +1511,15 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   let plan = resumeFromChat(history.messages, m.title, m.images.length);
   const live = await bot.recentIncoming(2);
   const liveText = String(live.text || plan.lastText || '');
-  plan = planUpload(plan, history.messages, liveText, m.images.length);
+  const tailText = latestIncomingText(live.text ? live : { text: liveText, bubbles: [] });
+  plan = planUpload(plan, history.messages, tailText, m.images.length);
   if (restart) plan = { action: 'newpack', uploaded: 0, lastText: '' };
-  console.log(dir, 'chat-plan', plan.action, plan.uploaded, history.reachedTop ? 'top' : 'partial', unfinishedPack(liveText) ? 'open' : 'idle');
-  if (!restart && plan.action === 'newpack' && !history.reachedTop && !unfinishedPack(liveText)) {
+  console.log(dir, 'chat-plan', plan.action, plan.uploaded, history.reachedTop ? 'top' : 'partial', unfinishedPack(tailText) ? 'open' : 'idle');
+  if (!restart && plan.action === 'newpack' && !history.reachedTop && !unfinishedPack(tailText)) {
     throw new Error('chat history did not load; not sending images');
   }
-  if (plan.action === 'newpack' && unfinishedPack(liveText)) {
-    throw new Error(`refusing /newpack while a pack is still open: ${liveText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+  if (plan.action === 'newpack' && unfinishedPack(tailText)) {
+    throw new Error(`refusing /newpack while a pack is still open: ${tailText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
   }
   if (plan.action === 'saved') {
     if (!plan.url) throw new Error('pack already saved but the link was not in the chat');
@@ -1492,10 +1539,11 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     // Saved but short: /addsticker + pack URL, then continue from tm.uploaded.
     // Only when uploaded is the real accepted count (set by a wait that did not race).
     const before = await bot.recentIncoming(1);
-    if (unfinishedPack(before.text)) {
-      throw new Error(`refusing /addsticker while a pack is still open: ${String(before.text || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+    const beforeTail = latestIncomingText(before);
+    if (unfinishedPack(beforeTail)) {
+      throw new Error(`refusing /addsticker while a pack is still open: ${beforeTail.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
     }
-    await note({ phase: 'newpack', pack: m.title, lastLine: before.text });
+    await note({ phase: 'newpack', pack: m.title, lastLine: beforeTail });
     const opened = await withRetry('addsticker', () => bot.say('/addsticker'));
     const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'addsticker-reply', openedText.slice(0, 400));
@@ -1556,10 +1604,11 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     savePack(p);
   } else if (mustOpenNewPack(tm)) {
     const before = await bot.recentIncoming(1);
-    if (nextCommand(before.text, '/newpack') !== '/newpack') {
-      throw new Error(`refusing /newpack while a pack is still open: ${String(before.text || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+    const beforeTail = latestIncomingText(before);
+    if (nextCommand(beforeTail, '/newpack') !== '/newpack') {
+      throw new Error(`refusing /newpack while a pack is still open: ${beforeTail.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
     }
-    await note({ phase: 'newpack', pack: m.title, lastLine: before.text });
+    await note({ phase: 'newpack', pack: m.title, lastLine: beforeTail });
     const opened = await withRetry('newpack', () => bot.say('/newpack'));
     const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'newpack-reply', openedText.slice(0, 400));
@@ -1910,11 +1959,12 @@ async function peekRestart(bot) {
   const title = statusPackName(
     openPackTitle(history.messages) || openPackTitle(liveMessages) || typedPackTitle(history.messages),
   );
+  const tailText = latestIncomingText(live);
   const choice = {
-    unfinished: unfinishedPack(live.text),
+    unfinished: unfinishedPack(tailText),
     title,
     liveText,
-    lastLine: screenLine(liveText),
+    lastLine: screenLine(tailText),
   };
   mkdirSync(join(ROOT, 'logs'), { recursive: true });
   writeFileSync(join(ROOT, 'logs', 'restart-choice.json'), JSON.stringify(choice));
@@ -1938,12 +1988,13 @@ async function restartRun(bot, note, dirRef) {
   let seenTitle = statusPackName(selected.title || choice.title || '');
   if (dirRef) dirRef.title = seenTitle;
   const live = await bot.recentIncoming(2);
-  const open = choice.unfinished || unfinishedPack(live.text);
+  const tailText = latestIncomingText(live);
+  const open = choice.unfinished || unfinishedPack(tailText);
   let closedText = '';
   if (open) {
     const closed = await closeOpenBotPackBeforeNew(bot, note, {
       label: seenTitle || 'перезапуск',
-      lastLine: screenLine(live.text) || choice.lastLine || '',
+      lastLine: screenLine(tailText) || choice.lastLine || '',
     });
     closedText = String(closed.closedText || '');
     if (closed.title) {
