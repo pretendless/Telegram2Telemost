@@ -676,14 +676,17 @@ test("staging URLs come from settings or env, and the fill window stays ahead of
   const fromFile = loadTelemostUrls({ TELEMOST_STAGING: undefined });
   assert.match(fromFile.botUrl, /telemost\.yandex\.ru\/user\//);
   assert.match(fromFile.stagingUrl, /telemost\.yandex\.ru\/join#/);
-  assert.equal(fromFile.stagingEnabled, true);
+  assert.equal(fromFile.stagingEnabled, false);
   assert.equal(fromFile.stagingWindow, 5);
   const off = loadTelemostUrls({ TELEMOST_STAGING: '0' });
   assert.equal(off.stagingEnabled, false);
+  assert.equal(loadTelemostUrls({ TELEMOST_STAGING: '' }).stagingEnabled, false);
+  assert.equal(loadTelemostUrls({ TELEMOST_STAGING: '1' }).stagingEnabled, true);
   const custom = loadTelemostUrls({
     TELEMOST_BOT_URL: 'https://telemost.yandex.ru/user/abc',
     TELEMOST_STAGING_URL: 'https://telemost.yandex.ru/join#buffer',
     TELEMOST_STAGING_WINDOW: '3',
+    TELEMOST_STAGING: '1',
   });
   assert.equal(custom.botUrl, 'https://telemost.yandex.ru/user/abc');
   assert.equal(custom.stagingUrl, 'https://telemost.yandex.ru/join#buffer');
@@ -693,6 +696,7 @@ test("staging URLs come from settings or env, and the fill window stays ahead of
   const fromVars = loadTelemostUrls({
     telemostbufferchannel: 'https://telemost.yandex.ru/chat/tg2tm-channel',
     telemoststickerbot: 'https://telemost.yandex.ru/user/stickers-bot',
+    TELEMOST_STAGING: '1',
   });
   assert.equal(fromVars.stagingUrl, 'https://telemost.yandex.ru/chat/tg2tm-channel');
   assert.equal(fromVars.stagingUrlSource, 'env:telemostbufferchannel');
@@ -701,10 +705,19 @@ test("staging URLs come from settings or env, and the fill window stays ahead of
   assert.equal(fromVars.botName, 'Стикеры');
   assert.equal(githubActionsChatUrlError(fromVars, { GITHUB_ACTIONS: 'true' }), '');
   assert.match(
-    githubActionsChatUrlError(loadTelemostUrls({}), { GITHUB_ACTIONS: 'true' }),
+    githubActionsChatUrlError(loadTelemostUrls({ TELEMOST_STAGING: '1' }), { GITHUB_ACTIONS: 'true' }),
     /telemostbufferchannel/,
   );
+  assert.equal(githubActionsChatUrlError(loadTelemostUrls({}), { GITHUB_ACTIONS: 'true' }), '');
   assert.equal(githubActionsChatUrlError(loadTelemostUrls({}), {}), '');
+  const direct = loadTelemostUrls({ TELEMOST_BOT_URL: 'https://telemost.yandex.ru/user/abc' });
+  assert.equal(direct.stagingEnabled, false);
+  assert.equal(direct.botUrl, 'https://telemost.yandex.ru/user/abc');
+  const settings = JSON.parse(readFileSync(new URL('../config/settings.json', import.meta.url), 'utf8'));
+  assert.equal(settings.telemost.staging, false);
+  const src = readFileSync(new URL('./telemost_upload.mjs', import.meta.url), 'utf8');
+  assert.match(src, /if \(!useStaging\) return bot\.onBot\(\(\) => bot\.sendImage\(file, \{ onWait \}\)\)/);
+  assert.match(src, /if \(!urls\.stagingEnabled \|\| !urls\.stagingUrl \|\| !openStagingTab\)/);
   assert.deepEqual(stagingFillTo(0, 0, 144, 5), [0, 1, 2, 3, 4]);
   assert.deepEqual(stagingFillTo(2, 5, 144, 5), [5, 6]);
   assert.deepEqual(stagingFillTo(2, 7, 144, 5), []);
