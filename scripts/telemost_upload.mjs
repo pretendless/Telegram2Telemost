@@ -805,13 +805,14 @@ class Bot {
     })()`);
   }
 
-  async openMessageMenu(ownId) {
+  async openMessageMenu(ownId, { maxCycles = 12 } = {}) {
     let sawRow = false;
     let menuOpened = false;
     await this.focusChatSurface();
     const id = JSON.stringify(String(ownId));
     const btnSel = JSON.stringify(STAGING_MESSAGE_ACTIONS_SELECTOR);
-    for (let attempt = 0; attempt < 12; attempt++) {
+    const cycles = Math.max(1, Math.min(12, Number(maxCycles) || 12));
+    for (let attempt = 0; attempt < cycles; attempt++) {
       const mode = attempt % 8;
       let geom = await this.messageRowGeometry(ownId);
       if (!geom || !geom.ok) {
@@ -906,8 +907,9 @@ class Bot {
     for (let attempt = 0; attempt < 4 && !pickedForward; attempt++) {
       if (attempt) await this.dismissOverlay();
       try {
-        await this.openMessageMenu(ownId);
+        await this.openMessageMenu(ownId, { maxCycles: attempt === 0 ? 8 : 4 });
       } catch (e) {
+        if (stagingForwardMenuBlocked(e)) throw e;
         if (attempt >= 3) throw e;
         continue;
       }
@@ -1311,6 +1313,12 @@ export function stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBuff
 export const STAGING_FORWARD_POLL_MS = 8000;
 
 export const STAGING_FORWARD_MENU_LABELS = Object.freeze(['Переслать сообщение', 'Переслать', 'Forward']);
+
+/** Forward-via-staging failed in a way direct sendImage from disk can recover. */
+export function stagingForwardMenuBlocked(err) {
+  const msg = err && typeof err === 'object' && err.message != null ? String(err.message) : String(err || '');
+  return /staging forward: (context menu did not open|Переслать not found|stickers chat not in picker)/i.test(msg);
+}
 
 // Match Telemost/Yamb context menu rows (exact label, prefix, or substring for RU/EN).
 export function menuLabelMatches(text, aria, labels = STAGING_FORWARD_MENU_LABELS) {
@@ -2349,10 +2357,16 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     try {
       await bot.forwardOwnToBot(ownId, botUrl);
     } catch (e) {
-      const msg = e && e.message ? String(e.message) : '';
-      const menuBlocked = /context menu did not open|Переслать not found/i.test(msg);
-      if (!menuBlocked) throw e;
+      if (!stagingForwardMenuBlocked(e)) throw e;
+      const msg = e && e.message ? String(e.message) : String(e);
       console.log(dir, 'forward-fallback-send', m.images[index].file, msg.replace(/\s+/g, ' ').slice(0, 240));
+      await note({
+        phase: 'sending',
+        pack: m.title,
+        index: index + 1,
+        total: m.images.length,
+        lastLine: 'пересылка недоступна — прямая отправка файла',
+      });
       await bot.openChat(botUrl);
       return bot.sendImage(file, { onWait });
     }

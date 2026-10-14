@@ -35,6 +35,7 @@ import {
   STAGING_FORWARD_POLL_MS,
   STAGING_FORWARD_MENU_LABELS,
   STAGING_MESSAGE_ACTIONS_SELECTOR,
+  stagingForwardMenuBlocked,
   menuLabelMatches,
   botRepliesAfterOwn,
   loadTelemostUrls,
@@ -511,6 +512,14 @@ test("menuLabelMatches accepts RU and EN forward menu labels", () => {
   assert.deepEqual([...STAGING_FORWARD_MENU_LABELS], ["Переслать сообщение", "Переслать", "Forward"]);
 });
 
+test("stagingForwardMenuBlocked detects forward failures eligible for sendImage fallback", () => {
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: context menu did not open for 1")), true);
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: Переслать not found")), true);
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: stickers chat not in picker")), true);
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: message 9 not found")), false);
+  assert.equal(stagingForwardMenuBlocked(new Error("file input not found")), false);
+});
+
 test("staging message menu uses deep press helpers and CDP hover", () => {
   const src = readFileSync(new URL("./telemost_upload.mjs", import.meta.url), "utf8");
   assert.match(src, /function tg2tmDeepWithin/);
@@ -522,6 +531,8 @@ test("staging message menu uses deep press helpers and CDP hover", () => {
   assert.match(src, /async pressMessageRowActions/);
   assert.match(src, /async focusMessageRow/);
   assert.match(src, /stagingForwardDebugCapture/);
+  assert.match(src, /forward-fallback-send/);
+  assert.match(src, /stagingForwardMenuBlocked/);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /Действия с сообщением/);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /MessageActions/i);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /yamb-message-row__actions/);
