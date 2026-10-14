@@ -1125,6 +1125,107 @@ test("findUploadingReleaseId matches slug for queued row", () => {
   assert.equal(id, "abc-1");
 });
 
+test("findUploadingReleaseId prefers slug over a stale queueRequestId", () => {
+  const active = {
+    id: "req-live",
+    chatId: "1",
+    title: "ВолнаСвета",
+    links: [],
+    priority: false,
+    createdAt: "1",
+    status: "uploading",
+  };
+  const stale = {
+    id: "req-stale",
+    chatId: "2",
+    title: "Другой",
+    links: [],
+    priority: false,
+    createdAt: "2",
+    status: "queued",
+  };
+  const slug = queueItemSlug(active);
+  const id = findUploadingReleaseId(
+    { items: [active, stale] },
+    { slug, title: active.title, queueRequestId: stale.id },
+  );
+  assert.equal(id, "req-live");
+});
+
+test("admin /status reconciles terminal pack KV and reports idle", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  const item = {
+    id: "req-wave",
+    chatId: "1",
+    title: "ВолнаСвета",
+    links: ["https://t.me/addstickers/wave"],
+    priority: false,
+    createdAt: "2026-10-13T12:00:00.000Z",
+    status: "uploading",
+    stickers: 79,
+  };
+  const slug = queueItemSlug(item);
+  env.BOT_KV.store.set("queue", JSON.stringify({ priority: [], items: [item] }));
+  env.BOT_KV.store.set(
+    `pack:${slug}`,
+    JSON.stringify({
+      slug,
+      title: item.title,
+      status: "done",
+      uploaded: 79,
+      total: 79,
+      url: PACK_URL,
+      notice: { started: true, step: 75, done: true, doneWithLink: true, posted: true },
+    }),
+  );
+  const replies = [];
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/status"), env, {
+    sendMessage: async (_env, _chatId, text) => {
+      replies.push(text);
+    },
+  });
+  assert.equal(replies[0], "простаивает");
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items[0].status, "done");
+});
+
+test("terminal progress releases the queue even when the channel post fails", async () => {
+  const env = envWith();
+  const item = {
+    id: "req-1",
+    chatId: "99",
+    title: "Запад",
+    links: ["https://t.me/addstickers/zapad"],
+    priority: false,
+    createdAt: "2026-10-13T12:00:00.000Z",
+    status: "uploading",
+    stickers: 10,
+  };
+  env.BOT_KV.store.set("queue", JSON.stringify({ priority: [], items: [item] }));
+  const sendMessage = async (_env, chatId) => {
+    if (String(chatId) === "@tg2tm") throw new Error("channel down");
+    return { message_id: 1 };
+  };
+  const res = await handle(
+    progressRequest({
+      slug: queueItemSlug(item),
+      title: item.title,
+      status: "done",
+      uploaded: 10,
+      total: 10,
+      packUrl: PACK_URL,
+      queueRequestId: item.id,
+      adminDelivered: true,
+    }),
+    env,
+    { sendMessage },
+  );
+  assert.equal(res.status, 502);
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items[0].status, "done");
+});
+
 test("/unstick autostart dispatch names next queued pack after terminal uploading row closes", async () => {
   const env = envWith();
   env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);

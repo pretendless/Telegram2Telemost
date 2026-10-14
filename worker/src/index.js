@@ -255,8 +255,9 @@ async function applyProgress(env, pack, deps) {
   if (prev && !prev.notice) notice = parseStored(await kv.get(`state:${pack.slug}`));
   const steps = notificationSteps(notice, pack);
   const waitingForUrl = pack.status === "done" && !pack.url;
+  const terminal = terminalProgress(pack);
+  if (terminal) await finishQueueItem(env, pack, prev, deps);
   if (sameVisibleProgress(prev, pack) && steps.length === 0) {
-    await finishQueueItem(env, pack, prev, deps);
     return { ok: true, status: 200, notified: 0, posted: false, waitingForUrl };
   }
 
@@ -266,7 +267,7 @@ async function applyProgress(env, pack, deps) {
   const writePack = (cursor) => kv.put(packKey, JSON.stringify({ ...pack, notice: cursor, admin, userCard }));
   if (needsToken) {
     await writePack(notice);
-    return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false };
+    return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false, waitingForUrl };
   }
 
   let subs = [];
@@ -319,7 +320,6 @@ async function applyProgress(env, pack, deps) {
     console.log("user request card skipped");
   }
   await writePack(cursor);
-  await finishQueueItem(env, pack, prev, deps);
   return { ok: true, status: 200, notified, posted, waitingForUrl };
 }
 
@@ -343,6 +343,12 @@ async function packProgressByUploadingId(kv, queue) {
 async function reconcileTerminalUploadingQueue(kv, queue) {
   const packByItemId = await packProgressByUploadingId(kv, queue);
   return reconcileTerminalUploadingFromProgress(queue, packByItemId);
+}
+
+function schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps) {
+  if (reconcile && reconcile.changed && (reconcile.finished || []).length) {
+    schedulePipeline(env, queue, deps, { dispatchReason: QUEUE_REASON.afterFinish });
+  }
 }
 
 function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
@@ -559,7 +565,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";
     } else {
-      const { queue, activePack } = await loadAdminQueueState(env.BOT_KV);
+      const { queue, activePack, reconcile } = await loadAdminQueueState(env.BOT_KV);
+      schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps);
       out = adminQueueOverviewText(queue, activePack);
     }
   } else if (cmd === "/unstick") {
@@ -630,7 +637,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     }
   } else if (cmd === "/status") {
     if (isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
-      const { job } = await loadAdminQueueState(env.BOT_KV);
+      const { queue, job, reconcile } = await loadAdminQueueState(env.BOT_KV);
+      schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps);
       out = adminJobText(job);
     } else {
       const queue = await readQueue(env.BOT_KV);

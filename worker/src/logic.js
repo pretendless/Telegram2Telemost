@@ -398,20 +398,25 @@ export function duplicateRequestReply({ title, duplicate, priority }) {
 }
 
 // Match the queue row to close when upload progress reaches a terminal state.
+// Slug (`request-<id>`) wins over queueRequestId: pack.json metadata can be stale while
+// the KV row still shows another item as uploading.
 export function findUploadingReleaseId(queue, pack) {
-  const explicit = pack.queueRequestId ? String(pack.queueRequestId) : "";
-  if (explicit) {
-    const hit = queue.items.find((item) => item.id === explicit);
-    if (hit && (hit.status === "uploading" || hit.status === "queued")) return hit.id;
-  }
+  const items = (queue && queue.items) || [];
   if (pack.slug) {
     const bySlug = queueItemBySlug(queue, pack.slug);
     if (bySlug && (bySlug.status === "uploading" || bySlug.status === "queued")) return bySlug.id;
   }
-  const byTitle = queue.items.filter(
-    (item) => item.status === "uploading" && item.title === pack.title,
-  );
+  const explicit = pack.queueRequestId ? String(pack.queueRequestId) : "";
+  if (explicit) {
+    const hit = items.find((item) => item.id === explicit);
+    if (hit && (hit.status === "uploading" || hit.status === "queued")) return hit.id;
+  }
+  const byTitle = items.filter((item) => item.status === "uploading" && item.title === pack.title);
   if (byTitle.length === 1) return byTitle[0].id;
+  const loneUploading = items.filter((item) => item.status === "uploading");
+  if (loneUploading.length === 1 && pack.title && loneUploading[0].title === pack.title) {
+    return loneUploading[0].id;
+  }
   return null;
 }
 

@@ -56,5 +56,13 @@ export async function loadAdminQueueState(kv) {
         ? packByItemId[uploading.id]
         : parseStored(await kv.get(`pack:${queueItemSlug(uploading)}`));
   }
-  return { queue, activePack, job: activeUploadJob(queue, activePack) };
+  return {
+    queue,
+    activePack,
+    job: activeUploadJob(queue, activePack),
+    reconcile: {
+      changed: reconciled.changed,
+      finished: reconciled.finished || [],
+    },
+  };
 }
