@@ -9,6 +9,16 @@ export const CHANNEL_CHAT = "@tg2tm";
 export const CHANNEL_TITLE = "Стикеры TG → Телемост";
 export const CHANNEL_ABOUT = "Готовые наборы стикеров, перенесённые в Телемост. Каждый пост — один набор и ссылка на него.";
 export const STEPS = [25, 50, 75];
+
+// The number in parentheses is this ratio, not the 25/50/75 milestone.
+// 92/92 used to print 75% because the milestone list stops at 75.
+export function progressPercent(uploaded, total) {
+  const up = Number(uploaded);
+  const all = Number(total);
+  if (!Number.isFinite(up) || !Number.isFinite(all) || all <= 0 || up <= 0) return 0;
+  if (up >= all) return 100;
+  return Math.round((100 * up) / all);
+}
 // Existing subscriber from the polling bot. Written to KV once; /stop is not undone.
 export const INITIAL_SUBSCRIBER = 8502935020;
 
@@ -35,7 +45,7 @@ export const START =
   FORMAT +
   `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
   "\n\nСначала /create — затем одним сообщением название и ссылки (см. /format). Бот проверит набор и поставит его в очередь." +
-  "\n\nВы подписаны на ход переноса: бот напишет, когда пак начнёт загружаться, как идёт загрузка и пришлёт ссылку на готовый пак в Телемосте. /status — текущее состояние, /stop — отписаться.";
+  "\n\nБот пишет вам только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылает. /status — ваши запросы, /stop — отписаться.";
 
 export const DESCRIPTION =
   `${BOT_NAME} переносит стикеры из Telegram в Телемост.\n` +
@@ -147,25 +157,26 @@ export function notificationSteps(prev, pack) {
   const title = pack.title;
   const uploaded = pack.uploaded;
   const total = pack.total;
-  const pct = total ? Math.floor((100 * uploaded) / total) : 0;
+  const percent = progressPercent(uploaded, total);
   const url = realPackUrl(pack.url);
 
-  if ((pack.status === "uploading" || pack.status === "done") && !state.started) {
+  if ((pack.status === "uploading" || pack.status === "done") && !state.started && total > 0) {
     state.started = true;
     steps.push({
       kind: "subscribers",
-      text: `Начата загрузка пака «${title}» в Телемост: ${uploaded}/${total}.`,
+      text: `Начата загрузка пака «${title}» в Телемост: 0/${total}.`,
       state: snapshot(state),
     });
   }
 
   if (pack.status === "uploading") {
-    const reached = STEPS.reduce((max, step) => (pct >= step ? step : max), 0);
-    if (reached > state.step) {
-      state.step = reached;
+    const reached = STEPS.reduce((max, step) => (percent >= step ? step : max), 0);
+    const announce = percent >= 100 ? 100 : reached;
+    if (announce > state.step) {
+      state.step = announce;
       steps.push({
         kind: "subscribers",
-        text: `«${title}»: ${uploaded}/${total} (${reached} %).`,
+        text: `«${title}»: ${uploaded}/${total} (${percent} %).`,
         state: snapshot(state),
       });
     }
@@ -854,14 +865,25 @@ export function queueItemBySlug(queue, slug) {
   return ((queue && queue.items) || []).find((item) => queueItemSlug(item) === key) || null;
 }
 
-// Queue KV is authoritative for who submitted the request. Progress may carry the
-// admin chat id in `requester` when pack.json omitted requesterChatId.
+// User progress is delivered only when requesterChatId is the chat that owns
+// queueRequestId and the slug is that row. A missing id, a mismatch, or a slug
+// from another pack is not a recipient — never a subscriber list or a previous row.
 export function resolveRequesterChatId(pack, item) {
-  const fromItem = item && item.chatId != null ? String(item.chatId).trim() : "";
-  if (/^[0-9]{1,16}$/.test(fromItem)) return fromItem;
   const explicit = pack && pack.requesterChatId != null ? String(pack.requesterChatId).trim() : "";
-  if (/^[0-9]{1,16}$/.test(explicit)) return explicit;
-  return null;
+  const requestId = pack && pack.queueRequestId ? String(pack.queueRequestId).trim() : "";
+  if (!item || !requestId || String(item.id) !== requestId) return null;
+  if (!/^[0-9]{1,16}$/.test(explicit) || String(item.chatId) !== explicit) return null;
+  if (!pack.slug || pack.slug !== queueItemSlug(item)) return null;
+  return explicit;
+}
+
+export function matchedProgressRequester(pack, queue) {
+  const requestId = pack && pack.queueRequestId ? String(pack.queueRequestId).trim() : "";
+  if (!requestId) return null;
+  const item = queueItemByRequestId(queue, requestId);
+  const chatId = resolveRequesterChatId(pack, item);
+  if (!chatId) return null;
+  return { item, chatId };
 }
 
 export function activeProgressPacks(packs) {

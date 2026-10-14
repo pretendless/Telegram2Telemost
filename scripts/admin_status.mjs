@@ -194,17 +194,60 @@ export async function deliverAdminStatus(io, chatId, prev, event, now) {
 
 function withSticker(event, previous) {
   const prev = previous && previous.event;
-  const samePack = Boolean(prev) && (prev.pack || '') === ((event && event.pack) || '');
-  const index = num(event && event.index) != null ? event.index : (samePack ? prev.index : event && event.index);
+  const phase = event && event.phase;
+  // A new pack must not inherit the previous pack's last sticker count.
+  const fresh = phase === 'start' || phase === 'newpack';
+  const samePack = !fresh && Boolean(prev) && (prev.pack || '') === ((event && event.pack) || '');
+  const explicit = num(event && event.index);
+  const index = fresh ? (explicit != null ? explicit : 0) : (explicit != null ? explicit : (samePack ? prev.index : event && event.index));
   const total = num(event && event.total) != null ? event.total : (samePack ? prev.total : event && event.total);
   return { ...event, index, total };
+}
+
+function chatIdOk(value) {
+  return /^[0-9]{1,16}$/.test(String(value || '').trim());
+}
+
+export function clearPackProgress(dirRef) {
+  if (!dirRef || typeof dirRef !== 'object') return;
+  dirRef.queueRequestId = '';
+  dirRef.requesterChatId = '';
+}
+
+// The live claim wins when pack.json still names another request. A pack with
+// no requester metadata clears the previous chat so it cannot leak forward.
+// TELEGRAM_CHAT_ID is never a requester.
+export function bindPackProgress(dirRef, meta) {
+  if (!dirRef || typeof dirRef !== 'object') return { queueRequestId: '', requesterChatId: '' };
+  const fileId = meta && meta.queueRequestId ? String(meta.queueRequestId).trim() : '';
+  const fileChat = meta && meta.requesterChatId ? String(meta.requesterChatId).trim() : '';
+  const liveId = dirRef.queueRequestId ? String(dirRef.queueRequestId).trim() : '';
+  const liveChat = dirRef.requesterChatId ? String(dirRef.requesterChatId).trim() : '';
+  const fileOk = Boolean(fileId) && chatIdOk(fileChat);
+  const liveOk = Boolean(liveId) && chatIdOk(liveChat);
+  let chosen = { queueRequestId: '', requesterChatId: '' };
+  if (liveOk && fileOk && liveId !== fileId) chosen = { queueRequestId: liveId, requesterChatId: liveChat };
+  else if (fileOk) chosen = { queueRequestId: fileId, requesterChatId: fileChat };
+  dirRef.queueRequestId = chosen.queueRequestId;
+  dirRef.requesterChatId = chosen.requesterChatId;
+  return chosen;
+}
+
+export function progressFieldsForPack(dirRef) {
+  const queueRequestId = dirRef && dirRef.queueRequestId ? String(dirRef.queueRequestId).trim() : '';
+  const requesterChatId = dirRef && dirRef.requesterChatId ? String(dirRef.requesterChatId).trim() : '';
+  if (!queueRequestId || !chatIdOk(requesterChatId)) {
+    return { requester: null, requesterChatId: null, queueRequestId: null };
+  }
+  return { requester: requesterChatId, requesterChatId, queueRequestId };
 }
 
 export function createAdminFeed({ io, requester, writeState, onDelivered, now, env = process.env } = {}) {
   let cursor = null;
   return async function notify(event) {
     const carried = withSticker(event, cursor);
-    let full = { ...carried, requester: carried.requester || requester || '' };
+    const liveRequester = typeof requester === 'function' ? requester() : requester;
+    let full = { ...carried, requester: carried.requester || liveRequester || '' };
     if ((full.phase === 'error' || full.phase === 'failed') && !oneLine(full.runUrl)) {
       const runUrl = actionsRunUrl(env);
       if (runUrl) full = { ...full, runUrl };

@@ -6,7 +6,15 @@
 import { readFileSync, writeFileSync, readdirSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { actionsRunUrl, createAdminFeed, postProgress, telegramIo } from './admin_status.mjs';
+import {
+  actionsRunUrl,
+  bindPackProgress,
+  clearPackProgress,
+  createAdminFeed,
+  postProgress,
+  progressFieldsForPack,
+  telegramIo,
+} from './admin_status.mjs';
 import { drainRemainingQueue } from './queue_drain.mjs';
 import { queueCredentialsReadable } from './queue_client.mjs';
 
@@ -3049,7 +3057,7 @@ function openAdminFeed(dirRef) {
   const token = process.env.TG2TMBOT_TOKEN || '';
   return createAdminFeed({
     io: token ? telegramIo(fetch, token) : null,
-    requester: dirRef.requesterChatId || process.env.TELEGRAM_CHAT_ID || '',
+    requester: () => progressFieldsForPack(dirRef).requesterChatId || '',
     writeState: (state) => {
       try {
         mkdirSync(join(ROOT, 'logs'), { recursive: true });
@@ -3060,7 +3068,9 @@ function openAdminFeed(dirRef) {
     },
     onDelivered: (event, delivery) => {
       if (!delivery || delivery.action === 'skip' || !dirRef.dir) return;
-      const index = Number(event.index);
+      const fields = progressFieldsForPack(dirRef);
+      const fresh = event.phase === 'start' || event.phase === 'newpack';
+      const index = fresh ? 0 : Number(event.index);
       const total = Number(event.total);
       return postProgress(fetch, process.env.TG2TM_PROGRESS_URL || '', process.env.UPLOADER_SECRET || '', {
         slug: dirRef.dir,
@@ -3073,9 +3083,9 @@ function openAdminFeed(dirRef) {
         runUrl: event.runUrl || null,
         lastLine: event.lastLine || null,
         phase: event.phase,
-        requester: dirRef.requesterChatId || null,
-        requesterChatId: dirRef.requesterChatId || null,
-        queueRequestId: dirRef.queueRequestId || null,
+        requester: fields.requester,
+        requesterChatId: fields.requesterChatId,
+        queueRequestId: fields.queueRequestId,
         sessionDrain: Boolean(dirRef.sessionDrain),
       });
     },
@@ -3199,6 +3209,7 @@ export async function closeOpenBotPackBeforeNew(bot, note, { label = 'перез
   await note({
     phase: 'done',
     pack: label,
+    index: 0,
     lastLine: lastLine || screenLine(tailText),
   });
 
@@ -3246,6 +3257,10 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   const p = loadPack(dir);
   const m = p.meta;
   let tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
+  if (dirRef) {
+    dirRef.title = m.title;
+    bindPackProgress(dirRef, m);
+  }
   if (tm.status === 'done' && tm.packUrl) {
     console.log(dir, 'already done', tm.packUrl);
     await note({
@@ -3261,11 +3276,6 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   if (restart && restartShouldNewpack(tm, m.images.length, '')) tm = m.telemost = resetForNewPack(tm);
   else if (tm.status === 'done') { console.log(dir, 'already done'); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
-  if (dirRef) {
-    dirRef.title = m.title;
-    dirRef.queueRequestId = m.queueRequestId || '';
-    dirRef.requesterChatId = m.requesterChatId || '';
-  }
   const earlyUrls = loadTelemostUrls();
   if (earlyUrls.stagingEnabled && (bot.stagingUrl || earlyUrls.stagingUrl)) {
     console.log(bufferClearSkippedLine());
@@ -3274,7 +3284,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   if (restart) {
     await closeOpenBotPackBeforeNew(bot, note, { label: m.title });
   }
-  await note({ phase: 'start', pack: m.title, total: m.images.length });
+  await note({ phase: 'start', pack: m.title, index: 0, total: m.images.length });
 
   const history = await bot.surveyChat();
   let plan = resumeFromChat(history.messages, m.title, m.images.length);
@@ -3382,7 +3392,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       if (doneSent) return;
       doneSent = true;
       console.log(dir, 'pre-newpack-done', why);
-      await note({ phase: 'done', pack: m.title, lastLine: screenLine(beforeTail) });
+      await note({ phase: 'done', pack: m.title, index: 0, total: m.images.length, lastLine: screenLine(beforeTail) });
       const closed = await bot.say('/done');
       const closedText = String(closed.text || '').replace(/\s+/g, ' ').trim();
       console.log(dir, 'pre-newpack-done-reply', closedText.slice(0, 400));
@@ -3813,8 +3823,7 @@ async function finalizePack(bot, dir, note = async () => {}, dirRef = null) {
   const m = p.meta;
   if (dirRef) {
     dirRef.title = m.title;
-    dirRef.queueRequestId = m.queueRequestId || '';
-    dirRef.requesterChatId = m.requesterChatId || '';
+    bindPackProgress(dirRef, m);
   }
   const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
   if (tm.status === 'done' && tm.packUrl) {
@@ -3861,6 +3870,7 @@ function seenPackError(selected, title) {
 }
 
 async function restartRun(bot, note, dirRef) {
+  clearPackProgress(dirRef);
   const choice = JSON.parse(readFileSync(join(ROOT, 'logs', 'restart-choice.json'), 'utf8'));
   const selected = JSON.parse(readFileSync(join(ROOT, 'logs', 'restart-pack.json'), 'utf8'));
   if (!selected || selected.action === 'idle') {
@@ -4011,6 +4021,7 @@ async function main() {
     return;
   }
   for (const d of dirs) {
+    clearPackProgress(dirRef);
     dirRef.dir = d;
     try {
       if (finalize) await finalizePack(bot, d, note, dirRef);
