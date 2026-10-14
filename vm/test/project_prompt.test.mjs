@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildProjectPromptDispatch,
+  findProjectPromptRunUrl,
   newPromptId,
   normalizeProjectReplyBody,
   parseProjectCommand,
+  projectDispatchedText,
+  projectFastAckSummary,
+  projectIssueTitle,
   projectPromptKey,
+  projectStartingText,
 } from "../project_prompt.js";
 
 test("parseProjectCommand requires non-empty body", () => {
@@ -45,4 +50,36 @@ test("normalizeProjectReplyBody", () => {
 
 test("projectPromptKey", () => {
   assert.equal(projectPromptKey("tg-1"), "project:prompt:tg-1");
+});
+
+test("projectFastAckSummary and issue title", () => {
+  assert.match(projectFastAckSummary("hello world"), /Принято: hello world/);
+  assert.match(projectIssueTitle("short"), /^\[TG Project\] short$/);
+  assert.match(projectStartingText(), /GitHub/);
+  assert.match(projectDispatchedText({ promptId: "tg-1", runUrl: "" }), /dispatch ok/);
+  assert.match(projectDispatchedText({ promptId: "tg-1", runUrl: "https://ex/run" }), /https:\/\/ex\/run/);
+});
+
+test("findProjectPromptRunUrl picks fresh run", async () => {
+  const startedAt = Date.parse("2026-10-14T12:00:00.000Z");
+  const fetchImpl = async () => ({
+    status: 200,
+    json: async () => ({
+      workflow_runs: [
+        {
+          id: 1,
+          status: "in_progress",
+          created_at: "2026-10-14T12:00:05.000Z",
+          html_url: "https://github.com/o/r/actions/runs/1",
+        },
+      ],
+    }),
+  });
+  const url = await findProjectPromptRunUrl(fetchImpl, {
+    token: "t",
+    repo: "pretendless/tg2tm",
+    startedAt,
+    attempts: 1,
+  });
+  assert.equal(url, "https://github.com/o/r/actions/runs/1");
 });

@@ -1,5 +1,11 @@
-// GitHub Actions: load /project prompt from Worker KV and prepare issue title/body files.
+// GitHub Actions: load /project prompt from Worker KV; fast TG ack; issue files for gh.
 import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import {
+  cursorAgentIssueHint,
+  projectFastAckSummary,
+  projectIssueTitle,
+} from "../vm/project_prompt.js";
 
 const progressUrl = String(process.env.TG2TM_PROGRESS_URL || "").trim();
 const workerBase = progressUrl.replace(/\/progress\/?$/i, "");
@@ -7,14 +13,20 @@ const secret = process.env.UPLOADER_SECRET || "";
 const promptId = String(process.env.PROMPT_ID || process.env.INPUT_PROMPT_ID || "").trim();
 const chatId = String(process.env.CHAT_ID || process.env.INPUT_CHAT_ID || "").trim();
 const runUrl = String(process.env.RUN_URL || "").trim();
+const mode = String(process.env.PROJECT_PROMPT_MODE || "issue").trim().toLowerCase();
+const repo = String(process.env.GITHUB_REPOSITORY || "pretendless/tg2tm").trim();
 
-async function fetchPrompt() {
-  if (!workerBase || !secret || !promptId) {
+export function workerBaseFromProgressUrl(url) {
+  return String(url || "").trim().replace(/\/progress\/?$/i, "");
+}
+
+export async function fetchPromptFromWorker({ workerBase: base, secret: bearer, promptId: id }) {
+  if (!base || !bearer || !id) {
     throw new Error("missing worker url, secret, or prompt id");
   }
-  const url = `${workerBase}/project/prompt?id=${encodeURIComponent(promptId)}`;
+  const url = `${base}/project/prompt?id=${encodeURIComponent(id)}`;
   const res = await fetch(url, {
-    headers: { authorization: `Bearer ${secret}`, "user-agent": "tg2tm-project-prompt" },
+    headers: { authorization: `Bearer ${bearer}`, "user-agent": "tg2tm-project-prompt" },
   });
   if (!res.ok) throw new Error(`worker prompt http ${res.status}`);
   const body = await res.json();
@@ -22,34 +34,65 @@ async function fetchPrompt() {
   return body;
 }
 
-function issueTitle(prompt) {
-  const one = String(prompt || "").replace(/\s+/g, " ").trim();
-  const head = one.slice(0, 72);
-  return `[TG /project] ${head}${one.length > 72 ? "…" : ""}`;
+export async function postProjectReply({ workerBase: base, secret: bearer, promptId: id, chatId: cid, summary, issueUrl }) {
+  if (!base || !bearer || !id || !summary) {
+    throw new Error("missing worker reply params");
+  }
+  const res = await fetch(`${base}/project/reply`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      id,
+      chatId: cid || undefined,
+      summary,
+      issueUrl: issueUrl || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(`worker reply http ${res.status}`);
 }
 
-function issueBody({ prompt, promptId, chatId, runUrl }) {
+export function issueTitle(prompt) {
+  return projectIssueTitle(prompt, 60);
+}
+
+export function issueBody({ prompt, promptId: id, chatId: cid, runUrl: workflowRun, issueUrl }) {
+  const promptBlock = String(prompt || "").trim();
   return [
     "Запрос из Telegram `/project` (Telegram2Telemost).",
     "",
-    `**prompt id:** \`${promptId}\``,
-    chatId ? `**admin chat:** \`${chatId}\`` : "",
-    runUrl ? `**workflow run:** ${runUrl}` : "",
+    `**prompt id:** \`${id}\``,
+    cid ? `**admin chat:** \`${cid}\`` : "",
+    workflowRun ? `**workflow run:** ${workflowRun}` : "",
+    issueUrl ? `**issue:** ${issueUrl}` : "",
     "",
-    "## Текст",
+    "## PROMPT_FOR_PROJECT",
     "",
-    prompt,
+    "```text",
+    promptBlock,
+    "```",
+    "",
+    cursorAgentIssueHint(repo),
     "",
     "---",
     "",
-    "Cursor Project не имеет публичного API из воркера: координатор Project или cloud agent обрабатывает текст и вызывает `POST /project/reply` с кратким ответом (см. docs в Project store).",
+    "Координатор Project или cloud agent обрабатывает текст и вызывает `POST /project/reply` с кратким ответом.",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-async function main() {
-  const loaded = await fetchPrompt();
+async function runFastAck(loaded) {
+  const summary = projectFastAckSummary(loaded.prompt);
+  await postProjectReply({
+    workerBase,
+    secret,
+    promptId,
+    chatId: chatId || loaded.chatId,
+    summary,
+  });
+}
+
+async function runIssueFiles(loaded) {
   const title = issueTitle(loaded.prompt);
   const body = issueBody({
     prompt: loaded.prompt,
@@ -59,6 +102,45 @@ async function main() {
   });
   writeFileSync("project-prompt-title.txt", title, "utf8");
   writeFileSync("project-prompt-body.md", body, "utf8");
+  writeFileSync("project-prompt-for-project.txt", String(loaded.prompt || "").trim(), "utf8");
 }
 
-await main();
+export function issueLinkReplySummary(issueUrl) {
+  return issueUrl
+    ? `Issue для Project: ${issueUrl}\n\nТекст запроса — в issue (блок PROMPT_FOR_PROJECT). Краткий итог пришлёт бот после POST /project/reply.`
+    : "Issue создан; ссылка недоступна в этом шаге.";
+}
+
+async function runIssueNotify() {
+  const issueUrl = String(process.env.ISSUE_URL || "").trim();
+  await postProjectReply({
+    workerBase,
+    secret,
+    promptId,
+    chatId,
+    summary: issueLinkReplySummary(issueUrl),
+    issueUrl: issueUrl || undefined,
+  });
+}
+
+async function main() {
+  if (mode === "issue-notify") {
+    await runIssueNotify();
+    return;
+  }
+  const loaded = await fetchPromptFromWorker({ workerBase, secret, promptId });
+  if (mode === "fast-ack" || mode === "ack") {
+    await runFastAck(loaded);
+    return;
+  }
+  if (mode === "issue") {
+    await runIssueFiles(loaded);
+    return;
+  }
+  throw new Error(`unknown PROJECT_PROMPT_MODE: ${mode}`);
+}
+
+const isCli = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isCli) {
+  await main();
+}

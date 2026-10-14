@@ -1,4 +1,4 @@
-# Telegram /project → issue + admin TG ack. Full prompt lives in Worker KV (GET /project/prompt).
+# Telegram /project → fast TG ack, issue + admin TG with links. Prompt in Worker KV (GET /project/prompt).
 name: Project prompt
 
 on:
@@ -18,7 +18,20 @@ permissions:
   issues: write
 
 jobs:
-  prompt:
+  fast-ack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fast ack to Telegram
+        env:
+          TG2TM_PROGRESS_URL: ${{ secrets.TG2TM_PROGRESS_URL }}
+          UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
+          PROMPT_ID: ${{ inputs.prompt_id }}
+          CHAT_ID: ${{ inputs.chat_id }}
+          PROJECT_PROMPT_MODE: fast-ack
+        run: node scripts/project_prompt_run.mjs
+
+  issue:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +42,7 @@ jobs:
           PROMPT_ID: ${{ inputs.prompt_id }}
           CHAT_ID: ${{ inputs.chat_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PROJECT_PROMPT_MODE: issue
         run: node scripts/project_prompt_run.mjs
       - name: Create tracking issue
         id: issue
@@ -46,25 +60,5 @@ jobs:
           PROMPT_ID: ${{ inputs.prompt_id }}
           CHAT_ID: ${{ inputs.chat_id }}
           ISSUE_URL: ${{ steps.issue.outputs.url }}
-        run: |
-          node - <<'NODE'
-          const progressUrl = String(process.env.TG2TM_PROGRESS_URL || "").trim();
-          const workerBase = progressUrl.replace(/\/progress\/?$/i, "");
-          const secret = process.env.UPLOADER_SECRET || "";
-          const id = process.env.PROMPT_ID || "";
-          const chatId = process.env.CHAT_ID || "";
-          const issueUrl = process.env.ISSUE_URL || "";
-          const summary = issueUrl
-            ? `Issue для Project: ${issueUrl}\n\nСкопируйте текст из issue в чат Cursor Project или дождитесь cloud agent. Краткий итог пришлёт бот после POST /project/reply.`
-            : "Issue создан; ссылка недоступна в этом шаге.";
-          fetch(`${workerBase}/project/reply`, {
-            method: "POST",
-            headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
-            body: JSON.stringify({ id, chatId: chatId || undefined, summary, issueUrl }),
-          }).then((r) => {
-            if (!r.ok) {
-              console.error("reply http", r.status);
-              process.exit(1);
-            }
-          });
-          NODE
+          PROJECT_PROMPT_MODE: issue-notify
+        run: node scripts/project_prompt_run.mjs

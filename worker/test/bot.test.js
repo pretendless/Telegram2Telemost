@@ -1771,9 +1771,30 @@ test("/project is admin-only and dispatches project-prompt workflow", async () =
   sent.length = 0;
   await handle(telegramRequest(INITIAL_SUBSCRIBER, "/project"), env, { sendMessage, fetch });
   assert.match(sent[0].text, /\/project/);
+  const runListUrl =
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/project-prompt.yml/runs?per_page=20";
+  const fetchWithRuns = async (url, init) => {
+    if (String(url) === runListUrl) {
+      return {
+        status: 200,
+        json: async () => ({
+          workflow_runs: [
+            {
+              id: 99,
+              status: "queued",
+              created_at: "2026-10-14T12:00:01.000Z",
+              html_url: "https://github.com/pretendless/tg2tm/actions/runs/99",
+            },
+          ],
+        }),
+      };
+    }
+    calls.push({ url, body: JSON.parse(init.body) });
+    return new Response(null, { status: 204 });
+  };
   await handle(telegramRequest(INITIAL_SUBSCRIBER, "/project статус очереди"), env, {
     sendMessage,
-    fetch,
+    fetch: fetchWithRuns,
     now: () => new Date("2026-10-14T12:00:00.000Z"),
   });
   assert.equal(calls.length, 1);
@@ -1792,6 +1813,49 @@ test("/project is admin-only and dispatches project-prompt workflow", async () =
   const texts = sent.map((item) => item.text);
   assert.ok(texts.some((t) => /принят/.test(t)));
   assert.ok(texts.some((t) => /Cursor Project/.test(t)));
+  assert.ok(texts.some((t) => /⏳/.test(t)));
+  assert.ok(texts.some((t) => /actions\/runs\/99/.test(t)));
+});
+
+test("/project waitUntil runs KV and dispatch in background", async () => {
+  const sent = [];
+  const calls = [];
+  const env = { ...envWith(), LOGIN_CHAT_IDS: String(INITIAL_SUBSCRIBER), GH_DISPATCH_TOKEN: "dispatch-token" };
+  let pending;
+  let releaseDispatch;
+  const dispatchGate = new Promise((resolve) => {
+    releaseDispatch = resolve;
+  });
+  const fetch = async (url, init) => {
+    const href = String(url);
+    if (href.includes("/dispatches")) {
+      await dispatchGate;
+    }
+    calls.push({ url: href, body: init && init.body ? JSON.parse(init.body) : null });
+    if (href.includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return new Response(null, { status: 204 });
+  };
+  const sendMessage = async (_env, chatId, text) => sent.push({ chatId, text });
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/project быстрый тест"), env, {
+    sendMessage,
+    fetch,
+    now: () => new Date("2026-10-14T12:00:00.000Z"),
+    waitUntil: (promise) => {
+      pending = promise;
+    },
+  });
+  assert.ok(pending);
+  assert.ok(sent.some((row) => /⏳/.test(row.text)));
+  assert.equal(
+    calls.some((call) => call.url.includes("/dispatches")),
+    false,
+  );
+  releaseDispatch();
+  await pending;
+  assert.ok(calls.some((call) => call.url.includes("/dispatches")));
+  assert.ok(sent.some((row) => /Очередь Project|dispatch ok/.test(row.text)));
 });
 
 test("POST /project/reply sends summary to admin chat", async () => {

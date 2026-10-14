@@ -1,0 +1,39 @@
+# Optional follow-up for tg-project-prompt issues. Cursor Cloud Agent has no public dispatch API from GitHub.
+name: Project agent (manual)
+
+on:
+  repository_dispatch:
+    types: [tg-project-prompt]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: GitHub issue number (tg-project-prompt)
+        required: false
+        type: string
+      prompt_id:
+        description: Worker prompt id (tg-…)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  document:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instructions
+        env:
+          ISSUE: ${{ github.event.client_payload.issue_number || inputs.issue_number }}
+          PROMPT_ID: ${{ github.event.client_payload.prompt_id || inputs.prompt_id }}
+        run: |
+          echo "No automated Cursor Project API is available from this workflow."
+          echo "Open the repo in Cursor Cloud Agent and paste PROMPT_FOR_PROJECT from the issue body."
+          if [ -n "$ISSUE" ]; then
+            echo "Issue: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/issues/${ISSUE}"
+          fi
+          if [ -n "$PROMPT_ID" ]; then
+            echo "Worker prompt id: $PROMPT_ID"
+          fi
