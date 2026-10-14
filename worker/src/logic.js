@@ -372,11 +372,16 @@ export function duplicateRequestReply({ title, duplicate, priority }) {
   return alreadyQueuedReply({ title, priority: Boolean(priority) });
 }
 
+// Match the queue row to close when upload progress reaches a terminal state.
 export function findUploadingReleaseId(queue, pack) {
   const explicit = pack.queueRequestId ? String(pack.queueRequestId) : "";
   if (explicit) {
     const hit = queue.items.find((item) => item.id === explicit);
-    if (hit && hit.status === "uploading") return hit.id;
+    if (hit && (hit.status === "uploading" || hit.status === "queued")) return hit.id;
+  }
+  if (pack.slug) {
+    const bySlug = queueItemBySlug(queue, pack.slug);
+    if (bySlug && (bySlug.status === "uploading" || bySlug.status === "queued")) return bySlug.id;
   }
   const byTitle = queue.items.filter(
     (item) => item.status === "uploading" && item.title === pack.title,
@@ -401,37 +406,100 @@ export function sortQueuedItems(items) {
   return priority.concat(normal);
 }
 
+function packProgressTerminal(pack) {
+  return pack && terminalProgress(pack);
+}
+
 // Reset stuck "uploading" rows when Actions is not running (admin /unstick).
-export function unstickUploadingQueue(queue) {
+// Rows whose pack progress is already done/error are marked done/error in the queue
+// instead of being re-queued (avoids re-uploading the same request).
+export function unstickUploadingQueue(queue, { packForItem = null, terminalOnly = false } = {}) {
   const stuck = (queue.items || []).filter((item) => item.status === "uploading");
-  if (!stuck.length) return { queue, changed: false, reason: "none", released: [] };
+  if (!stuck.length) return { queue, changed: false, reason: "none", released: [], finished: [] };
   let changed = false;
+  const released = [];
+  const finished = [];
   const items = queue.items.map((item) => {
     if (item.status !== "uploading") return item;
+    if (packForItem) {
+      const pack = packForItem(item);
+      if (packProgressTerminal(pack)) {
+        changed = true;
+        const status = pack.status === "error" ? "error" : "done";
+        finished.push({ ...item, status });
+        return { ...item, status };
+      }
+    }
+    if (terminalOnly) return item;
     changed = true;
+    released.push(item);
     return { ...item, status: "queued" };
   });
   return {
     queue: changed ? { priority: queue.priority.slice(), items } : queue,
     changed,
-    reason: "released",
-    released: stuck,
+    reason: released.length || finished.length ? "released" : "none",
+    released,
+    finished,
   };
 }
 
-export function unstickReply({ reason, released, actionsRunning }) {
+// Admin /skip: drop the current uploading row and advance the queue.
+export function skipUploadingQueue(queue) {
+  const stuck = (queue.items || []).filter((item) => item.status === "uploading");
+  if (!stuck.length) return { queue, changed: false, reason: "none", skipped: [] };
+  let changed = false;
+  const skipped = [];
+  const items = queue.items.map((item) => {
+    if (item.status !== "uploading") return item;
+    changed = true;
+    skipped.push(item);
+    return { ...item, status: "error" };
+  });
+  return {
+    queue: changed ? { priority: queue.priority.slice(), items } : queue,
+    changed,
+    reason: "skipped",
+    skipped,
+  };
+}
+
+export function skipReply({ reason, skipped, actionsRunning }) {
   if (actionsRunning) {
-    return "Сейчас идёт запуск Actions — строку «загружается» не трогаю.";
+    return "Сейчас идёт запуск Actions — /skip не выполняю.";
   }
-  if (reason === "none" || !released.length) {
+  if (reason === "none" || !skipped.length) {
+    return "Нет строки «загружается» — /skip не к чему применить.";
+  }
+  const titles = skipped.map((item) => `«${item.title}»`).join(", ");
+  return `Пропустил ${titles} (ошибка в очереди). Запускаю следующий пак, если очередь не пуста.`;
+}
+
+export function unstickReply({ reason, released, finished, actionsRunning, cleanedWhileRunning = false }) {
+  if (actionsRunning) {
+    if (cleanedWhileRunning && (finished || []).length) {
+      const titles = finished.map((item) => `«${item.title}»`).join(", ");
+      return `Сейчас идёт Actions — строку «загружается» не снимаю. Закрыл в очереди как готовый: ${titles} (прогресс в KV уже был завершён). Когда run закончится, при необходимости снова /unstick или /skip.`;
+    }
+    return "Сейчас идёт запуск Actions — строку «загружается» не трогаю. Если run оборвётся, повторите /unstick (или /skip).";
+  }
+  if (reason === "none" || (!released.length && !(finished || []).length)) {
     return "Зависших строк «загружается» нет.";
   }
-  const titles = released.map((item) => `«${item.title}»`).join(", ");
-  const one = released.length === 1;
-  const subject = one ? "Набор" : "Наборы";
-  const wait = one ? "ждёт" : "ждут";
-  const loading = one ? "не грузится" : "не грузятся";
-  return `Снял блокировку «загружается» у ${titles}. ${subject} ${wait} в очереди — сейчас ${loading}. Запускаю pipeline: следующий пак по приоритету (или /restart).`;
+  const parts = [];
+  if ((finished || []).length) {
+    const titles = finished.map((item) => `«${item.title}»`).join(", ");
+    parts.push(`Закрыл в очереди как готовый: ${titles} (прогресс уже был завершён).`);
+  }
+  if (released.length) {
+    const titles = released.map((item) => `«${item.title}»`).join(", ");
+    const one = released.length === 1;
+    const subject = one ? "Набор" : "Наборы";
+    const wait = one ? "снова ждёт" : "снова ждут";
+    parts.push(`Снял блокировку «загружается» у ${titles}. ${subject} ${wait} в очереди.`);
+  }
+  parts.push("Запускаю pipeline: следующий пак по приоритету (или /restart, /skip — пропустить текущий).");
+  return parts.join(" ");
 }
 
 // Priority requests pass normal ones. An item already uploading stays in front and is not replaced.

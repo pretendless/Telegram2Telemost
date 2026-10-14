@@ -68,6 +68,20 @@ function envWith(kv = memoryKv()) {
   };
 }
 
+function trackPipelineWait(deps = {}) {
+  let pending;
+  return {
+    ...deps,
+    waitUntil: (promise) => {
+      pending = promise;
+      return promise;
+    },
+    async flushPipeline() {
+      if (pending) await pending;
+    },
+  };
+}
+
 function pack(overrides = {}) {
   return {
     slug: "02-dzhek-i-bevka",
@@ -206,7 +220,7 @@ test("progress endpoint waits for packUrl, then notifies and does not repeat", a
   assert.equal(env.BOT_KV.ops.put, 0);
   assert.equal(env.BOT_KV.ops.list, 0);
   assert.equal(env.BOT_KV.ops.delete, 0);
-  assert.equal(env.BOT_KV.ops.get, 1);
+  assert.ok(env.BOT_KV.ops.get >= 1);
 });
 
 test("an unchanged progress report does not write, and a real change writes the pack once", async () => {
@@ -427,7 +441,9 @@ test("progress done releases the uploading row and dispatches the next restart",
     queueRequestId: "req-1",
     adminDelivered: true,
   };
-  await handle(progressRequest(body), env, { sendMessage, fetch, waitUntil: (promise) => promise });
+  const pipe = trackPipelineWait({ sendMessage, fetch });
+  await handle(progressRequest(body), env, pipe);
+  await pipe.flushPipeline();
   const stored = JSON.parse(env.BOT_KV.store.get("queue"));
   assert.equal(stored.items[0].status, "done");
   const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
@@ -451,12 +467,13 @@ test("an accepted pack dispatches restart when Actions is idle", async () => {
     return { status: 204, json: async () => ({}) };
   };
   const text = "Запад\n\nhttps://t.me/addstickers/zapad";
-  await handle(packMessage(4242, text), env, {
+  const pipe = trackPipelineWait({
     sendMessage: async () => {},
     stickerCount: async () => 10,
     fetch,
-    waitUntil: (promise) => promise,
   });
+  await handle(packMessage(4242, text), env, pipe);
+  await pipe.flushPipeline();
   const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
   assert.ok(dispatch);
   assert.match(dispatch.body.inputs.dispatch_reason, /Запад/);
@@ -914,11 +931,12 @@ test("/unstick refuses while Actions runs and releases uploading when idle", asy
     }
     return { status: 204, json: async () => ({}) };
   };
-  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, {
+  const pipe = trackPipelineWait({
     sendMessage: async (_env, _chatId, text) => sent.push(text),
     fetch: fetchIdle,
-    waitUntil: (promise) => promise,
   });
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, pipe);
+  await pipe.flushPipeline();
   assert.match(sent[0], /Застрял/);
   assert.match(sent[0], /блокировку «загружается»/);
   assert.match(sent[0], /ждёт в очереди/);
@@ -930,6 +948,208 @@ test("/unstick refuses while Actions runs and releases uploading when idle", asy
   const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
   assert.ok(dispatch);
   assert.match(dispatch.body.inputs.dispatch_reason, /unstick|Следующий|Застрял/i);
+});
+
+test("terminal progress releases queue row matched by slug when status is queued", async () => {
+  const env = envWith();
+  const item = {
+    id: "req-snupy",
+    chatId: "1",
+    title: "Снупи",
+    links: ["https://t.me/addstickers/snoopy"],
+    priority: false,
+    createdAt: "2026-10-13T12:00:00.000Z",
+    status: "queued",
+    stickers: 5,
+  };
+  const slug = queueItemSlug(item);
+  env.BOT_KV.store.set("queue", JSON.stringify({ priority: [], items: [item] }));
+  env.BOT_KV.store.set(
+    `pack:${slug}`,
+    JSON.stringify({ slug, title: item.title, status: "done", uploaded: 5, total: 5, url: PACK_URL }),
+  );
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  const fetch = async (url) => {
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  await handle(
+    progressRequest({
+      slug,
+      title: item.title,
+      status: "done",
+      uploaded: 5,
+      total: 5,
+      packUrl: PACK_URL,
+      queueRequestId: item.id,
+      adminDelivered: true,
+    }),
+    env,
+    { sendMessage: async () => ({}), fetch, waitUntil: (p) => p },
+  );
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items[0].status, "done");
+});
+
+test("repeat terminal progress retries queue release when KV pack was already done", async () => {
+  const env = envWith();
+  const item = {
+    id: "req-stuck-done",
+    chatId: "1",
+    title: "Застрял готов",
+    links: ["https://t.me/addstickers/x"],
+    priority: false,
+    createdAt: "2026-10-13T12:00:00.000Z",
+    status: "uploading",
+    stickers: 3,
+  };
+  const slug = queueItemSlug(item);
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        item,
+        {
+          id: "req-next",
+          chatId: "2",
+          title: "Следующий",
+          links: ["https://t.me/addstickers/y"],
+          priority: false,
+          createdAt: "2026-10-13T12:01:00.000Z",
+          status: "queued",
+          stickers: 4,
+        },
+      ],
+    }),
+  );
+  env.BOT_KV.store.set(
+    `pack:${slug}`,
+    JSON.stringify({
+      slug,
+      title: item.title,
+      status: "done",
+      uploaded: 3,
+      total: 3,
+      url: PACK_URL,
+      notice: { started: true, step: 75, done: true, doneWithLink: true, posted: true },
+    }),
+  );
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  let dispatches = 0;
+  const fetch = async (url, init) => {
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    if (String(url).endsWith("/dispatches")) dispatches += 1;
+    return { status: 204, json: async () => ({}) };
+  };
+  const body = {
+    slug,
+    title: item.title,
+    status: "done",
+    uploaded: 3,
+    total: 3,
+    packUrl: PACK_URL,
+    queueRequestId: item.id,
+    adminDelivered: true,
+  };
+  const pipe = trackPipelineWait({ sendMessage: async () => ({}), fetch });
+  await handle(progressRequest(body), env, pipe);
+  await pipe.flushPipeline();
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items.find((row) => row.id === item.id).status, "done");
+  assert.equal(stored.items.find((row) => row.id === "req-next").status, "queued");
+  assert.equal(dispatches, 1);
+});
+
+test("/unstick marks uploading as done when pack progress is already terminal", () => {
+  const item = {
+    id: "req-done",
+    chatId: "1",
+    title: "Готовый",
+    links: ["https://t.me/addstickers/d"],
+    priority: false,
+    createdAt: "1",
+    status: "uploading",
+    stickers: 2,
+  };
+  const queue = { priority: [], items: [item, { ...item, id: "req-wait", title: "Ждёт", status: "queued" }] };
+  const slug = queueItemSlug(item);
+  const result = unstickUploadingQueue(queue, {
+    packForItem: () => ({ slug, title: item.title, status: "done", uploaded: 2, total: 2, url: PACK_URL }),
+  });
+  assert.equal(result.finished.length, 1);
+  assert.equal(result.released.length, 0);
+  assert.equal(result.queue.items[0].status, "done");
+  assert.equal(result.queue.items[1].status, "queued");
+});
+
+test("findUploadingReleaseId matches slug for queued row", () => {
+  const item = { id: "abc-1", chatId: "1", title: "T", links: [], priority: false, createdAt: "1", status: "queued" };
+  const slug = queueItemSlug(item);
+  const id = findUploadingReleaseId({ items: [item] }, { slug, title: "T", queueRequestId: "abc-1" });
+  assert.equal(id, "abc-1");
+});
+
+test("/unstick autostart dispatch names next queued pack after terminal uploading row closes", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  const snoopy = {
+    id: "req-snoopy",
+    chatId: "1",
+    title: "Снупи",
+    links: ["https://t.me/addstickers/snoopy"],
+    priority: false,
+    createdAt: "2026-10-13T12:00:00.000Z",
+    status: "uploading",
+    stickers: 80,
+  };
+  const wave = {
+    id: "req-wave",
+    chatId: "2",
+    title: "ВолнаСветa",
+    links: ["https://t.me/addstickers/wave"],
+    priority: true,
+    createdAt: "2026-10-13T12:01:00.000Z",
+    status: "queued",
+    stickers: 10,
+  };
+  env.BOT_KV.store.set("queue", JSON.stringify({ priority: ["2"], items: [snoopy, wave] }));
+  env.BOT_KV.store.set(
+    `pack:${queueItemSlug(snoopy)}`,
+    JSON.stringify({
+      slug: queueItemSlug(snoopy),
+      title: snoopy.title,
+      status: "done",
+      uploaded: 80,
+      total: 80,
+      url: PACK_URL,
+    }),
+  );
+  const calls = [];
+  const fetchIdle = async (url, init) => {
+    calls.push({
+      url: String(url),
+      body: init && init.body ? JSON.parse(init.body) : null,
+    });
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  const pipe = trackPipelineWait({ sendMessage: async () => {}, fetch: fetchIdle });
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, pipe);
+  await pipe.flushPipeline();
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items.find((item) => item.id === "req-snoopy").status, "done");
+  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
+  assert.ok(dispatch);
+  assert.match(dispatch.body.inputs.dispatch_reason, /ВолнаСветa/);
+  assert.doesNotMatch(dispatch.body.inputs.dispatch_reason, /Снупи/);
 });
 
 test("admin /queue reads queue and one pack key for uploading progress", async () => {

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   adminRestartReason,
   enrichDispatchReason,
+  nextAutostartPackTitle,
   nextQueuePackTitle,
   queuePipelineReason,
   QUEUE_REASON,
@@ -21,6 +22,37 @@ const queue = {
 
 test("nextQueuePackTitle prefers uploading row", () => {
   assert.equal(nextQueuePackTitle(queue), "Запад");
+});
+
+test("nextAutostartPackTitle ignores uploading and picks priority queued", () => {
+  assert.equal(nextAutostartPackTitle(queue), "Восток");
+  const mixed = {
+    priority: [],
+    items: [
+      { id: "a", status: "uploading", title: "Снупи", createdAt: "2026-01-01T00:00:00.000Z", priority: false },
+      { id: "b", status: "queued", title: "ВолнаСветa", createdAt: "2026-01-02T00:00:00.000Z", priority: true },
+      { id: "c", status: "queued", title: "Дьяволица", createdAt: "2026-01-03T00:00:00.000Z", priority: false },
+    ],
+  };
+  assert.equal(nextAutostartPackTitle(mixed), "ВолнаСветa");
+});
+
+test("queuePipelineReason for autostart names next queued pack, not stale uploading", () => {
+  const stuck = {
+    priority: [],
+    items: [
+      { id: "a", status: "uploading", title: "Снупи", createdAt: "2026-01-01T00:00:00.000Z", priority: false },
+      { id: "b", status: "queued", title: "ВолнаСветa", createdAt: "2026-01-02T00:00:00.000Z", priority: true },
+    ],
+  };
+  assert.equal(
+    queuePipelineReason(QUEUE_REASON.afterUnstick, stuck, { preferQueued: true }),
+    "очередь: автозапуск после /unstick — «ВолнаСветa»",
+  );
+});
+
+test("adminRestartReason prefers next queued over stale uploading", () => {
+  assert.equal(adminRestartReason(queue), "админ: /restart — «Восток»");
 });
 
 test("nextQueuePackTitle picks priority queued item", () => {

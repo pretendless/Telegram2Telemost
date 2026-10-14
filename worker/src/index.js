@@ -42,6 +42,8 @@ import {
   queueStatusText,
   unstickReply,
   unstickUploadingQueue,
+  skipReply,
+  skipUploadingQueue,
   releaseRequest,
   renderPackCheck,
   staticReply,
@@ -251,6 +253,7 @@ async function applyProgress(env, pack, deps) {
   const steps = notificationSteps(notice, pack);
   const waitingForUrl = pack.status === "done" && !pack.url;
   if (sameVisibleProgress(prev, pack) && steps.length === 0) {
+    await finishQueueItem(env, pack, prev, deps);
     return { ok: true, status: 200, notified: 0, posted: false, waitingForUrl };
   }
 
@@ -325,24 +328,56 @@ async function writeQueue(kv, queue) {
   await kv.put(QUEUE_KEY, JSON.stringify(queue));
 }
 
+async function packProgressByUploadingId(kv, queue) {
+  const packByItemId = {};
+  for (const item of queue.items) {
+    if (item.status !== "uploading") continue;
+    packByItemId[item.id] = await readPackProgress(kv, item);
+  }
+  return packByItemId;
+}
+
+async function reconcileTerminalUploadingQueue(kv, queue) {
+  const packByItemId = await packProgressByUploadingId(kv, queue);
+  return unstickUploadingQueue(queue, {
+    packForItem: (item) => packByItemId[item.id] || null,
+    terminalOnly: true,
+  });
+}
+
 function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
-  const run = () =>
-    startPipelineIfIdle(deps.fetch || fetch, env, queue, { dispatchReason }).catch((err) => {
+  const run = async () => {
+    try {
+      let q = queue;
+      if (env.BOT_KV) {
+        const reconciled = await reconcileTerminalUploadingQueue(env.BOT_KV, q);
+        if (reconciled.changed) {
+          await writeQueue(env.BOT_KV, reconciled.queue);
+          q = reconciled.queue;
+        }
+      }
+      await startPipelineIfIdle(deps.fetch || fetch, env, q, { dispatchReason });
+    } catch (err) {
       console.error("pipeline start failed", err && err.message);
-    });
+    }
+  };
   if (deps.waitUntil) deps.waitUntil(run());
   else run();
 }
 
 async function finishQueueItem(env, pack, prev, deps) {
   if (!terminalProgress(pack)) return null;
-  if (prev && terminalProgress(prev)) return null;
   let queue = await readQueue(env.BOT_KV);
   const id = findUploadingReleaseId(queue, pack);
   if (!id) return queue;
+  const row = queue.items.find((item) => item.id === id);
+  if (!row) return queue;
+  if (row.status === "done" || row.status === "error") return queue;
+  if (prev && terminalProgress(prev) && row.status !== "uploading" && row.status !== "queued") return queue;
   const status = pack.status === "error" ? "error" : "done";
   const released = releaseRequest(queue, id, status);
-  if (released.changed) await writeQueue(env.BOT_KV, released.queue);
+  if (!released.changed) return queue;
+  await writeQueue(env.BOT_KV, released.queue);
   schedulePipeline(env, released.queue, deps, { dispatchReason: QUEUE_REASON.afterFinish });
   return released.queue;
 }
@@ -532,10 +567,31 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       const fetchImpl = deps.fetch || fetch;
       const actionsRunning = await telemostRunActive(fetchImpl, env);
       if (actionsRunning) {
-        out = unstickReply({ reason: "none", released: [], actionsRunning: true });
+        const queue = await readQueue(env.BOT_KV);
+        const packByItemId = await packProgressByUploadingId(env.BOT_KV, queue);
+        const cleaned = unstickUploadingQueue(queue, {
+          packForItem: (item) => packByItemId[item.id] || null,
+          terminalOnly: true,
+        });
+        if (cleaned.changed) await writeQueue(env.BOT_KV, cleaned.queue);
+        out = unstickReply({
+          reason: cleaned.reason,
+          released: [],
+          finished: cleaned.finished,
+          actionsRunning: true,
+          cleanedWhileRunning: cleaned.changed,
+        });
       } else {
         const queue = await readQueue(env.BOT_KV);
-        const unstuck = unstickUploadingQueue(queue);
+        const kv = env.BOT_KV;
+        const packByItemId = {};
+        for (const item of queue.items) {
+          if (item.status !== "uploading") continue;
+          packByItemId[item.id] = await readPackProgress(kv, item);
+        }
+        const unstuck = unstickUploadingQueue(queue, {
+          packForItem: (item) => packByItemId[item.id] || null,
+        });
         if (unstuck.changed) {
           await writeQueue(env.BOT_KV, unstuck.queue);
           schedulePipeline(env, unstuck.queue, deps, { dispatchReason: QUEUE_REASON.afterUnstick });
@@ -543,6 +599,29 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         out = unstickReply({
           reason: unstuck.reason,
           released: unstuck.released,
+          finished: unstuck.finished,
+          actionsRunning: false,
+        });
+      }
+    }
+  } else if (cmd === "/skip") {
+    if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
+      out = "Эта команда только для администратора.";
+    } else {
+      const fetchImpl = deps.fetch || fetch;
+      const actionsRunning = await telemostRunActive(fetchImpl, env);
+      if (actionsRunning) {
+        out = skipReply({ reason: "none", skipped: [], actionsRunning: true });
+      } else {
+        const queue = await readQueue(env.BOT_KV);
+        const skipped = skipUploadingQueue(queue);
+        if (skipped.changed) {
+          await writeQueue(env.BOT_KV, skipped.queue);
+          schedulePipeline(env, skipped.queue, deps, { dispatchReason: QUEUE_REASON.afterUnstick });
+        }
+        out = skipReply({
+          reason: skipped.reason,
+          skipped: skipped.skipped,
           actionsRunning: false,
         });
       }
@@ -560,7 +639,15 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       send,
       fetch: deps.fetch,
       sleep: deps.sleep,
-      getQueue: async () => readQueue(env.BOT_KV),
+      getQueue: async () => {
+        let queue = await readQueue(env.BOT_KV);
+        const reconciled = await reconcileTerminalUploadingQueue(env.BOT_KV, queue);
+        if (reconciled.changed) {
+          await writeQueue(env.BOT_KV, reconciled.queue);
+          return reconciled.queue;
+        }
+        return queue;
+      },
     });
     return;
   } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {

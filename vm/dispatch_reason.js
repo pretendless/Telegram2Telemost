@@ -8,15 +8,21 @@ function byTime(left, right) {
   return left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : left.id < right.id ? -1 : 1;
 }
 
+/** Next queued request (priority first, FIFO within band). Matches restart_prepare on an idle dialog. */
+export function nextAutostartPackTitle(queue) {
+  const items = ((queue && queue.items) || []).filter(Boolean);
+  const waiting = items.filter((item) => item.status === "queued").sort(byTime);
+  const priority = waiting.filter((item) => item.priority);
+  const next = (priority.length ? priority : waiting)[0] || null;
+  return next ? oneLineTitle(next.title) : "";
+}
+
 /** Title of the pack this pipeline run will work on (uploading row, else next queued). */
 export function nextQueuePackTitle(queue) {
   const items = ((queue && queue.items) || []).filter(Boolean);
   const uploading = items.find((item) => item.status === "uploading");
   if (uploading) return oneLineTitle(uploading.title);
-  const waiting = items.filter((item) => item.status === "queued").sort(byTime);
-  const priority = waiting.filter((item) => item.priority);
-  const next = (priority.length ? priority : waiting)[0] || null;
-  return next ? oneLineTitle(next.title) : "";
+  return nextAutostartPackTitle(queue);
 }
 
 export function reasonAlreadyNamesPack(reason, packTitle) {
@@ -71,13 +77,16 @@ export const QUEUE_REASON = {
   autostart: "очередь: автозапуск pipeline (есть работа в KV)",
 };
 
-export function queuePipelineReason(scenario, queue, { preferTitle } = {}) {
-  const title = oneLineTitle(preferTitle) || nextQueuePackTitle(queue);
+export function queuePipelineReason(scenario, queue, { preferTitle, preferQueued = false } = {}) {
+  const title =
+    oneLineTitle(preferTitle) ||
+    (preferQueued ? nextAutostartPackTitle(queue) || nextQueuePackTitle(queue) : nextQueuePackTitle(queue));
   return withPackTitle(scenario, title);
 }
 
 export function adminRestartReason(queue) {
-  return withPackTitle("админ: /restart", nextQueuePackTitle(queue));
+  const title = nextAutostartPackTitle(queue) || nextQueuePackTitle(queue);
+  return withPackTitle("админ: /restart", title);
 }
 
 export function adminUploadReason(packs, { packTitles } = {}) {
