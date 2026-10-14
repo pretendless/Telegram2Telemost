@@ -86,7 +86,7 @@ async function focusRequest(id) {
   if (!response.ok) throw new Error('queue focus http ' + response.status);
 }
 
-function writeRequestPack(target) {
+export function writeRequestPack(target) {
   const slug = ('request-' + String(target.requestId || 'next').replace(/[^A-Za-z0-9_-]/g, '')).slice(0, 48);
   const sets = (target.links || []).map((link) => ({ url: link, name: stickerSetName(link) })).filter((set) => set.name);
   if (!sets.length) throw new Error('request has no sticker sets');

@@ -75,6 +75,7 @@ export const QUEUE_REASON = {
   afterFinish: "очередь: следующий пак после завершения",
   afterUnstick: "очередь: автозапуск после /unstick",
   afterSkip: "очередь: автозапуск после /skip",
+  afterDrainSession: "очередь: автозапуск после сессии drain",
   autostart: "очередь: автозапуск pipeline (есть работа в KV)",
 };
 

@@ -9,7 +9,7 @@ import {
 } from "../../scripts/admin_status.mjs";
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
 import { startPipelineIfIdle, telemostRunActive } from "../../vm/queue_runner.js";
-import { QUEUE_REASON } from "../../vm/dispatch_reason.js";
+import { QUEUE_REASON, queuePipelineReason } from "../../vm/dispatch_reason.js";
 import { defaultSessionReason, notifySessionStartOnce } from "../../vm/session_notify.js";
 import {
   CHANNEL_CHAT,
@@ -48,10 +48,12 @@ import {
   skipUploadingQueue,
   releaseRequest,
   renderPackCheck,
+  shouldSchedulePipelineAfterProgress,
   staticReply,
   statusText,
   terminalProgress,
   userRequestEvent,
+  queueHasQueuedWork,
 } from "./logic.js";
 import { loadAdminQueueState, reconcileTerminalUploadingFromProgress } from "./queue_view.js";
 
@@ -384,8 +386,25 @@ async function finishQueueItem(env, pack, prev, deps) {
   const released = releaseRequest(queue, id, status);
   if (!released.changed) return queue;
   await writeQueue(env.BOT_KV, released.queue);
-  schedulePipeline(env, released.queue, deps, { dispatchReason: QUEUE_REASON.afterFinish });
+  if (shouldSchedulePipelineAfterProgress(pack)) {
+    schedulePipeline(env, released.queue, deps, {
+      dispatchReason: queuePipelineReason(QUEUE_REASON.afterFinish, released.queue),
+    });
+  }
   return released.queue;
+}
+
+async function handleDrainComplete(request, env, deps) {
+  const secret = env.UPLOADER_SECRET || "";
+  if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
+  const queue = await readQueue(env.BOT_KV);
+  const queued = queueHasQueuedWork(queue);
+  if (queued) {
+    schedulePipeline(env, queue, deps, {
+      dispatchReason: queuePipelineReason(QUEUE_REASON.afterDrainSession, queue, { preferQueued: true }),
+    });
+  }
+  return json({ ok: true, queued });
 }
 
 function stickerLinks(names) {
@@ -777,6 +796,9 @@ export async function handle(request, env, deps = {}) {
   }
   if (request.method === "POST" && url.pathname === "/queue/claim") return handleClaim(request, env);
   if (request.method === "GET" && url.pathname === "/queue/plan") return handlePlan(request, env);
+  if (request.method === "POST" && url.pathname === "/queue/drain-complete") {
+    return handleDrainComplete(request, env, deps);
+  }
   if (request.method === "POST" && url.pathname === "/telegram") return handleTelegram(request, env, send, stickerCount, deps);
   return new Response("not found", { status: 404 });
 }
