@@ -11,9 +11,36 @@ import { createAdminFeed, postProgress, telegramIo } from './admin_status.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKS = join(ROOT, 'packs');
 const LOG = join(ROOT, 'logs', 'transfer-log.md');
-const BOT_URL = process.env.TELEMOST_BOT_URL || 'https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d';
+const DEFAULT_BOT_URL = 'https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d';
+const DEFAULT_STAGING_URL = 'https://telemost.yandex.ru/join#87de7b40-0e2e-0557-537a-fa84858fd189';
 const DEVTOOLS = process.env.DEVTOOLS || 'http://127.0.0.1:9222';
 const POLL_MS = 100;
+
+// Bot + staging chat URLs live in config/settings.json (overridable by env).
+export function loadTelemostUrls(env = process.env, settingsPath = join(ROOT, 'config', 'settings.json')) {
+  let file = {};
+  try {
+    file = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  } catch {
+    file = {};
+  }
+  const t = (file && file.telemost) || {};
+  const botUrl = String(env.TELEMOST_BOT_URL || t.botUrl || DEFAULT_BOT_URL).trim();
+  const stagingUrl = String(env.TELEMOST_STAGING_URL || t.stagingUrl || DEFAULT_STAGING_URL).trim();
+  const windowRaw = Number(env.TELEMOST_STAGING_WINDOW || t.stagingWindow || 5);
+  const stagingWindow = Number.isFinite(windowRaw) && windowRaw > 0 ? Math.floor(windowRaw) : 5;
+  const flag = env.TELEMOST_STAGING != null ? env.TELEMOST_STAGING : t.staging;
+  const stagingEnabled = Boolean(stagingUrl) && String(flag == null ? '1' : flag) !== '0' && String(flag) !== 'false';
+  return { botUrl, stagingUrl, stagingWindow, stagingEnabled };
+}
+
+export function stagingFillTo(uploaded, filled, total, windowSize) {
+  const start = Math.max(Number(filled) || 0, Number(uploaded) || 0);
+  const end = Math.min(Number(total) || 0, (Number(uploaded) || 0) + Math.max(1, Number(windowSize) || 5));
+  const need = [];
+  for (let i = start; i < end; i++) need.push(i);
+  return need;
+}
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -73,16 +100,41 @@ const pressJs = (sel) => `(() => {
 })()`;
 
 class Bot {
-  constructor(c) { this.c = c; }
+  constructor(c, urls = loadTelemostUrls()) {
+    this.c = c;
+    this.botUrl = urls.botUrl || DEFAULT_BOT_URL;
+    this.stagingUrl = urls.stagingUrl || '';
+    this.chatUrl = this.botUrl;
+    this.settledByTarget = Object.create(null);
+  }
+
+  async openChat(url) {
+    const target = String(url || '').trim();
+    if (!target) throw new Error('Telemost chat URL is empty');
+    this.chatUrl = target;
+    await this.ensureChat();
+  }
 
   async ensureChat() {
+    const target = this.chatUrl || this.botUrl;
+    const settled = this.settledByTarget[target];
     const href = await this.c.ev('location.href');
-    if (!href.startsWith(BOT_URL)) await this.c.send('Page.navigate', { url: BOT_URL });
+    const here = String(href || '');
+    const onTarget = here === target
+      || (settled && (here === settled || here.startsWith(settled)))
+      || (target.includes('#') && here.includes(target.slice(target.indexOf('#'))))
+      || (!target.includes('#') && here.startsWith(target));
+    if (!onTarget) {
+      await this.c.send('Page.navigate', { url: target });
+    }
     for (let i = 0; i < 60; i++) {
-      if (await this.c.ev(`!!document.querySelector('[contenteditable=true]')`)) return;
+      if (await this.c.ev(`!!document.querySelector('[contenteditable=true]')`)) {
+        this.settledByTarget[target] = await this.c.ev('location.href');
+        return;
+      }
       await sleep(500);
     }
-    throw new Error('Telemost bot chat did not load');
+    throw new Error('Telemost chat did not load');
   }
 
   // Every bubble (ours and the bot's) shares one id space so a reply can be
@@ -317,6 +369,169 @@ class Bot {
     const ownBeforeIds = ownIds(thread);
     await this.clickSend(true);
     return this.waitForReply(baseline, { until: 'sticker', ownBeforeIds, ...(opts || {}) });
+  }
+
+  // Staging buffer: put the file in the open chat and return when our bubble
+  // appears. Do not wait for a bot reply — that chat is only an image queue.
+  async sendImageNoWait(path, { timeoutMs = 60000 } = {}) {
+    await this.ensureChat();
+    await this.scrollToBottom();
+    const before = ownIds(await this.chatRows());
+    const nodeId = await this.fileInput();
+    await this.c.send('DOM.setFileInputFiles', { nodeId, files: [path] });
+    for (let i = 0; i < 80; i++) {
+      const open = await this.c.ev(`[...document.querySelectorAll('[aria-label="Отправить сообщение"]')].filter(e => e.getBoundingClientRect().width > 0).length > 1`);
+      if (open) break;
+      await sleep(POLL_MS);
+    }
+    await this.clickSend(true);
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const ownId = newOwnId(before, await this.chatRows());
+      if (ownId) return ownId;
+      await sleep(POLL_MS);
+    }
+    throw new Error('staging upload: own message did not appear');
+  }
+
+  async clickLabel(label) {
+    const lit = JSON.stringify(String(label));
+    for (let i = 0; i < 40; i++) {
+      const ok = await this.c.ev(`(() => {
+        const want = ${lit};
+        const nodes = [...document.querySelectorAll('button, [role="menuitem"], [role="button"], [aria-label], span, div')];
+        const el = nodes.find((e) => {
+          const aria = (e.getAttribute('aria-label') || '').trim();
+          const text = (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim();
+          if (aria === want || text === want) {
+            const r = e.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          }
+          return false;
+        });
+        if (!el) return false;
+        el.click();
+        return true;
+      })()`);
+      if (ok) return true;
+      await sleep(POLL_MS);
+    }
+    return false;
+  }
+
+  async openMessageMenu(ownId) {
+    const id = JSON.stringify(String(ownId));
+    const opened = await this.c.ev(`(() => {
+      const want = ${id};
+      const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+      if (!row) return false;
+      row.scrollIntoView({ block: 'center' });
+      const r = row.getBoundingClientRect();
+      const x = r.x + Math.min(r.width - 4, Math.max(4, r.width * 0.5));
+      const y = r.y + Math.min(r.height - 4, Math.max(4, r.height * 0.5));
+      const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2, buttons: 2 };
+      row.dispatchEvent(new MouseEvent('contextmenu', opts));
+      const btn = row.querySelector('[aria-label="Действия с сообщением"], [aria-label="Ещё"], button[aria-haspopup="menu"]');
+      if (btn) btn.click();
+      return true;
+    })()`);
+    if (!opened) throw new Error(`staging forward: message ${ownId} not found`);
+    await sleep(200);
+  }
+
+  // Forward one staging bubble into the stickers bot chat (no disk upload there).
+  async forwardOwnToBot(ownId, botUrl = this.botUrl) {
+    await this.scrollToBottom();
+    await this.openMessageMenu(ownId);
+    if (!(await this.clickLabel('Переслать'))) {
+      throw new Error('staging forward: Переслать not found');
+    }
+    await sleep(300);
+    const botName = 'Стикеры';
+    const botUser = (String(botUrl).match(/\/user\/([^/?#]+)/) || [])[1] || '';
+    const picked = await this.c.ev(`(() => {
+      const want = ${JSON.stringify(botName)};
+      const user = ${JSON.stringify(botUser)};
+      const nodes = [...document.querySelectorAll('button, [role="option"], [role="listitem"], a, div, span')];
+      const el = nodes.find((e) => {
+        const text = (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim();
+        const href = e.getAttribute && (e.getAttribute('href') || '');
+        const r = e.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) return false;
+        if (text === want || text.startsWith(want + ' ')) return true;
+        if (user && href && href.includes(user)) return true;
+        return false;
+      });
+      if (!el) return false;
+      el.click();
+      return true;
+    })()`);
+    if (!picked) {
+      const search = await this.c.ev(`(() => {
+        const el = document.querySelector('input[type="search"], input[placeholder*="Поиск"], input[aria-label*="Поиск"]');
+        if (!el) return false;
+        el.focus();
+        return true;
+      })()`);
+      if (search) {
+        await this.c.send('Input.insertText', { text: botName });
+        await sleep(400);
+        if (!(await this.clickLabel(botName))) {
+          throw new Error('staging forward: stickers chat not in picker');
+        }
+      } else {
+        throw new Error('staging forward: stickers chat not in picker');
+      }
+    }
+    await sleep(200);
+    const sent = await this.c.ev(`(() => {
+      const buttons = [...document.querySelectorAll('[aria-label="Отправить сообщение"], button')].filter((e) => e.getBoundingClientRect().width > 0);
+      const confirm = buttons.find((e) => {
+        const t = (e.innerText || e.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
+        return t === 'Переслать' || t === 'Отправить' || t === 'Отправить сообщение';
+      });
+      if (!confirm) return false;
+      confirm.click();
+      return true;
+    })()`);
+    void sent;
+    await this.openChat(botUrl);
+  }
+
+  // Best-effort residue cleanup: delete recent own bubbles (staging or bot chat).
+  async clearChatResidue({ limit = 200 } = {}) {
+    await this.ensureChat();
+    await this.scrollToBottom();
+    let removed = 0;
+    for (let n = 0; n < limit; n++) {
+      const thread = await this.chatRows();
+      const own = [...(thread || [])].reverse().find((row) => row && row.own);
+      if (!own) break;
+      try {
+        await this.openMessageMenu(own.id);
+      } catch {
+        break;
+      }
+      if (!(await this.clickLabel('Удалить')) && !(await this.clickLabel('Удалить сообщение'))) {
+        await this.c.ev(`(() => { document.body.click(); })()`);
+        break;
+      }
+      await sleep(150);
+      if (!(await this.clickLabel('Удалить у всех'))) await this.clickLabel('Удалить');
+      removed += 1;
+      await sleep(150);
+    }
+    const cleared = await this.c.ev(`(() => {
+      const btn = [...document.querySelectorAll('button, [role="menuitem"]')].find((e) => /Очистить историю|Clear history/i.test((e.innerText || e.getAttribute('aria-label') || '')));
+      if (!btn || btn.getBoundingClientRect().width < 1) return false;
+      btn.click();
+      return true;
+    })()`);
+    if (cleared) {
+      await sleep(200);
+      await this.clickLabel('Очистить') || await this.clickLabel('Удалить');
+    }
+    return removed;
   }
 
   // Scroll the sticker-bot history once and keep every message. A later run
@@ -1252,10 +1467,54 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     log(m.title, '', 'набор создан', 'без /start и без /done');
   }
 
+  const urls = loadTelemostUrls();
+  const useStaging = Boolean(urls.stagingEnabled && (bot.stagingUrl || urls.stagingUrl));
+  const stagingUrl = bot.stagingUrl || urls.stagingUrl;
+  const botUrl = bot.botUrl || urls.botUrl;
+  const stagedOwn = new Map();
+  let stagingFilled = tm.uploaded;
+
+  async function fillStagingWindow() {
+    if (!useStaging) return;
+    const need = stagingFillTo(tm.uploaded, stagingFilled, m.images.length, urls.stagingWindow);
+    if (!need.length) return;
+    await bot.openChat(stagingUrl);
+    for (const idx of need) {
+      const item = m.images[idx];
+      const path = join(PACKS, dir, item.file);
+      console.log(dir, 'stage', item.file);
+      const ownId = await bot.sendImageNoWait(path);
+      stagedOwn.set(idx, ownId);
+      stagingFilled = idx + 1;
+    }
+    await bot.openChat(botUrl);
+  }
+
+  async function deliverImage(file, index, onWait) {
+    if (!useStaging) return bot.sendImage(file, { onWait });
+    await fillStagingWindow();
+    let ownId = stagedOwn.get(index);
+    if (!ownId) {
+      await bot.openChat(stagingUrl);
+      ownId = await bot.sendImageNoWait(file);
+      stagedOwn.set(index, ownId);
+      stagingFilled = Math.max(stagingFilled, index + 1);
+    }
+    await bot.openChat(botUrl);
+    const thread = await bot.chatRows();
+    const baseline = (thread || []).filter((row) => row && !row.own).map(({ id, text, links }) => ({ id, text, links }));
+    const ownBeforeIds = ownIds(thread);
+    await bot.openChat(stagingUrl);
+    console.log(dir, 'forward', m.images[index].file);
+    await bot.forwardOwnToBot(ownId, botUrl);
+    return bot.waitForReply(baseline, { until: 'sticker', ownBeforeIds, onWait });
+  }
+
   for (let i = tm.uploaded; i < m.images.length; i++) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
-    console.log(dir, 'send', img.file);
+    if (useStaging) await fillStagingWindow();
+    console.log(dir, useStaging ? 'forward-send' : 'send', img.file);
     await note({ phase: 'sending', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
     const onWait = (seconds, seenLine) => note({
       phase: 'waiting',
@@ -1284,13 +1543,17 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
         seconds: Math.round(reply.seconds || 0),
         lastLine: waitLastLine(30, reply.text || 'нет ответа, перезагрузка'),
       });
+      if (useStaging && outboundStep === 'image') stagedOwn.delete(i);
+      await bot.openChat(botUrl);
       await bot.recoverChat();
     };
     while (!accepted) {
       let reply;
       if (outboundStep === 'image') {
-        reply = await bot.sendImage(file, { onWait });
+        await bot.openChat(botUrl);
+        reply = await deliverImage(file, i, onWait);
       } else {
+        await bot.openChat(botUrl);
         const text = emojiAnswerText || emojiAnswer('', img.emoji);
         reply = await bot.say(text, { onWait, until: 'sticker' });
       }
@@ -1311,6 +1574,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
           savePack(p);
           break;
         }
+        if (useStaging && outboundStep === 'image') stagedOwn.delete(i);
         outboundStep = 'image';
         await sleep(1000);
         continue;
@@ -1324,6 +1588,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       }
       let done = reply;
       if (outboundStep === 'emoji' && reply.kind === 'emoji') {
+        await bot.openChat(botUrl);
         done = await bot.say('🙂', { onWait, until: 'sticker' });
         if (done.kind === 'stall') {
           await recoverFromStall(done, 'зависание после эмодзи');
@@ -1350,6 +1615,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
             savePack(p);
             break;
           }
+          if (useStaging) stagedOwn.delete(i);
           outboundStep = 'image';
           await sleep(1000);
           continue;
@@ -1361,6 +1627,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       await note({ phase: 'ready', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
       accepted = true;
       tm.pendingFile = null;
+      stagedOwn.delete(i);
     }
     if (!accepted) continue;
     tm.uploaded = i + 1;
@@ -1378,6 +1645,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     return;
   }
   let readyText = lastText;
+  await bot.openChat(botUrl);
   if (finalizeDecision(readyText).action !== 'done') {
     const seen = await bot.recentIncoming(1);
     readyText = seen.text;
@@ -1425,6 +1693,24 @@ async function resolveSavedPackUrl(bot, text, links, dir) {
   return { text: body, links: hrefs, url };
 }
 
+async function cleanupStagingChats(bot, packTitle, dirSlug) {
+  const urls = loadTelemostUrls();
+  if (!urls.stagingEnabled || !urls.stagingUrl) return;
+  const stagingUrl = bot.stagingUrl || urls.stagingUrl;
+  const botUrl = bot.botUrl || urls.botUrl;
+  try {
+    await bot.openChat(stagingUrl);
+    const stagingRemoved = await bot.clearChatResidue();
+    await bot.openChat(botUrl);
+    const botRemoved = await bot.clearChatResidue();
+    console.log(dirSlug, 'cleanup', 'staging', stagingRemoved, 'bot', botRemoved);
+    log(packTitle, '', 'очистка чатов', `staging ${stagingRemoved}, bot ${botRemoved}`);
+  } catch (e) {
+    console.log(dirSlug, 'cleanup-failed', e && e.message ? e.message : e);
+    log(packTitle, '', 'очистка чатов', e && e.message ? e.message : 'failed');
+  }
+}
+
 async function publishSavedPack(bot, p, dir, note = async () => {}) {
   const m = p.meta;
   const tm = m.telemost;
@@ -1463,6 +1749,7 @@ async function publishSavedPack(bot, p, dir, note = async () => {}) {
   await note({ phase: 'saved', pack: m.title, lastLine: doneText });
   await note({ phase: 'link', pack: m.title, lastLine: doneText, link: saved.url });
   console.log(dir, 'pack-link-notified', saved.url);
+  await cleanupStagingChats(bot, m.title, dir);
   return true;
 }
 
@@ -1598,7 +1885,9 @@ async function main() {
   if (skipped.length) console.log('skip', skipped.join(' '));
   dirs = dirsForRun(dirs, { finalize, close });
   const c = await connect();
-  const bot = new Bot(c);
+  const urls = loadTelemostUrls();
+  const bot = new Bot(c, urls);
+  if (urls.stagingEnabled) console.log('staging', urls.stagingUrl, 'window', urls.stagingWindow);
   const dirRef = { dir: '', title: '' };
   const note = openAdminFeed(dirRef);
   if (peek) {
