@@ -507,7 +507,7 @@ test("menuLabelMatches accepts RU and EN forward menu labels", () => {
   assert.equal(menuLabelMatches("", "Forward"), true);
   assert.equal(menuLabelMatches("Forward to…", "Forward"), true);
   assert.equal(menuLabelMatches("Удалить", ""), false);
-  assert.deepEqual([...STAGING_FORWARD_MENU_LABELS], ["Переслать", "Forward"]);
+  assert.deepEqual([...STAGING_FORWARD_MENU_LABELS], ["Переслать сообщение", "Переслать", "Forward"]);
 });
 
 test("stagingRowsForForward prefers survey then merges live hasImage", async () => {
