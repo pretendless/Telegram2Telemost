@@ -666,17 +666,17 @@ test("restart follows the open pack, or the next stored request", () => {
   assert.equal(stickerSetName("https://t.me/addstickers/vostok"), "vostok");
 });
 
-test("closeOpenPackPlan abandons a zero-sticker picture draft, not /done", () => {
+test("closeOpenPackPlan uses /done for a zero-sticker picture draft", () => {
   const pictureOnly = "Создан набор стикеров «Маф, Изис и Агнес». Отправьте картинку для стикера.";
   const messages = [
     { own: false, text: pictureOnly },
   ];
   assert.equal(acceptedInOpenPack(messages), 0);
-  assert.equal(shouldAbandonOpenPack(pictureOnly, messages), true);
-  assert.deepEqual(closeOpenPackPlan(pictureOnly, messages), { action: "abandon" });
+  assert.equal(shouldAbandonOpenPack(pictureOnly, messages), false);
+  assert.deepEqual(closeOpenPackPlan(pictureOnly, messages), { action: "done" });
   assert.equal(
     closeOpenPackPlan("Отправьте картинку для стикера.\n/done — завершить действие", messages).action,
-    "abandon",
+    "done",
   );
 });
 
@@ -715,9 +715,9 @@ test("latestIncomingText ignores an older saved bubble when a draft is open", ()
   assert.equal(unfinishedPack(latestIncomingText(incoming)), true);
 
   const messages = [{ own: false, text: open }];
-  assert.equal(shouldAbandonOpenPack(open, messages), true);
-  assert.deepEqual(closeOpenPackPlan(open, messages), { action: "abandon" });
-  assert.deepEqual(closeOpenPackPlan(latestIncomingText(incoming), messages), { action: "abandon" });
+  assert.equal(shouldAbandonOpenPack(open, messages), false);
+  assert.deepEqual(closeOpenPackPlan(open, messages), { action: "done" });
+  assert.deepEqual(closeOpenPackPlan(latestIncomingText(incoming), messages), { action: "done" });
 });
 
 test("incomingTailText splits joined bubbles without DOM bubbles", () => {
