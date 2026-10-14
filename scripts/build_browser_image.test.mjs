@@ -40,6 +40,10 @@ test('the Telemost session mounts a writable sticker cache and forwards the Acti
   assert.match(workflow, /-e GITHUB_RUN_ID/);
   assert.match(workflow, /-e RUN_URL/);
   assert.match(workflow, /github\.server_url.*actions\/runs/);
+  assert.equal((workflow.match(/vars\.telemostbufferchannel/g) || []).length, 2);
+  assert.equal((workflow.match(/vars\.telemoststickerbot/g) || []).length, 2);
+  assert.equal((workflow.match(/-e TELEMOST_STAGING_URL/g) || []).length, 2);
+  assert.equal((workflow.match(/-e TELEMOST_BOT_URL/g) || []).length, 2);
 });
 
 test('the image build reuses one GitHub Actions cache scope', () => {
