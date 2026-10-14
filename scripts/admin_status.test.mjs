@@ -3,6 +3,9 @@ import test from 'node:test';
 import {
   ADMIN_CHAT_ID,
   adminDelivery,
+  bindPackProgress,
+  clearPackProgress,
+  progressFieldsForPack,
   adminJobText,
   createAdminFeed,
   currentAdminJob,
@@ -379,4 +382,57 @@ test('a restart failure names the open pack, or says перезапуск when t
   assert.match(sent[1], /«Север»/);
   assert.equal(sent[1].includes('«пак»'), false);
   rmSync(dir, { recursive: true });
+});
+
+test('two packs in one session do not keep a stale requester, and TELEGRAM_CHAT_ID is not one', () => {
+  const previous = process.env.TELEGRAM_CHAT_ID;
+  process.env.TELEGRAM_CHAT_ID = '8502935020';
+  try {
+    const dirRef = { dir: 'request-a', title: '', queueRequestId: '', requesterChatId: '' };
+    bindPackProgress(dirRef, { title: 'Том', queueRequestId: 'req-a', requesterChatId: '111' });
+    assert.deepEqual(progressFieldsForPack(dirRef), {
+      requester: '111',
+      requesterChatId: '111',
+      queueRequestId: 'req-a',
+    });
+    clearPackProgress(dirRef);
+    bindPackProgress(dirRef, { title: 'Дьяволица', queueRequestId: 'req-b', requesterChatId: '222' });
+    assert.equal(progressFieldsForPack(dirRef).requesterChatId, '222');
+    assert.equal(progressFieldsForPack(dirRef).queueRequestId, 'req-b');
+    clearPackProgress(dirRef);
+    bindPackProgress(dirRef, { title: 'Без метаданных' });
+    assert.deepEqual(progressFieldsForPack(dirRef), {
+      requester: null,
+      requesterChatId: null,
+      queueRequestId: null,
+    });
+    dirRef.queueRequestId = 'req-a';
+    dirRef.requesterChatId = '111';
+    bindPackProgress(dirRef, { title: 'Пустой', queueRequestId: '', requesterChatId: '' });
+    assert.equal(progressFieldsForPack(dirRef).requesterChatId, null);
+    dirRef.queueRequestId = 'req-b';
+    dirRef.requesterChatId = '222';
+    bindPackProgress(dirRef, { queueRequestId: 'req-a', requesterChatId: '111' });
+    assert.equal(dirRef.queueRequestId, 'req-b');
+    assert.equal(dirRef.requesterChatId, '222');
+    assert.equal(JSON.stringify(progressFieldsForPack(dirRef)).includes('8502935020'), false);
+  } finally {
+    if (previous == null) delete process.env.TELEGRAM_CHAT_ID;
+    else process.env.TELEGRAM_CHAT_ID = previous;
+  }
+});
+
+test('the admin feed sends the card only to the admin chat', async () => {
+  const chats = [];
+  const io = {
+    send: async (chatId) => {
+      chats.push(String(chatId));
+      return { message_id: 4 };
+    },
+    edit: async () => {},
+    delete: async () => {},
+  };
+  const notify = createAdminFeed({ io, requester: () => '222' });
+  await notify({ phase: 'sending', pack: 'Дьяволица', index: 1, total: 4, at: '20:33' });
+  assert.deepEqual(chats, [ADMIN_CHAT_ID]);
 });

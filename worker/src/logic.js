@@ -35,7 +35,7 @@ export const START =
   FORMAT +
   `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
   "\n\nСначала /create — затем одним сообщением название и ссылки (см. /format). Бот проверит набор и поставит его в очередь." +
-  "\n\nВы подписаны на ход переноса: бот напишет, когда пак начнёт загружаться, как идёт загрузка и пришлёт ссылку на готовый пак в Телемосте. /status — текущее состояние, /stop — отписаться.";
+  "\n\nБот пишет вам только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылает. /status — ваши запросы, /stop — отписаться.";
 
 export const DESCRIPTION =
   `${BOT_NAME} переносит стикеры из Telegram в Телемост.\n` +
@@ -854,14 +854,25 @@ export function queueItemBySlug(queue, slug) {
   return ((queue && queue.items) || []).find((item) => queueItemSlug(item) === key) || null;
 }
 
-// Queue KV is authoritative for who submitted the request. Progress may carry the
-// admin chat id in `requester` when pack.json omitted requesterChatId.
+// User progress is delivered only when requesterChatId is the chat that owns
+// queueRequestId and the slug is that row. A missing id, a mismatch, or a slug
+// from another pack is not a recipient — never a subscriber list or a previous row.
 export function resolveRequesterChatId(pack, item) {
-  const fromItem = item && item.chatId != null ? String(item.chatId).trim() : "";
-  if (/^[0-9]{1,16}$/.test(fromItem)) return fromItem;
   const explicit = pack && pack.requesterChatId != null ? String(pack.requesterChatId).trim() : "";
-  if (/^[0-9]{1,16}$/.test(explicit)) return explicit;
-  return null;
+  const requestId = pack && pack.queueRequestId ? String(pack.queueRequestId).trim() : "";
+  if (!item || !requestId || String(item.id) !== requestId) return null;
+  if (!/^[0-9]{1,16}$/.test(explicit) || String(item.chatId) !== explicit) return null;
+  if (!pack.slug || pack.slug !== queueItemSlug(item)) return null;
+  return explicit;
+}
+
+export function matchedProgressRequester(pack, queue) {
+  const requestId = pack && pack.queueRequestId ? String(pack.queueRequestId).trim() : "";
+  if (!requestId) return null;
+  const item = queueItemByRequestId(queue, requestId);
+  const chatId = resolveRequesterChatId(pack, item);
+  if (!chatId) return null;
+  return { item, chatId };
 }
 
 export function activeProgressPacks(packs) {

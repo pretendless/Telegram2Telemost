@@ -212,25 +212,23 @@ test("progress endpoint waits for packUrl, then notifies and does not repeat", a
   const waitingJson = await waiting.json();
   assert.equal(waitingJson.waitingForUrl, true);
   assert.equal(waitingJson.posted, false);
-  assert.equal(sent.length, 2);
-  assert.match(sent[0].text, /Начата загрузка/);
-  assert.equal(sent[0].chatId, INITIAL_SUBSCRIBER);
-  assert.equal(String(sent[1].chatId), String(INITIAL_SUBSCRIBER));
-  assert.match(sent[1].text, /«Джек и Бевка» \| стикер 144 из 144 \| старт/);
+  assert.equal(sent.length, 1);
+  assert.equal(String(sent[0].chatId), String(INITIAL_SUBSCRIBER));
+  assert.match(sent[0].text, /«Джек и Бевка» \| стикер 144 из 144 \| старт/);
+  assert.equal(sent.some((row) => row.text.includes("Начата загрузка")), false);
 
   sent.length = 0;
   const done = await handle(progressRequest({ ...body, packUrl: PACK_URL }), env, { sendMessage });
   assert.equal(done.status, 200);
   const doneJson = await done.json();
   assert.equal(doneJson.posted, true);
-  assert.equal(sent.length, 3);
-  assert.match(sent[0].text, /^Готово:/);
-  assert.equal(sent[0].chatId, INITIAL_SUBSCRIBER);
-  assert.equal(sent[1].chatId, "@tg2tm");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].chatId, "@tg2tm");
+  assert.match(sent[0].text, /8377/);
+  assert.equal(String(sent[1].chatId), String(INITIAL_SUBSCRIBER));
+  assert.match(sent[1].text, /ссылка/);
   assert.match(sent[1].text, /8377/);
-  assert.equal(String(sent[2].chatId), String(INITIAL_SUBSCRIBER));
-  assert.match(sent[2].text, /ссылка/);
-  assert.match(sent[2].text, /8377/);
+  assert.equal(sent.some((row) => row.text.startsWith("Готово:")), false);
 
   sent.length = 0;
   env.BOT_KV.ops.get = 0;
@@ -362,8 +360,7 @@ test("progress that the uploader already told the admin does not send a second c
   }), env, {
     sendMessage: async (_env, _chatId, text) => sent.push(text),
   });
-  assert.equal(sent.some((text) => text.includes("стикер 1 из 144")), false);
-  assert.equal(sent.some((text) => text.includes("Начата загрузка")), true);
+  assert.equal(sent.length, 0);
 });
 
 function packMessage(chatId, text) {
@@ -1537,6 +1534,7 @@ test("progress edits the queue requester card even when requester is the admin c
       uploaded: 2,
       total: 5,
       queueRequestId: item.id,
+      requesterChatId: "424242",
       requester: "8502935020",
       adminDelivered: true,
     }),
@@ -1550,14 +1548,153 @@ test("progress edits the queue requester card even when requester is the admin c
   assert.match(edited[0].text, /стикер 2 из 5/);
 });
 
-test("resolveRequesterChatId prefers the queue item over progress requester", () => {
-  const item = { chatId: "424242" };
+test("resolveRequesterChatId requires requesterChatId to match that queue row", () => {
+  const item = { id: "req-1", chatId: "424242" };
+  const slug = queueItemSlug(item);
   assert.equal(
-    resolveRequesterChatId({ requesterChatId: "8502935020", requester: "8502935020" }, item),
+    resolveRequesterChatId(
+      { slug, queueRequestId: "req-1", requesterChatId: "424242", requester: "8502935020" },
+      item,
+    ),
     "424242",
   );
-  const keyed = { ...item, id: "abc" };
-  assert.equal(queueItemBySlug({ items: [keyed] }, queueItemSlug(keyed)), keyed);
+  assert.equal(
+    resolveRequesterChatId(
+      { slug, queueRequestId: "req-1", requesterChatId: "8502935020", requester: "8502935020" },
+      item,
+    ),
+    null,
+  );
+  assert.equal(resolveRequesterChatId({ slug, queueRequestId: "req-1", requester: "8502935020" }, item), null);
+  assert.equal(queueItemBySlug({ items: [item] }, slug), item);
+});
+
+test("progress reaches both admins and only the requester of that pack", async () => {
+  const env = envWith();
+  const admin = "8502935020";
+  const otherAdmin = "777";
+  const userA = "111";
+  const userB = "222";
+  env.LOGIN_CHAT_IDS = `${admin},${otherAdmin}`;
+  env.BOT_KV.store.set("meta:seeded", "1");
+  env.BOT_KV.store.set(`sub:${admin}`, "1");
+  env.BOT_KV.store.set(`sub:${userA}`, "1");
+  env.BOT_KV.store.set(`sub:${userB}`, "1");
+  const packA = {
+    id: "req-a",
+    chatId: userA,
+    title: "Том",
+    links: ["https://t.me/addstickers/tom"],
+    priority: false,
+    createdAt: "2026-10-14T20:00:00.000Z",
+    status: "uploading",
+    stickers: 10,
+  };
+  const packB = {
+    id: "req-b",
+    chatId: userB,
+    title: "Дьяволица",
+    links: ["https://t.me/addstickers/dya"],
+    priority: false,
+    createdAt: "2026-10-14T20:01:00.000Z",
+    status: "queued",
+    stickers: 10,
+  };
+  const writeQueue = (items) => env.BOT_KV.store.set("queue", JSON.stringify({ priority: [], items }));
+  writeQueue([packA, packB]);
+  const sent = [];
+  const sendMessage = async (_env, chatId, text) => {
+    sent.push({ chatId: String(chatId), text });
+    return { message_id: sent.length };
+  };
+  const chats = () => new Set(sent.map((row) => row.chatId));
+
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(packA),
+      title: packA.title,
+      status: "uploading",
+      uploaded: 2,
+      total: 10,
+      queueRequestId: packA.id,
+      requesterChatId: userA,
+    }),
+    env,
+    { sendMessage },
+  );
+  assert.equal(chats().has(admin), true);
+  assert.equal(chats().has(otherAdmin), true);
+  assert.equal(chats().has(userA), true);
+  assert.equal(chats().has(userB), false);
+  assert.equal(sent.some((row) => row.chatId === userA && row.text.includes("Том")), true);
+  assert.equal(sent.some((row) => row.text.includes("Начата загрузка")), false);
+
+  sent.length = 0;
+  writeQueue([{ ...packA, status: "done" }, { ...packB, status: "uploading" }]);
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(packB),
+      title: packB.title,
+      status: "uploading",
+      uploaded: 1,
+      total: 10,
+      queueRequestId: packB.id,
+      requesterChatId: userB,
+    }),
+    env,
+    { sendMessage },
+  );
+  assert.equal(chats().has(userB), true);
+  assert.equal(chats().has(userA), false);
+  assert.equal(chats().has(admin), true);
+  assert.equal(chats().has(otherAdmin), true);
+  assert.equal(sent.some((row) => row.chatId === userB && row.text.includes("Дьяволица")), true);
+  assert.equal(sent.some((row) => row.chatId === userA && row.text.includes("Дьяволица")), false);
+
+  sent.length = 0;
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(packB),
+      title: packB.title,
+      status: "uploading",
+      uploaded: 3,
+      total: 10,
+      queueRequestId: packB.id,
+    }),
+    env,
+    { sendMessage },
+  );
+  assert.equal(chats().has(userA), false);
+  assert.equal(chats().has(userB), false);
+  assert.equal(chats().has(admin), true);
+  assert.equal(chats().has(otherAdmin), true);
+
+  sent.length = 0;
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(packB),
+      title: packB.title,
+      status: "uploading",
+      uploaded: 4,
+      total: 10,
+      queueRequestId: packA.id,
+      requesterChatId: userA,
+    }),
+    env,
+    { sendMessage },
+  );
+  assert.equal(chats().has(userA), false);
+  assert.equal(chats().has(userB), false);
+  assert.equal(sent.filter((row) => row.chatId === userA || row.chatId === userB).length, 0);
+
+  sent.length = 0;
+  await handle(packMessage(333, "/status"), env, { sendMessage });
+  assert.equal(sent.length, 1);
+  assert.equal(/Том|Дьяволица/.test(sent[0].text), false);
+  sent.length = 0;
+  await handle(packMessage(Number(userB), "/status"), env, { sendMessage });
+  assert.match(sent[0].text, /Дьяволица/);
+  assert.equal(sent[0].text.includes("Том"), false);
 });
 
 test("user request card text follows upload progress", () => {

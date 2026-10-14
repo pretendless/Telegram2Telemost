@@ -37,10 +37,8 @@ import {
   isPriorityChat,
   normalizeQueue,
   parsePackMessage,
-  queueItemByRequestId,
-  queueItemBySlug,
   queueItemSlug,
-  resolveRequesterChatId,
+  matchedProgressRequester,
   queueStatusText,
   unstickReply,
   unstickUploadingQueue,
@@ -50,7 +48,6 @@ import {
   renderPackCheck,
   shouldSchedulePipelineAfterProgress,
   staticReply,
-  statusText,
   terminalProgress,
   userRequestEvent,
   queueHasQueuedWork,
@@ -141,55 +138,6 @@ async function ensureSeed(kv) {
   await kv.put("meta:seeded", "1");
 }
 
-async function listByPrefix(kv, prefix) {
-  const names = [];
-  let cursor;
-  do {
-    const page = await kv.list({ prefix, cursor });
-    for (const key of page.keys) names.push(key.name);
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  return names;
-}
-
-async function listSubscribers(kv) {
-  await ensureSeed(kv);
-  const ids = [];
-  for (const name of await listByPrefix(kv, "sub:")) {
-    const id = Number(name.slice(4));
-    if (Number.isSafeInteger(id)) ids.push(id);
-  }
-  return ids;
-}
-
-async function listPacks(kv) {
-  const packs = [];
-  for (const name of await listByPrefix(kv, "pack:")) {
-    const raw = await kv.get(name);
-    if (!raw) continue;
-    try {
-      packs.push(JSON.parse(raw));
-    } catch {
-      // skip a corrupt row
-    }
-  }
-  return packs;
-}
-
-async function fanout(send, env, chatIds, text) {
-  if (!chatIds.length) return "empty";
-  let ok = 0;
-  for (const chatId of chatIds) {
-    try {
-      await send(env, chatId, text);
-      ok++;
-    } catch (err) {
-      console.error("notify failed", String(chatId), err && err.message);
-    }
-  }
-  return ok > 0 ? "ok" : "fail";
-}
-
 function parseStored(raw) {
   if (!raw) return null;
   try {
@@ -219,15 +167,56 @@ async function readPackProgress(kv, item) {
   return parseStored(raw);
 }
 
+function adminCursors(prev, primaryId) {
+  const map = {};
+  const stored = prev && prev.adminByChat;
+  if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+    for (const [id, cursor] of Object.entries(stored)) {
+      if (/^[0-9]{1,16}$/.test(id) && cursor && typeof cursor === "object") map[id] = cursor;
+    }
+  }
+  if (prev && prev.admin && typeof prev.admin === "object" && primaryId && !Object.keys(map).length) {
+    map[String(primaryId)] = prev.admin;
+  }
+  return map;
+}
+
+// Every admin chat gets every pack. adminDelivered means the uploader already
+// wrote the card to ADMIN_CHAT_ID; the other admin chats still need a copy.
+async function deliverAdminProgress(env, pack, prev, deps) {
+  const ids = adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
+  const cursors = adminCursors(prev, ids[0]);
+  let notified = 0;
+  if (!botToken(env)) {
+    return { admin: cursors[ids[0]] || null, adminByChat: cursors, notified };
+  }
+  const io = adminIo(env, deps);
+  for (const chatId of ids) {
+    if (pack.adminDelivered && String(chatId) === String(ADMIN_CHAT_ID)) continue;
+    const event = eventFromProgress(pack, cursors[chatId] && cursors[chatId].event);
+    try {
+      const delivered = await deliverAdminStatus(io, chatId, cursors[chatId] || null, event);
+      if (delivered.action !== "skip") {
+        cursors[chatId] = {
+          messageId: delivered.messageId,
+          event: delivered.event,
+          text: delivered.text,
+        };
+        notified++;
+      }
+    } catch {
+      console.log("admin status skipped");
+    }
+  }
+  return { admin: cursors[ids[0]] || cursors[ADMIN_CHAT_ID] || null, adminByChat: cursors, notified };
+}
+
 async function deliverRequesterCard(env, pack, prev, deps) {
-  const kv = env.BOT_KV;
-  const queue = await readQueue(kv);
-  let item = queueItemByRequestId(queue, pack.queueRequestId);
-  if (!item) item = queueItemBySlug(queue, pack.slug);
-  if (!pack.queueRequestId && !item) return null;
-  const chatRaw = resolveRequesterChatId(pack, item);
-  if (!chatRaw) return null;
-  const chatId = Number(chatRaw);
+  const queue = await readQueue(env.BOT_KV);
+  const match = matchedProgressRequester(pack, queue);
+  if (!match) return null;
+  const item = match.item;
+  const chatId = Number(match.chatId);
   const io = adminIo(env, deps);
   const event = userRequestEvent({ item, pack, queue });
   let cursor = prev && prev.userCard ? prev.userCard : null;
@@ -266,25 +255,21 @@ async function applyProgress(env, pack, deps) {
     return { ok: true, status: 200, notified: 0, posted: false, waitingForUrl };
   }
 
-  const needsToken = steps.length > 0 && !botToken(env);
+  const needsToken = steps.some((step) => step.kind === "channel") && !botToken(env);
   let admin = prev && prev.admin ? prev.admin : null;
+  let adminByChat = adminCursors(prev, adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)[0]);
   let userCard = prev && prev.userCard ? prev.userCard : null;
-  const writePack = (cursor) => kv.put(packKey, JSON.stringify({ ...pack, notice: cursor, admin, userCard }));
+  let notified = 0;
+  let posted = false;
+  const writePack = (cursor) =>
+    kv.put(packKey, JSON.stringify({ ...pack, notice: cursor, admin, userCard, adminByChat }));
   if (needsToken) {
     await writePack(notice);
     return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false, waitingForUrl };
   }
 
-  let subs = [];
-  if (steps.some((step) => step.kind !== "channel")) subs = await listSubscribers(kv);
-  const queueForRequester = await readQueue(kv);
-  const requestItem =
-    queueItemByRequestId(queueForRequester, pack.queueRequestId) || queueItemBySlug(queueForRequester, pack.slug);
-  const requesterId = resolveRequesterChatId(pack, requestItem) || "";
-  if (requesterId) subs = subs.filter((id) => String(id) !== requesterId);
-
-  let notified = 0;
-  let posted = false;
+  // Subscriber-kind steps still advance the cursor (and the public channel post).
+  // They are not sent to the subscriber list: that leaked every pack title.
   let cursor = notice;
   for (const step of steps) {
     if (step.kind === "channel") {
@@ -296,28 +281,13 @@ async function applyProgress(env, pack, deps) {
         await writePack(cursor);
         return { ok: false, status: 502, error: "channel post failed", notified, posted: false };
       }
-    } else {
-      const result = await fanout(send, env, subs, step.text);
-      if (result === "fail") {
-        await writePack(cursor);
-        return { ok: false, status: 502, error: "notify failed", notified, posted: false };
-      }
-      notified++;
     }
     cursor = step.state;
   }
-  if (!pack.adminDelivered) {
-    const event = eventFromProgress(pack, admin && admin.event);
-    try {
-      const delivered = await deliverAdminStatus(adminIo(env, deps), adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)[0], admin, event);
-      if (delivered.action !== "skip") {
-        admin = { messageId: delivered.messageId, event: delivered.event, text: delivered.text };
-        notified++;
-      }
-    } catch {
-      console.log("admin status skipped");
-    }
-  }
+  const adminDelivery = await deliverAdminProgress(env, pack, prev, deps);
+  admin = adminDelivery.admin;
+  adminByChat = adminDelivery.adminByChat;
+  notified += adminDelivery.notified;
   try {
     const deliveredUser = await deliverRequesterCard(env, pack, prev, deps);
     if (deliveredUser) userCard = deliveredUser;
@@ -706,7 +676,6 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       const queue = await readQueue(env.BOT_KV);
       out =
         queueStatusText(queue, chatId) ||
-        statusText(await listPacks(env.BOT_KV)) ||
         "Активных запросов нет. Новый перенос — /create, затем сообщение с паком (/format).";
     }
   } else if (cmd === "/restart") {

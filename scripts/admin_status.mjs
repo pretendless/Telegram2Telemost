@@ -200,11 +200,50 @@ function withSticker(event, previous) {
   return { ...event, index, total };
 }
 
+function chatIdOk(value) {
+  return /^[0-9]{1,16}$/.test(String(value || '').trim());
+}
+
+export function clearPackProgress(dirRef) {
+  if (!dirRef || typeof dirRef !== 'object') return;
+  dirRef.queueRequestId = '';
+  dirRef.requesterChatId = '';
+}
+
+// The live claim wins when pack.json still names another request. A pack with
+// no requester metadata clears the previous chat so it cannot leak forward.
+// TELEGRAM_CHAT_ID is never a requester.
+export function bindPackProgress(dirRef, meta) {
+  if (!dirRef || typeof dirRef !== 'object') return { queueRequestId: '', requesterChatId: '' };
+  const fileId = meta && meta.queueRequestId ? String(meta.queueRequestId).trim() : '';
+  const fileChat = meta && meta.requesterChatId ? String(meta.requesterChatId).trim() : '';
+  const liveId = dirRef.queueRequestId ? String(dirRef.queueRequestId).trim() : '';
+  const liveChat = dirRef.requesterChatId ? String(dirRef.requesterChatId).trim() : '';
+  const fileOk = Boolean(fileId) && chatIdOk(fileChat);
+  const liveOk = Boolean(liveId) && chatIdOk(liveChat);
+  let chosen = { queueRequestId: '', requesterChatId: '' };
+  if (liveOk && fileOk && liveId !== fileId) chosen = { queueRequestId: liveId, requesterChatId: liveChat };
+  else if (fileOk) chosen = { queueRequestId: fileId, requesterChatId: fileChat };
+  dirRef.queueRequestId = chosen.queueRequestId;
+  dirRef.requesterChatId = chosen.requesterChatId;
+  return chosen;
+}
+
+export function progressFieldsForPack(dirRef) {
+  const queueRequestId = dirRef && dirRef.queueRequestId ? String(dirRef.queueRequestId).trim() : '';
+  const requesterChatId = dirRef && dirRef.requesterChatId ? String(dirRef.requesterChatId).trim() : '';
+  if (!queueRequestId || !chatIdOk(requesterChatId)) {
+    return { requester: null, requesterChatId: null, queueRequestId: null };
+  }
+  return { requester: requesterChatId, requesterChatId, queueRequestId };
+}
+
 export function createAdminFeed({ io, requester, writeState, onDelivered, now, env = process.env } = {}) {
   let cursor = null;
   return async function notify(event) {
     const carried = withSticker(event, cursor);
-    let full = { ...carried, requester: carried.requester || requester || '' };
+    const liveRequester = typeof requester === 'function' ? requester() : requester;
+    let full = { ...carried, requester: carried.requester || liveRequester || '' };
     if ((full.phase === 'error' || full.phase === 'failed') && !oneLine(full.runUrl)) {
       const runUrl = actionsRunUrl(env);
       if (runUrl) full = { ...full, runUrl };

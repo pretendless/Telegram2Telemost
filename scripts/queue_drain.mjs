@@ -6,6 +6,7 @@
 import { spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { clearPackProgress } from './admin_status.mjs';
 import { claimQueueItem, postDrainComplete, queueCredentialsReadable } from './queue_client.mjs';
 import { writeRequestPack } from './restart_prepare.mjs';
 
@@ -153,6 +154,7 @@ export async function drainRemainingQueue(ctx) {
   const finishedIds = new Set();
 
   for (;;) {
+    clearPackProgress(ctx.dirRef);
     let claim;
     try {
       claim = await claimQueueItem(fetchImpl, progressUrl, secret);
