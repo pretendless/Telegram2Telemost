@@ -6,6 +6,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { activeUploadJob } from '../worker/src/logic.js';
 
 export const ADMIN_CHAT_ID = '8502935020';
 
@@ -121,19 +122,9 @@ export function adminJobText(job) {
   return 'идёт';
 }
 
-function packStillRunning(entry) {
-  if (!entry || entry.status !== 'uploading') return false;
-  if (entry.status === 'done' && entry.url) return false;
-  if (entry.status === 'error') return false;
-  return true;
-}
-
-export function currentAdminJob(packs, queue) {
-  const item = ((queue && queue.items) || []).find((entry) => entry && entry.status === 'uploading');
-  if (item) return { running: true, pack: item.title, total: item.stickers, index: null };
-  const pack = (packs || []).find((entry) => packStillRunning(entry));
-  if (pack) return { running: true, pack: pack.title, index: pack.uploaded, total: pack.total };
-  return { running: false };
+/** Queue uploading row + its pack: progress only (ignores orphan catalog keys in KV). */
+export function currentAdminJob(queue, packProgress) {
+  return activeUploadJob(queue, packProgress);
 }
 
 export function eventFromProgress(pack, prev) {

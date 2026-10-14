@@ -290,14 +290,40 @@ test("admin chat gets another user's upload, edits the sticker count, and /statu
   await handle(packMessage(8502935020, "/status"), env, {
     sendMessage: async (_env, _chatId, text) => idle.push(text),
   });
-  assert.match(idle[0], /идёт \| «Маф, Изис и Агнес» \| стикер 3 из 144/);
+  assert.equal(idle[0], "простаивает");
 
-  env.BOT_KV.store.delete("pack:08-maf-izis-i-agnes");
+  const mafItem = {
+    id: "req-maf",
+    chatId: "111",
+    title: "Маф, Изис и Агнес",
+    links: ["https://t.me/addstickers/maf"],
+    priority: false,
+    createdAt: "2026-10-13T12:00:00.000Z",
+    status: "uploading",
+    stickers: 144,
+  };
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [mafItem],
+    }),
+  );
+  env.BOT_KV.store.set(
+    `pack:${queueItemSlug(mafItem)}`,
+    JSON.stringify({
+      slug: queueItemSlug(mafItem),
+      title: mafItem.title,
+      status: "uploading",
+      uploaded: 3,
+      total: 144,
+    }),
+  );
   idle.length = 0;
   await handle(packMessage(8502935020, "/status"), env, {
     sendMessage: async (_env, _chatId, text) => idle.push(text),
   });
-  assert.equal(idle[0], "простаивает");
+  assert.match(idle[0], /идёт \| «Маф, Изис и Агнес» \| стикер 3 из 144/);
 });
 
 test("progress that the uploader already told the admin does not send a second card", async () => {
@@ -1470,6 +1496,118 @@ test("admin chat accepts a pack without /create", async () => {
   });
   assert.match(sent[0], /Запрос принят/);
   assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items.length, 1);
+});
+
+test("admin /status matches /queue when catalog pack KV is orphan", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  env.BOT_KV.store.set(
+    "pack:07-set-redzh-i-letti",
+    JSON.stringify({
+      slug: "07-set-redzh-i-letti",
+      title: "Сэт, Рэдж и Летти",
+      status: "uploading",
+      uploaded: 0,
+      total: 144,
+    }),
+  );
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-maf",
+          chatId: "1",
+          title: "Maf",
+          links: ["https://t.me/addstickers/maf"],
+          priority: false,
+          createdAt: "2026-10-13T10:00:00.000Z",
+          status: "queued",
+          stickers: 12,
+        },
+        {
+          id: "req-dev",
+          chatId: "2",
+          title: "Дьяволица",
+          links: ["https://t.me/addstickers/dev"],
+          priority: false,
+          createdAt: "2026-10-13T10:01:00.000Z",
+          status: "queued",
+          stickers: 10,
+        },
+      ],
+    }),
+  );
+  const sent = [];
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/status"), env, {
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+  });
+  assert.equal(sent[0], "простаивает");
+  sent.length = 0;
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/queue"), env, {
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+  });
+  assert.match(sent[0], /никто не загружается/);
+  assert.match(sent[0], /Дьяволица/);
+  assert.doesNotMatch(sent[0], /Сэт, Рэдж и Летти/);
+});
+
+test("admin /skip dispatches with afterSkip reason", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-wave",
+          chatId: "1",
+          title: "ВолнаСветa",
+          links: ["https://t.me/addstickers/wave"],
+          priority: false,
+          createdAt: "2026-10-13T12:00:00.000Z",
+          status: "uploading",
+          stickers: 5,
+        },
+        {
+          id: "req-next",
+          chatId: "2",
+          title: "Дьяволица",
+          links: ["https://t.me/addstickers/dev"],
+          priority: false,
+          createdAt: "2026-10-13T12:01:00.000Z",
+          status: "queued",
+          stickers: 8,
+        },
+      ],
+    }),
+  );
+  const calls = [];
+  const fetchIdle = async (url, init) => {
+    calls.push({
+      url: String(url),
+      body: init && init.body ? JSON.parse(init.body) : null,
+    });
+    if (String(url).includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  const pipe = trackPipelineWait({
+    sendMessage: async () => {},
+    fetch: fetchIdle,
+  });
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/skip"), env, pipe);
+  await pipe.flushPipeline();
+  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
+  assert.ok(dispatch);
+  assert.match(dispatch.body.inputs.dispatch_reason, /\/skip/);
+  assert.match(dispatch.body.inputs.dispatch_reason, /Дьяволица/);
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items.find((row) => row.id === "req-wave").status, "error");
 });
 
 test("/format and /stop", async () => {

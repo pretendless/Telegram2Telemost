@@ -3,7 +3,6 @@ import {
   ADMIN_CHAT_ID,
   adminChatIds,
   adminJobText,
-  currentAdminJob,
   deliverAdminStatus,
   eventFromProgress,
   isAdminChat,
@@ -54,6 +53,7 @@ import {
   terminalProgress,
   userRequestEvent,
 } from "./logic.js";
+import { loadAdminQueueState, reconcileTerminalUploadingFromProgress } from "./queue_view.js";
 
 export function botToken(env) {
   return env.TG2TMBOT_TOKEN || env.TELEGRAM_BOT_TOKEN || "";
@@ -342,20 +342,13 @@ async function packProgressByUploadingId(kv, queue) {
 
 async function reconcileTerminalUploadingQueue(kv, queue) {
   const packByItemId = await packProgressByUploadingId(kv, queue);
-  return unstickUploadingQueue(queue, {
-    packForItem: (item) => packByItemId[item.id] || null,
-    terminalOnly: true,
-  });
+  return reconcileTerminalUploadingFromProgress(queue, packByItemId);
 }
 
-async function reconcileQueueAndAutostart(env, queue, deps) {
-  const reconciled = await reconcileTerminalUploadingQueue(env.BOT_KV, queue);
-  if (!reconciled.changed) return { queue, changed: false, finished: [] };
-  await writeQueue(env.BOT_KV, reconciled.queue);
-  if ((reconciled.finished || []).length) {
-    schedulePipeline(env, reconciled.queue, deps, { dispatchReason: QUEUE_REASON.afterFinish });
+function schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps) {
+  if (reconcile && reconcile.changed && (reconcile.finished || []).length) {
+    schedulePipeline(env, queue, deps, { dispatchReason: QUEUE_REASON.afterFinish });
   }
-  return { queue: reconciled.queue, changed: true, finished: reconciled.finished || [] };
 }
 
 function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
@@ -572,11 +565,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";
     } else {
-      let queue = await readQueue(env.BOT_KV);
-      const reconciled = await reconcileQueueAndAutostart(env, queue, deps);
-      queue = reconciled.queue;
-      const uploading = queue.items.find((item) => item.status === "uploading");
-      const activePack = uploading ? await readPackProgress(env.BOT_KV, uploading) : null;
+      const { queue, activePack, reconcile } = await loadAdminQueueState(env.BOT_KV);
+      schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps);
       out = adminQueueOverviewText(queue, activePack);
     }
   } else if (cmd === "/unstick") {
@@ -636,7 +626,7 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         const skipped = skipUploadingQueue(queue);
         if (skipped.changed) {
           await writeQueue(env.BOT_KV, skipped.queue);
-          schedulePipeline(env, skipped.queue, deps, { dispatchReason: QUEUE_REASON.afterUnstick });
+          schedulePipeline(env, skipped.queue, deps, { dispatchReason: QUEUE_REASON.afterSkip });
         }
         out = skipReply({
           reason: skipped.reason,
@@ -647,10 +637,9 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     }
   } else if (cmd === "/status") {
     if (isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
-      let queue = await readQueue(env.BOT_KV);
-      const reconciled = await reconcileQueueAndAutostart(env, queue, deps);
-      queue = reconciled.queue;
-      out = adminJobText(currentAdminJob(await listPacks(env.BOT_KV), queue));
+      const { queue, job, reconcile } = await loadAdminQueueState(env.BOT_KV);
+      schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps);
+      out = adminJobText(job);
     } else {
       const queue = await readQueue(env.BOT_KV);
       out =

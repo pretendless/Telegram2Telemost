@@ -630,6 +630,25 @@ export function queueItemSlug(item) {
   return (`request-${id}`).slice(0, 48);
 }
 
+/** Admin /status and /queue: only the queue row marked uploading counts as live work. */
+export function activeUploadJob(queue, packProgress) {
+  const item = ((queue && queue.items) || []).find((entry) => entry && entry.status === "uploading");
+  if (!item) return { running: false };
+  const pack = packProgress && typeof packProgress === "object" ? packProgress : null;
+  const uploaded = pack && Number.isFinite(pack.uploaded) ? pack.uploaded : null;
+  const total =
+    pack && Number.isFinite(pack.total) && pack.total > 0
+      ? pack.total
+      : Number.isFinite(item.stickers) && item.stickers > 0
+        ? item.stickers
+        : null;
+  if (uploaded != null && total != null) {
+    return { running: true, pack: item.title, index: uploaded, total };
+  }
+  if (total != null) return { running: true, pack: item.title, index: null, total };
+  return { running: true, pack: item.title };
+}
+
 export function adminQueueOverviewText(queue, activePack) {
   const items = (queue && queue.items) || [];
   const lines = ["Очередь переноса:", ""];

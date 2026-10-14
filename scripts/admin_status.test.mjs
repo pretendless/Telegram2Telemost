@@ -80,12 +80,25 @@ test('the card names the pack, the step, the bot line, and another user only by 
 });
 
 test('/status says the job is running or idle', () => {
-  assert.equal(adminJobText(currentAdminJob([], { items: [] })), 'простаивает');
+  assert.equal(adminJobText(currentAdminJob({ items: [] })), 'простаивает');
   assert.equal(
-    adminJobText(currentAdminJob([{ title: pack, status: 'uploading', uploaded: 16, total: 144 }], { items: [] })),
+    adminJobText(
+      currentAdminJob(
+        { items: [] },
+        { title: pack, status: 'uploading', uploaded: 16, total: 144 },
+      ),
+    ),
+    'простаивает',
+  );
+  assert.equal(
+    adminJobText(
+      currentAdminJob(
+        { items: [{ status: 'uploading', title: pack, stickers: 144 }] },
+        { title: pack, status: 'uploading', uploaded: 16, total: 144 },
+      ),
+    ),
     `идёт | «${pack}» | стикер 16 из 144`,
   );
-  assert.match(adminJobText(currentAdminJob([], { items: [{ status: 'uploading', title: pack, stickers: 144 }] })), /^идёт \|/);
 });
 
 test('a failed edit deletes the old card and sends the replacement', async () => {
