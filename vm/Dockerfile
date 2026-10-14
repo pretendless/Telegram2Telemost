@@ -33,7 +33,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/tg2tm
 
-COPY scripts/chrome_cdp.mjs scripts/telemost_upload.mjs scripts/telemost_links.mjs scripts/admin_status.mjs scripts/
+# All runtime .mjs under scripts/ (queue drain, restart, upload). Test files are harmless in the image.
+COPY scripts/*.mjs scripts/
+COPY scripts/fetch_and_convert.py scripts/
+COPY worker/src/logic.js worker/src/logic.js
 COPY vm/ vm/
 COPY config/settings.json config/settings.json
 

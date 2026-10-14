@@ -1,7 +1,35 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { buildArgs, runWatched, stallWatch } from './build_browser_image.mjs';
+
+const DOCKERFILE = new URL('../vm/Dockerfile', import.meta.url);
+
+/** Local .mjs imports needed when telemost_upload.mjs loads in the browser container. */
+const BROWSER_SCRIPT_MODULES = [
+  'telemost_upload.mjs',
+  'admin_status.mjs',
+  'queue_drain.mjs',
+  'queue_client.mjs',
+  'restart_prepare.mjs',
+  'chrome_cdp.mjs',
+  'telemost_links.mjs',
+];
+
+function dockerfileIncludesScript(name, dockerfile) {
+  if (/COPY\s+scripts\/\*\.mjs/.test(dockerfile)) return true;
+  return new RegExp(`scripts/${name.replace('.', '\\.')}`).test(dockerfile);
+}
+
+test('browser Dockerfile copies telemost upload and queue-drain scripts', () => {
+  const dockerfile = readFileSync(DOCKERFILE, 'utf8');
+  for (const name of BROWSER_SCRIPT_MODULES) {
+    assert.ok(dockerfileIncludesScript(name, dockerfile), `vm/Dockerfile must COPY ${name}`);
+  }
+  assert.match(dockerfile, /fetch_and_convert\.py/, 'queue drain fetch uses scripts/fetch_and_convert.py');
+  assert.match(dockerfile, /worker\/src\/logic\.js/, 'admin_status.mjs imports worker/src/logic.js');
+});
 
 test('the image build reuses one GitHub Actions cache scope', () => {
   const args = buildArgs().join(' ');
