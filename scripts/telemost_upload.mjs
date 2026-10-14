@@ -1387,8 +1387,7 @@ async function rememberAndPost(p, dir, url, replyText, note = async () => {}) {
   console.log(dir, 'pack-url', url);
   await note({ phase: 'saved', pack: m.title, lastLine: replyText });
   await note({ phase: 'link', pack: m.title, lastLine: replyText, link: url });
-  await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, url);
-  console.log(dir, 'channel-posted', '@tg2tm');
+  console.log(dir, 'pack-link-notified', url);
 }
 
 async function resolveSavedPackUrl(bot, text, links, dir) {
@@ -1446,8 +1445,7 @@ async function publishSavedPack(bot, p, dir, note = async () => {}) {
   console.log(dir, 'pack-url', saved.url);
   await note({ phase: 'saved', pack: m.title, lastLine: doneText });
   await note({ phase: 'link', pack: m.title, lastLine: doneText, link: saved.url });
-  await postPackLink(fetch, process.env.TG2TMBOT_TOKEN || '', m.title, saved.url);
-  console.log(dir, 'channel-posted', '@tg2tm');
+  console.log(dir, 'pack-link-notified', saved.url);
   return true;
 }
 

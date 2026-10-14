@@ -42,6 +42,8 @@ import {
   queueStatusText,
   unstickReply,
   unstickUploadingQueue,
+  skipReply,
+  skipUploadingQueue,
   releaseRequest,
   renderPackCheck,
   staticReply,
@@ -251,6 +253,7 @@ async function applyProgress(env, pack, deps) {
   const steps = notificationSteps(notice, pack);
   const waitingForUrl = pack.status === "done" && !pack.url;
   if (sameVisibleProgress(prev, pack) && steps.length === 0) {
+    await finishQueueItem(env, pack, prev, deps);
     return { ok: true, status: 200, notified: 0, posted: false, waitingForUrl };
   }
 
@@ -336,13 +339,17 @@ function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
 
 async function finishQueueItem(env, pack, prev, deps) {
   if (!terminalProgress(pack)) return null;
-  if (prev && terminalProgress(prev)) return null;
   let queue = await readQueue(env.BOT_KV);
   const id = findUploadingReleaseId(queue, pack);
   if (!id) return queue;
+  const row = queue.items.find((item) => item.id === id);
+  if (!row) return queue;
+  if (row.status === "done" || row.status === "error") return queue;
+  if (prev && terminalProgress(prev) && row.status !== "uploading" && row.status !== "queued") return queue;
   const status = pack.status === "error" ? "error" : "done";
   const released = releaseRequest(queue, id, status);
-  if (released.changed) await writeQueue(env.BOT_KV, released.queue);
+  if (!released.changed) return queue;
+  await writeQueue(env.BOT_KV, released.queue);
   schedulePipeline(env, released.queue, deps, { dispatchReason: QUEUE_REASON.afterFinish });
   return released.queue;
 }
@@ -532,10 +539,18 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       const fetchImpl = deps.fetch || fetch;
       const actionsRunning = await telemostRunActive(fetchImpl, env);
       if (actionsRunning) {
-        out = unstickReply({ reason: "none", released: [], actionsRunning: true });
+        out = unstickReply({ reason: "none", released: [], finished: [], actionsRunning: true });
       } else {
         const queue = await readQueue(env.BOT_KV);
-        const unstuck = unstickUploadingQueue(queue);
+        const kv = env.BOT_KV;
+        const packByItemId = {};
+        for (const item of queue.items) {
+          if (item.status !== "uploading") continue;
+          packByItemId[item.id] = await readPackProgress(kv, item);
+        }
+        const unstuck = unstickUploadingQueue(queue, {
+          packForItem: (item) => packByItemId[item.id] || null,
+        });
         if (unstuck.changed) {
           await writeQueue(env.BOT_KV, unstuck.queue);
           schedulePipeline(env, unstuck.queue, deps, { dispatchReason: QUEUE_REASON.afterUnstick });
@@ -543,6 +558,29 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         out = unstickReply({
           reason: unstuck.reason,
           released: unstuck.released,
+          finished: unstuck.finished,
+          actionsRunning: false,
+        });
+      }
+    }
+  } else if (cmd === "/skip") {
+    if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
+      out = "Эта команда только для администратора.";
+    } else {
+      const fetchImpl = deps.fetch || fetch;
+      const actionsRunning = await telemostRunActive(fetchImpl, env);
+      if (actionsRunning) {
+        out = skipReply({ reason: "none", skipped: [], actionsRunning: true });
+      } else {
+        const queue = await readQueue(env.BOT_KV);
+        const skipped = skipUploadingQueue(queue);
+        if (skipped.changed) {
+          await writeQueue(env.BOT_KV, skipped.queue);
+          schedulePipeline(env, skipped.queue, deps, { dispatchReason: QUEUE_REASON.afterUnstick });
+        }
+        out = skipReply({
+          reason: skipped.reason,
+          skipped: skipped.skipped,
           actionsRunning: false,
         });
       }
