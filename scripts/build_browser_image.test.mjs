@@ -28,6 +28,8 @@ test('browser Dockerfile copies telemost upload and queue-drain scripts', () => 
     assert.ok(dockerfileIncludesScript(name, dockerfile), `vm/Dockerfile must COPY ${name}`);
   }
   assert.match(dockerfile, /fetch_and_convert\.py/, 'queue drain fetch uses scripts/fetch_and_convert.py');
+  assert.match(dockerfile, /requirements-fetch\.txt/, 'fetch pip deps are installed in the browser image');
+  assert.match(dockerfile, /python3-pil/, 'Pillow comes from apt for fetch_and_convert.py');
   assert.match(dockerfile, /worker\/src\/logic\.js/, 'admin_status.mjs imports worker/src/logic.js');
 });
 

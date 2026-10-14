@@ -1,0 +1,3 @@
+# Pip dependencies for scripts/fetch_and_convert.py (animated .tgs → PNG).
+# Install Pillow from the OS: apt install python3-pil (not listed here).
+rlottie-python

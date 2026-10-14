@@ -2,6 +2,9 @@
 
 Needs TELEGRAM_BOT_TOKEN in the environment (any bot works; getStickerSet is public).
 Originals are cached under .cache/originals/ (git-ignored).
+
+Runtime deps: python3-pil (apt) and rlottie-python (pip; see scripts/requirements-fetch.txt).
+Used on GitHub Actions (upload/restart prepare), locally, and in the tg2tm-browser image for queue drain.
 """
 
 from __future__ import annotations
