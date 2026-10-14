@@ -6,6 +6,7 @@ import {
   fetchPackImages,
   formatPackFetchError,
   nextDrainWait,
+  drainClaimAction,
   parseDrainIdleMs,
   shouldWaitForQueue,
   spawnFailureDetail,
@@ -14,6 +15,13 @@ import {
 test('priority policy documents finish-current before claim', () => {
   assert.match(DRAIN_PRIORITY_POLICY, /Finish the current pack/i);
   assert.match(DRAIN_PRIORITY_POLICY, /never preempt/i);
+});
+
+test('a finished request is not uploaded again when claim returns it', () => {
+  const finished = new Set(['tom']);
+  assert.equal(drainClaimAction({ id: 'tom', title: 'Tom & Jerry' }, finished), 'skip-finished');
+  assert.equal(drainClaimAction({ id: 'dya', title: 'Дьяволица' }, finished), 'upload');
+  assert.equal(drainClaimAction(null, finished), 'idle');
 });
 
 test('nextDrainWait uploads when claim returns a row', () => {

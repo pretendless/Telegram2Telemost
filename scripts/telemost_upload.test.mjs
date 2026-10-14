@@ -110,6 +110,8 @@ import {
   mustOpenNewPack,
   packDialogOpen,
   resetForNewPack,
+  packAlreadyComplete,
+  restartShouldNewpack,
   wantsPicture,
   openPackTitle,
   packTitleKey,
@@ -180,6 +182,19 @@ test("a stopped draft is opened with /newpack, not resumed and not /start", () =
   assert.equal(wantsPicture("Отправьте эмодзи для стикера."), false);
   assert.equal(packDialogOpen("Это не эмодзи :)"), true);
   assert.equal(afterNewpack("Это не эмодзи :)"), "open");
+});
+
+test("a finished pack is not reset into another /newpack", () => {
+  const done = { status: 'done', uploaded: 111, packUrl: 'https://t.me/addstickers/no', error: null };
+  assert.equal(packAlreadyComplete(done, 111), true);
+  assert.equal(restartShouldNewpack(done, 111, 'newpack'), false);
+  assert.equal(restartShouldNewpack(done, 111, 'saved'), false);
+  const uploaded = { status: 'uploading', uploaded: 111, packUrl: null };
+  assert.equal(packAlreadyComplete(uploaded, 111), true);
+  assert.equal(restartShouldNewpack(uploaded, 111, 'newpack'), false);
+  const mid = { status: 'uploading', uploaded: 14, packUrl: null };
+  assert.equal(restartShouldNewpack(mid, 111, 'newpack'), true);
+  assert.equal(restartShouldNewpack(mid, 111, 'saved'), false);
 });
 
 test("close and finalize keep every requested pack folder", () => {

@@ -86,20 +86,36 @@ async function focusRequest(id) {
   if (!response.ok) throw new Error('queue focus http ' + response.status);
 }
 
+export function telemostForRequest(existing) {
+  const prev = existing && existing.telemost;
+  const blank = { status: 'pending', uploaded: 0, packUrl: null, error: null };
+  if (!prev || typeof prev !== 'object') return blank;
+  if (prev.status === 'done' && prev.packUrl) return prev;
+  if ((Number(prev.uploaded) || 0) > 0 && prev.status !== 'error') return prev;
+  return blank;
+}
+
 export function writeRequestPack(target) {
   const slug = ('request-' + String(target.requestId || 'next').replace(/[^A-Za-z0-9_-]/g, '')).slice(0, 48);
   const sets = (target.links || []).map((link) => ({ url: link, name: stickerSetName(link) })).filter((set) => set.name);
   if (!sets.length) throw new Error('request has no sticker sets');
   const folder = join(ROOT, 'packs', slug);
   mkdirSync(folder, { recursive: true });
-  writeFileSync(join(folder, 'pack.json'), JSON.stringify({
+  const path = join(folder, 'pack.json');
+  let existing = null;
+  try {
+    existing = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    existing = null;
+  }
+  writeFileSync(path, JSON.stringify({
     title: target.title,
     slug,
     queueRequestId: target.requestId || '',
     requesterChatId: target.chatId || '',
     stickerLinks: target.links,
     stickerSets: sets,
-    telemost: { status: 'pending', uploaded: 0, packUrl: null, error: null },
+    telemost: telemostForRequest(existing),
   }, null, 2) + '\n');
   return slug;
 }

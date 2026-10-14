@@ -3119,6 +3119,20 @@ export function draftNeedsAbandon(tm) {
   return Boolean(tm.pendingFile) || (tm.status === 'stopped' && waiting);
 }
 
+export function packAlreadyComplete(tm, imageCount) {
+  if (!tm) return false;
+  if (tm.status === 'done' && tm.packUrl) return true;
+  const total = Number(imageCount) || 0;
+  return total > 0 && (Number(tm.uploaded) || 0) >= total;
+}
+
+// A restart must not /newpack a pack this session or the chat already finished.
+export function restartShouldNewpack(tm, imageCount, chatAction) {
+  if (chatAction === 'saved') return false;
+  if (packAlreadyComplete(tm, imageCount)) return false;
+  return true;
+}
+
 export function resetForNewPack(tm) {
   return {
     ...tm,
@@ -3232,7 +3246,19 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   const p = loadPack(dir);
   const m = p.meta;
   let tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
-  if (restart) tm = m.telemost = resetForNewPack(tm);
+  if (tm.status === 'done' && tm.packUrl) {
+    console.log(dir, 'already done', tm.packUrl);
+    await note({
+      phase: 'link',
+      pack: m.title,
+      lastLine: tm.botReply || '',
+      link: tm.packUrl,
+      index: m.images.length,
+      total: m.images.length,
+    });
+    return;
+  }
+  if (restart && restartShouldNewpack(tm, m.images.length, '')) tm = m.telemost = resetForNewPack(tm);
   else if (tm.status === 'done') { console.log(dir, 'already done'); return; }
   if (!m.images?.length) throw new Error(`${dir}: no images yet`);
   if (dirRef) {
@@ -3256,7 +3282,9 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   const liveText = String(live.text || plan.lastText || '');
   const tailText = latestIncomingText(live.text ? live : { text: liveText, bubbles: [] });
   plan = planUpload(plan, history.messages, tailText, m.images.length);
-  if (restart) plan = { action: 'newpack', uploaded: 0, lastText: '' };
+  if (restart && restartShouldNewpack(tm, m.images.length, plan.action)) {
+    plan = { action: 'newpack', uploaded: 0, lastText: '' };
+  }
   console.log(dir, 'chat-plan', plan.action, plan.uploaded, history.reachedTop ? 'top' : 'partial', unfinishedPack(tailText) ? 'open' : 'idle');
   if (!restart && plan.action === 'newpack' && !history.reachedTop && !unfinishedPack(tailText)) {
     throw new Error('chat history did not load; not sending images');
@@ -3346,7 +3374,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       lastText = reply.text;
     }
     savePack(p);
-  } else if (mustOpenNewPack(tm)) {
+  } else if (mustOpenNewPack(tm) && !packAlreadyComplete(tm, m.images.length)) {
     const before = await bot.recentIncoming(1);
     const beforeTail = latestIncomingText(before);
     let doneSent = false;
