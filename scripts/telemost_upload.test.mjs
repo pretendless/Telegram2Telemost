@@ -49,6 +49,7 @@ import {
   bufferBatchBubble,
   bufferUploadLogLine,
   bufferPostCount,
+  bufferClearSkippedLine,
   bufferClearStartLine,
   bufferClearDeletedLine,
   bufferClearDoneLine,
@@ -584,7 +585,7 @@ test("staging message menu uses deep press helpers and CDP hover", () => {
   assert.match(src, /async pressMessageRowActions/);
   assert.match(src, /async focusMessageRow/);
   assert.match(src, /stagingForwardDebugCapture/);
-  assert.match(src, /buffer-upload \$\{index\}\/\$\{total\} ok msgCount=/);
+  assert.match(src, /buffer-upload \$\{index\}\/\$\{total\} \$\{kind\} msgCount=/);
   assert.match(src, /via submenu target=/);
   assert.match(src, /bot-reply \$\{index\}\/\$\{total\}/);
   assert.match(src, /async readForwardFlyout/);
@@ -821,7 +822,33 @@ test("buffer clear empties TG2TM before upload and does not treat leftovers as t
   assert.equal(messageMenuHasDelete(["Выбрать"]), false);
   const src = readFileSync(new URL("./telemost_upload.mjs", import.meta.url), "utf8");
   assert.match(src, /buffer-clear start msgCount=/);
-  assert.match(src, /onStaging\(\(\) => bot\.clearBufferChannel\(\)\)/);
+  assert.match(src, /buffer-clear skipped: keep existing images/);
+  assert.equal(src.includes("onStaging(() => bot.clearBufferChannel())"), false);
+  assert.equal(bufferClearSkippedLine(), "buffer-clear skipped: keep existing images");
+  const cappedBefore = [
+    { id: "1", hasImage: true },
+    { id: "2", hasImage: true },
+    { id: "3", hasImage: true },
+    { id: "4", hasImage: true },
+    { id: "5", hasImage: true },
+    { id: "6", hasImage: true },
+  ];
+  const cappedAfter = [
+    { id: "2", hasImage: true },
+    { id: "3", hasImage: true },
+    { id: "4", hasImage: true },
+    { id: "5", hasImage: true },
+    { id: "6", hasImage: true },
+    { id: "7", hasImage: true },
+  ];
+  const tail = bufferImagesGrown(cappedBefore, cappedAfter);
+  assert.equal(tail.ok, true);
+  assert.equal(tail.reason, "tail");
+  assert.equal(tail.msgCount, 6);
+  assert.equal(tail.id, "7");
+  assert.equal(bufferUploadLogLine(1, 116, 6, "tail"), "buffer-upload 1/116 new-tail msgCount=6");
+  const churned = cappedBefore.map((row, n) => ({ id: `n${n}`, hasImage: true }));
+  assert.equal(bufferImagesGrown(cappedBefore, churned).ok, false);
   assert.match(src, /new image did not appear/);
   assert.equal(src.includes("image count did not grow"), false);
   assert.equal(isDeleteMessageOk("ОК"), true);

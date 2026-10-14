@@ -2098,22 +2098,39 @@ export function bufferCountGrew(beforeCount, afterCount) {
   return Number(afterCount) > Number(beforeCount);
 }
 
-// A post counts only when the image-bubble count grows. Recycled tg2tm ids do not.
+// A new post is a higher image count, or one new bubble that replaced one old one
+// when the visible list is full (count stays the same). A full id reset is not a post.
 export function bufferImagesGrown(beforeRows, afterRows) {
   const before = channelImageBubbles(beforeRows);
   const after = channelImageBubbles(afterRows);
   const beforeCount = before.length;
   const afterCount = after.length;
-  if (!bufferCountGrew(beforeCount, afterCount)) {
-    return { ok: false, msgCount: afterCount, id: '', before: beforeCount };
+  if (bufferCountGrew(beforeCount, afterCount)) {
+    const row = after[afterCount - 1];
+    return {
+      ok: true,
+      reason: 'count',
+      msgCount: afterCount,
+      id: row && row.id != null ? String(row.id) : '',
+      before: beforeCount,
+    };
   }
-  const row = after[afterCount - 1];
-  return {
-    ok: true,
-    msgCount: afterCount,
-    id: row && row.id != null ? String(row.id) : '',
-    before: beforeCount,
-  };
+  if (beforeCount > 0 && afterCount === beforeCount) {
+    const afterIds = new Set(after.map((row) => String(row.id)));
+    const fresh = after.filter((row) => row && row.id != null && !before.some((prev) => String(prev.id) === String(row.id)));
+    const gone = before.filter((row) => row && row.id != null && !afterIds.has(String(row.id)));
+    const kept = after.filter((row) => before.some((prev) => String(prev.id) === String(row.id)));
+    if (fresh.length === 1 && gone.length === 1 && kept.length >= 1) {
+      return {
+        ok: true,
+        reason: 'tail',
+        msgCount: afterCount,
+        id: String(fresh[0].id),
+        before: beforeCount,
+      };
+    }
+  }
+  return { ok: false, reason: '', msgCount: afterCount, id: '', before: beforeCount };
 }
 
 // Absolute index from the pre-upload count, else the tail of this batch (virtualized history).
@@ -2135,8 +2152,13 @@ export function bufferPostCount(rows) {
   return (rows || []).filter((row) => row && row.id != null).length;
 }
 
-export function bufferUploadLogLine(index, total, msgCount) {
-  return `buffer-upload ${index}/${total} ok msgCount=${msgCount}`;
+export function bufferUploadLogLine(index, total, msgCount, reason) {
+  const kind = reason === 'tail' ? 'new-tail' : 'ok';
+  return `buffer-upload ${index}/${total} ${kind} msgCount=${msgCount}`;
+}
+
+export function bufferClearSkippedLine() {
+  return 'buffer-clear skipped: keep existing images';
 }
 
 export function bufferClearStartLine(msgCount) {
@@ -3217,8 +3239,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   }
   const earlyUrls = loadTelemostUrls();
   if (earlyUrls.stagingEnabled && (bot.stagingUrl || earlyUrls.stagingUrl)) {
-    if (!bufferClearAllowed(bot.dualTab)) throw new Error(bufferClearFailed(0, actionsRunUrl()));
-    await bot.onStaging(() => bot.clearBufferChannel());
+    console.log(bufferClearSkippedLine());
     await bot.onBot(() => bot.clearStickersHistory(bot.botUrl || earlyUrls.botUrl));
   }
   if (restart) {
@@ -3402,9 +3423,6 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     await bot.onStaging(async () => {
       stagingBaseImageCount = null;
       await ensureStagingBase();
-      if (stagingBaseImageCount !== 0) {
-        throw new Error(bufferClearFailed(stagingBaseImageCount, actionsRunUrl()));
-      }
       console.log(dir, 'buffer-base', `msgCount=${stagingBaseImageCount}`);
     });
   }
@@ -3425,10 +3443,10 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
 
   async function postBufferImage(idx, path) {
     const posted = await bot.sendImageNoWait(path);
-    if (!posted || !posted.ok || !bufferCountGrew(posted.before, posted.msgCount)) {
+    if (!posted || !posted.ok) {
       throw new Error(newImageDidNotAppear(posted && posted.before, posted && posted.msgCount));
     }
-    console.log(bufferUploadLogLine(idx + 1, m.images.length, posted.msgCount));
+    console.log(bufferUploadLogLine(idx + 1, m.images.length, posted.msgCount, posted.reason));
     stagedIndices.add(idx);
     stagingFilled = Math.max(stagingFilled, idx + 1);
   }
@@ -3539,7 +3557,6 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
         seconds: Math.round(reply.seconds || 0),
         lastLine: waitLastLine(30, reply.text || 'нет ответа, перезагрузка'),
       });
-      if (useStaging && outboundStep === 'image') stagedIndices.delete(i);
       await bot.onBot(() => bot.recoverChat());
     };
     while (!accepted) {
