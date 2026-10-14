@@ -1,0 +1,35 @@
+# Telegram /project → Cursor Cloud Agent on pretendless/tg2tm, then a short POST /project/reply.
+# CURSOR_API_KEY stays in GitHub Actions. Do not print the key, Authorization, or response bodies.
+name: Cursor agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt_id:
+        description: Prompt id from Worker KV (tg-…)
+        required: true
+        type: string
+      chat_id:
+        description: Admin Telegram chat id
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Launch Cloud Agent and reply to Telegram
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          TG2TM_PROGRESS_URL: ${{ secrets.TG2TM_PROGRESS_URL || 'https://tg2tmbot.prtndz.workers.dev/progress' }}
+          UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
+          PROMPT_ID: ${{ inputs.prompt_id }}
+          CHAT_ID: ${{ inputs.chat_id }}
+          CURSOR_REPO_URL: https://github.com/pretendless/tg2tm
+          CURSOR_STARTING_REF: main
+        run: node scripts/cursor_agent.mjs

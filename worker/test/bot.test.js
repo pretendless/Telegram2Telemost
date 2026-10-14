@@ -1756,7 +1756,7 @@ test("/format, /example and /stop", async () => {
   assert.match(sent[2].text, /Уведомления выключены/);
 });
 
-test("/project is admin-only and dispatches project-prompt workflow", async () => {
+test("/project is admin-only and dispatches cursor-agent workflow", async () => {
   const sent = [];
   const calls = [];
   const env = { ...envWith(), LOGIN_CHAT_IDS: String(INITIAL_SUBSCRIBER), GH_DISPATCH_TOKEN: "dispatch-token" };
@@ -1772,7 +1772,7 @@ test("/project is admin-only and dispatches project-prompt workflow", async () =
   await handle(telegramRequest(INITIAL_SUBSCRIBER, "/project"), env, { sendMessage, fetch });
   assert.match(sent[0].text, /\/project/);
   const runListUrl =
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/project-prompt.yml/runs?per_page=20";
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/cursor-agent.yml/runs?per_page=20";
   const fetchWithRuns = async (url, init) => {
     if (String(url) === runListUrl) {
       return {
@@ -1800,7 +1800,7 @@ test("/project is admin-only and dispatches project-prompt workflow", async () =
   assert.equal(calls.length, 1);
   assert.equal(
     calls[0].url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/project-prompt.yml/dispatches",
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/cursor-agent.yml/dispatches",
   );
   assert.deepEqual(calls[0].body.inputs, {
     prompt_id: "tg-2026-10-14T12-00-00-000Z",
@@ -1856,6 +1856,37 @@ test("/project waitUntil runs KV and dispatch in background", async () => {
   await pending;
   assert.ok(calls.some((call) => call.url.includes("/dispatches")));
   assert.ok(sent.some((row) => /Очередь Project|dispatch ok/.test(row.text)));
+});
+
+test("/project optional issue dispatch does not fail cursor-agent", async () => {
+  const sent = [];
+  const dispatches = [];
+  const env = {
+    ...envWith(),
+    LOGIN_CHAT_IDS: String(INITIAL_SUBSCRIBER),
+    GH_DISPATCH_TOKEN: "dispatch-token",
+    PROJECT_ALSO_CREATE_ISSUE: "1",
+  };
+  const fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/runs?")) {
+      return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    }
+    if (href.includes("/dispatches")) dispatches.push(href);
+    if (href.includes("project-prompt.yml")) return new Response("no", { status: 500 });
+    return new Response(null, { status: 204 });
+  };
+  const sendMessage = async (_env, chatId, text) => sent.push({ chatId, text });
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/project статус очереди"), env, {
+    sendMessage,
+    fetch,
+    now: () => new Date("2026-10-14T12:00:00.000Z"),
+  });
+  assert.ok(dispatches.some((href) => href.includes("cursor-agent.yml")));
+  assert.ok(dispatches.some((href) => href.includes("project-prompt.yml")));
+  assert.ok(sent.some((row) => /Очередь Project|dispatch ok/.test(row.text)));
+  const stored = JSON.parse(env.BOT_KV.store.get("project:prompt:tg-2026-10-14T12-00-00-000Z"));
+  assert.equal(stored.status, "dispatched");
 });
 
 test("POST /project/reply sends summary to admin chat", async () => {

@@ -1,4 +1,5 @@
-# Telegram /project → fast TG ack, issue + admin TG with links. Prompt in Worker KV (GET /project/prompt).
+# Optional tracking issue for Telegram /project. /project itself dispatches cursor-agent.yml.
+# This workflow still reads the prompt from Worker KV (GET /project/prompt).
 name: Project prompt
 
 on:

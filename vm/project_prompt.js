@@ -1,4 +1,4 @@
-// Telegram /project → GitHub project-prompt workflow. No Node builtins (Worker-safe).
+// Telegram /project → GitHub cursor-agent workflow. No Node builtins (Worker-safe).
 
 import {
   assertRef,
@@ -9,7 +9,8 @@ import {
   workflowRunsUrl,
 } from "./dispatch.js";
 
-export const DEFAULT_PROJECT_PROMPT_WORKFLOW = "project-prompt.yml";
+export const DEFAULT_PROJECT_PROMPT_WORKFLOW = "cursor-agent.yml";
+export const OPTIONAL_PROJECT_ISSUE_WORKFLOW = "project-prompt.yml";
 export const PROJECT_PROMPT_KV_PREFIX = "project:prompt:";
 
 const PROMPT_MAX = 8000;
@@ -88,7 +89,14 @@ export async function findProjectPromptRunUrl(
 }
 
 export function projectStartingText() {
-  return "⏳ Запускаю GitHub Actions (project-prompt)…";
+  return "⏳ Запускаю GitHub Actions (cursor-agent)…";
+}
+
+/** Issue workflow when PROJECT_ALSO_CREATE_ISSUE is on. Empty means skip. */
+export function optionalProjectIssueWorkflow(flag) {
+  const raw = String(flag ?? "").trim().toLowerCase();
+  if (raw === "1" || raw === "true" || raw === "yes" || raw === "on") return OPTIONAL_PROJECT_ISSUE_WORKFLOW;
+  return "";
 }
 
 export function projectDispatchedText({ promptId, runUrl }) {
@@ -114,14 +122,12 @@ export function projectIssueTitle(prompt, max = 60) {
 export function cursorAgentIssueHint(repo = DEFAULT_REPO) {
   const slug = String(repo || DEFAULT_REPO);
   return [
-    "## Cursor cloud agent (ручной или automation)",
+    "## Cursor Cloud Agent",
     "",
-    "Публичного API «запустить Project» из GitHub нет. Варианты:",
+    "Основной путь — workflow `cursor-agent.yml` (его запускает `/project`).",
+    "Этот issue — необязательный след: воркер создаёт его только если задан `PROJECT_ALSO_CREATE_ISSUE`.",
     "",
-    `1. Откройте репозиторий \`${slug}\` в Cursor → Cloud Agent / Project и вставьте блок **PROMPT_FOR_PROJECT** ниже.`,
-    "2. Или дождитесь координатора Project по метке `tg-project-prompt`.",
-    "",
-    `Deep link (открыть репо): https://github.com/${slug}`,
+    `Репозиторий: https://github.com/${slug}`,
   ].join("\n");
 }
 
@@ -149,7 +155,7 @@ export function projectMirrorText(prompt) {
 }
 
 export function projectDispatchFailText(status) {
-  return `Не удалось запустить project-prompt: GitHub ответил ${status}. Проверьте GH_DISPATCH_TOKEN и workflow project-prompt.yml в main.`;
+  return `Не удалось запустить cursor-agent: GitHub ответил ${status}. Проверьте GH_DISPATCH_TOKEN и workflow cursor-agent.yml в main.`;
 }
 
 export function normalizeProjectReplyBody(body) {

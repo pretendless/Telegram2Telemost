@@ -5,6 +5,7 @@ import {
   findProjectPromptRunUrl,
   newPromptId,
   parseProjectCommand,
+  optionalProjectIssueWorkflow,
   projectAckText,
   projectDispatchFailText,
   projectDispatchedText,
@@ -57,6 +58,22 @@ export async function finishProjectPromptDispatch(env, { record, chatId, deps = 
     await storeProjectPrompt(kv, record);
     if (send) await send(env, chatId, projectDispatchFailText(dispatched.status || "error"));
     return { ok: false };
+  }
+  const issueWorkflow = optionalProjectIssueWorkflow(env.PROJECT_ALSO_CREATE_ISSUE);
+  if (issueWorkflow && issueWorkflow !== workflow) {
+    try {
+      const issue = await dispatchProjectPrompt(fetchImpl, {
+        token: env.GH_DISPATCH_TOKEN,
+        repo,
+        workflow: issueWorkflow,
+        ref,
+        promptId: record.id,
+        chatId,
+      });
+      if (!issue.ok) console.error("optional project issue dispatch", issue.status);
+    } catch (err) {
+      console.error("optional project issue dispatch", err && err.message);
+    }
   }
   record.status = "dispatched";
   let runUrl = "";
