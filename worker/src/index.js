@@ -31,8 +31,14 @@ import {
   awaitCreateKey,
   claimNext,
   CREATE_PROMPT,
+  createLinksPrompt,
+  decodeAwaitCreate,
+  encodeAwaitCreate,
   enqueueRequest,
+  judgeCreateLinks,
+  nameStepResult,
   NEED_CREATE,
+  parseStickerSetNames,
   focusRequest,
   isPriorityChat,
   normalizeQueue,
@@ -575,6 +581,42 @@ async function handleProgress(request, env, deps) {
   );
 }
 
+async function acceptCountedRequest(env, chatId, { title, names, rows, total }, deps) {
+  const queue = await readQueue(env.BOT_KV);
+  const priority = isPriorityChat(queue, chatId);
+  const stored = enqueueRequest(queue, {
+    chatId,
+    title,
+    links: stickerLinks(names),
+    priority,
+    createdAt: new Date().toISOString(),
+    stickers: total,
+  });
+  if (stored.created) await writeQueue(env.BOT_KV, stored.queue);
+  const queueAfter = stored.created ? stored.queue : queue;
+  let out;
+  if (stored.duplicate) {
+    out = duplicateRequestReply({
+      title,
+      duplicate: stored.duplicate,
+      priority,
+    });
+  } else {
+    const item = stored.item;
+    const ahead = item ? aheadCount(stored.created ? stored.queue : queue, item) : 0;
+    out = acceptReply({ title, rows, total, priority, ahead });
+  }
+  let userCardAfterAccept = null;
+  if (stored.created && stored.item) {
+    userCardAfterAccept = { item: stored.item, queue: stored.queue };
+    await env.BOT_KV.delete(awaitCreateKey(chatId));
+  }
+  if (stored.duplicate !== "done") {
+    schedulePipeline(env, queueAfter, deps, { dispatchReason: QUEUE_REASON.newRequest });
+  }
+  return { out, userCardAfterAccept };
+}
+
 async function answer(env, update, send, stickerCount, deps = {}) {
   const message = update && update.message;
   if (!message || typeof message.text !== "string") return;
@@ -586,12 +628,14 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   const known = staticReply(cmd);
   let out;
   let userCardAfterAccept = null;
+  // Commands other than /create leave await:<chatId> as it is (name or links).
+  // /create rewrites that key and starts again at the name.
   if (known) {
     if (known.subscribe === true) await env.BOT_KV.put(`sub:${chatId}`, "1");
     if (known.subscribe === false) await env.BOT_KV.delete(`sub:${chatId}`);
     out = known.text;
   } else if (cmd === "/create") {
-    await env.BOT_KV.put(awaitCreateKey(chatId), "1");
+    await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
     out = CREATE_PROMPT;
   } else if (cmd === "/queue") {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
@@ -719,61 +763,71 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     return;
   } else {
     const admin = isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
-    const awaiting = Boolean(await env.BOT_KV.get(awaitCreateKey(chatId)));
-    if (!admin && !awaiting) {
-      out = NEED_CREATE;
-    } else {
-    const parsed = parsePackMessage(text);
-    if (!parsed.ok) {
-      out = NOT_A_PACK;
-    } else {
-      const rows = [];
-      let total = 0;
-      for (const name of parsed.names) {
+    const awaiting = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
+    if (awaiting && awaiting.step === "name") {
+      const named = nameStepResult(text);
+      if (!named.ok) {
+        out = named.text;
+      } else {
+        await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "links", title: named.title }));
+        out = createLinksPrompt(named.title);
+      }
+    } else if (awaiting && awaiting.step === "links") {
+      const names = parseStickerSetNames(text);
+      const lookups = [];
+      for (const name of names) {
         try {
           const count = await stickerCount(env, name);
-          total += count;
-          rows.push(`• ${name} — ${count}`);
+          lookups.push({ name, count });
         } catch {
-          rows.push(`• ${name} — набор не найден`);
+          lookups.push({ name, missing: true });
         }
       }
-      const missing = rows.some((row) => row.includes("не найден"));
-      if (missing || total > MAX_STICKERS || total === 0) {
-        out = renderPackCheck(parsed.title, rows, total);
+      const verdict = judgeCreateLinks(awaiting.title, names, lookups);
+      if (!verdict.ok) {
+        out = verdict.text;
       } else {
-        const queue = await readQueue(env.BOT_KV);
-        const priority = isPriorityChat(queue, chatId);
-        const stored = enqueueRequest(queue, {
+        const accepted = await acceptCountedRequest(
+          env,
           chatId,
-          title: parsed.title,
-          links: stickerLinks(parsed.names),
-          priority,
-          createdAt: new Date().toISOString(),
-          stickers: total,
-        });
-        if (stored.created) await writeQueue(env.BOT_KV, stored.queue);
-        const queueAfter = stored.created ? stored.queue : queue;
-        if (stored.duplicate) {
-          out = duplicateRequestReply({
-            title: parsed.title,
-            duplicate: stored.duplicate,
-            priority,
-          });
+          { title: awaiting.title, names, rows: verdict.rows, total: verdict.total },
+          deps,
+        );
+        out = accepted.out;
+        userCardAfterAccept = accepted.userCardAfterAccept;
+      }
+    } else if (!admin) {
+      out = NEED_CREATE;
+    } else {
+      const parsed = parsePackMessage(text);
+      if (!parsed.ok) {
+        out = NOT_A_PACK;
+      } else {
+        const rows = [];
+        let total = 0;
+        for (const name of parsed.names) {
+          try {
+            const count = await stickerCount(env, name);
+            total += count;
+            rows.push(`• ${name} — ${count}`);
+          } catch {
+            rows.push(`• ${name} — набор не найден`);
+          }
+        }
+        const missing = rows.some((row) => row.includes("не найден"));
+        if (missing || total > MAX_STICKERS || total === 0) {
+          out = renderPackCheck(parsed.title, rows, total);
         } else {
-          const item = stored.item;
-          const ahead = item ? aheadCount(stored.created ? stored.queue : queue, item) : 0;
-          out = acceptReply({ title: parsed.title, rows, total, priority, ahead });
-        }
-        if (stored.created && stored.item) {
-          userCardAfterAccept = { item: stored.item, queue: stored.queue };
-          await env.BOT_KV.delete(awaitCreateKey(chatId));
-        }
-        if (stored.duplicate !== "done") {
-          schedulePipeline(env, queueAfter, deps, { dispatchReason: QUEUE_REASON.newRequest });
+          const accepted = await acceptCountedRequest(
+            env,
+            chatId,
+            { title: parsed.title, names: parsed.names, rows, total },
+            deps,
+          );
+          out = accepted.out;
+          userCardAfterAccept = accepted.userCardAfterAccept;
         }
       }
-    }
     }
   }
   if (out) await send(env, chatId, out);

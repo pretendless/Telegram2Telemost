@@ -398,8 +398,16 @@ function packMessage(chatId, text) {
 }
 
 async function acceptPackMessage(chatId, text, env, deps) {
+  const lines = text
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const title = lines.find((line) => !/(?:https?:\/\/)?t\.me\/addstickers\//i.test(line)) || lines[0];
+  const links = lines.filter((line) => /addstickers/i.test(line));
   await handle(telegramRequest(chatId, "/create"), env, { sendMessage: async () => ({}) });
-  return handle(packMessage(chatId, text), env, deps);
+  await handle(packMessage(chatId, title), env, { sendMessage: async () => ({}) });
+  return handle(packMessage(chatId, links.join("\n")), env, deps);
 }
 
 test("a priority chat is queued ahead of an older normal request, behind an active upload", () => {
@@ -888,9 +896,13 @@ test("after /create a pack-shaped message counts stickers and enforces 150", asy
     stickerCount: async (_env, name) => (name === "minty_vk" ? 80 : 80),
   });
   assert.equal(res.status, 200);
-  assert.match(sent.find((line) => /Пак «Минто»/.test(line)), /Пак «Минто»/);
-  assert.match(sent.find((line) => /minty_vk — 80/.test(line)), /minty_vk — 80/);
-  assert.match(sent.find((line) => /больше лимита 150/.test(line)), /больше лимита 150/);
+  const reply = sent.join("\n");
+  assert.match(reply, /minty_vk — 80/);
+  assert.match(reply, /больше лимита 150/);
+  assert.match(reply, /160 > 150/);
+  assert.match(reply, /«Минто» сохранено/);
+  assert.match(env.BOT_KV.store.get("await:7"), /"step":"links"/);
+  assert.match(env.BOT_KV.store.get("await:7"), /Минто/);
 });
 
 function telegramRequest(chatId, text) {
@@ -1914,7 +1926,9 @@ test("/format, /example and /stop", async () => {
     env,
     { sendMessage: send },
   );
-  assert.match(sent[0].text, /Одно сообщение — один пак/);
+  assert.match(sent[0].text, /два следующих сообщения/);
+  assert.match(sent[0].text, /только название пака, без ссылок/);
+  assert.match(sent[0].text, /не больше 150/);
   await handle(
     new Request("https://tg2tmbot.example/telegram", {
       method: "POST",
