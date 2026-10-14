@@ -63,18 +63,26 @@ export function awaitCreateKey(chatId) {
   return `${AWAIT_CREATE_PREFIX}${chatId}`;
 }
 
-export const COMMANDS = [
+// Telegram menu (BotFather / setMyCommands). Admin-only rows — ADMIN_ONLY_COMMANDS.
+export const USER_COMMANDS = [
   { command: "start", description: "Как пользоваться" },
   { command: "create", description: "Новый запрос на перенос" },
-  { command: "status", description: "Ход переноса" },
-  { command: "format", description: "Формат запроса" },
-  { command: "example", description: "Пример набора" },
+  { command: "format", description: "Формат и пример пака" },
+  { command: "status", description: "Ваши запросы в очереди" },
   { command: "stop", description: "Отписаться" },
+];
+
+export const ADMIN_ONLY_COMMANDS = [
+  { command: "queue", description: "Очередь и прогресс" },
+  { command: "unstick", description: "Снять зависшую загрузку" },
+  { command: "skip", description: "Пропустить текущий пак" },
+  { command: "restart", description: "Перезапустить загрузку" },
   { command: "login", description: "Войти в Яндекс" },
   { command: "connect", description: "Войти в аккаунт с меткой" },
   { command: "upload", description: "Загрузить паки этой сессией" },
-  { command: "restart", description: "Перезапустить загрузку" },
 ];
+
+export const ADMIN_COMMANDS = USER_COMMANDS.concat(ADMIN_ONLY_COMMANDS);
 
 const STATUS_RU = { pending: "ждёт", uploading: "загружается", done: "готов", error: "ошибка" };
 const STATUSES = new Set(Object.keys(STATUS_RU));
@@ -248,8 +256,7 @@ export function commandOf(text) {
 export function staticReply(cmd) {
   if (cmd === "/start" || cmd === "/help") return { subscribe: true, text: START };
   if (cmd === "/stop") return { subscribe: false, text: "Уведомления выключены. /start — включить снова." };
-  if (cmd === "/format") return { text: FORMAT };
-  if (cmd === "/example") return { text: "Пример:\n\n" + EXAMPLE };
+  if (cmd === "/format" || cmd === "/example") return { text: FORMAT };
   return null;
 }
 
