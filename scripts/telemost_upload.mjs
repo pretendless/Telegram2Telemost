@@ -97,7 +97,23 @@ export const STAGING_MESSAGE_ACTIONS_SELECTOR = [
   '[class*="yamb-message-row__actions" i] button',
 ].join(', ');
 
-// Bot + staging chat URLs live in config/settings.json (overridable by env).
+// GitHub Actions variables telemoststickerbot / telemostbufferchannel are mapped
+// onto TELEMOST_BOT_URL / TELEMOST_STAGING_URL by the workflow. Those override
+// config/settings.json. The raw variable names are accepted too.
+const BOT_URL_ENV_KEYS = ['TELEMOST_BOT_URL', 'telemoststickerbot', 'TELEMOSTSTICKERBOT'];
+const STAGING_URL_ENV_KEYS = ['TELEMOST_STAGING_URL', 'telemostbufferchannel', 'TELEMOSTBUFFERCHANNEL'];
+
+export function urlFromEnv(env, keys) {
+  const source = env || {};
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    const value = String(source[key] == null ? '' : source[key]).trim();
+    if (value) return { url: value, source: `env:${key}` };
+  }
+  return null;
+}
+
+// Bot + buffer-channel URLs. Env wins over config/settings.json.
 export function loadTelemostUrls(env = process.env, settingsPath = join(ROOT, 'config', 'settings.json')) {
   let file = {};
   try {
@@ -106,13 +122,38 @@ export function loadTelemostUrls(env = process.env, settingsPath = join(ROOT, 'c
     file = {};
   }
   const t = (file && file.telemost) || {};
-  const botUrl = String(env.TELEMOST_BOT_URL || t.botUrl || DEFAULT_BOT_URL).trim();
-  const stagingUrl = String(env.TELEMOST_STAGING_URL || t.stagingUrl || DEFAULT_STAGING_URL).trim();
+  const botPick = urlFromEnv(env, BOT_URL_ENV_KEYS)
+    || { url: String(t.botUrl || DEFAULT_BOT_URL).trim(), source: t.botUrl ? 'settings' : 'default' };
+  const stagingPick = urlFromEnv(env, STAGING_URL_ENV_KEYS)
+    || { url: String(t.stagingUrl || DEFAULT_STAGING_URL).trim(), source: t.stagingUrl ? 'settings' : 'default' };
   const windowRaw = Number(env.TELEMOST_STAGING_WINDOW || t.stagingWindow || 5);
   const stagingWindow = Number.isFinite(windowRaw) && windowRaw > 0 ? Math.floor(windowRaw) : 5;
   const flag = env.TELEMOST_STAGING != null ? env.TELEMOST_STAGING : t.staging;
-  const stagingEnabled = Boolean(stagingUrl) && String(flag == null ? '1' : flag) !== '0' && String(flag) !== 'false';
-  return { botUrl, stagingUrl, stagingWindow, stagingEnabled };
+  const stagingEnabled = Boolean(stagingPick.url) && String(flag == null ? '1' : flag) !== '0' && String(flag) !== 'false';
+  const botName = String(env.TELEMOST_BOT_NAME || t.botName || 'Стикеры').trim() || 'Стикеры';
+  return {
+    botUrl: botPick.url,
+    botUrlSource: botPick.source,
+    stagingUrl: stagingPick.url,
+    stagingUrlSource: stagingPick.source,
+    stagingWindow,
+    stagingEnabled,
+    botName,
+  };
+}
+
+// In Actions, an empty variable must not silently fall back to the join URL in settings.json.
+export function githubActionsChatUrlError(urls, env = process.env) {
+  if (String((env && env.GITHUB_ACTIONS) || '') !== 'true') return '';
+  if (!urls || !urls.stagingEnabled) return '';
+  const problems = [];
+  if (!String(urls.stagingUrlSource || '').startsWith('env:')) {
+    problems.push('buffer channel URL missing: set GitHub variable telemostbufferchannel');
+  }
+  if (!String(urls.botUrlSource || '').startsWith('env:')) {
+    problems.push('stickers bot URL missing: set GitHub variable telemoststickerbot');
+  }
+  return problems.join('; ');
 }
 
 export function stagingFillTo(uploaded, filled, total, windowSize) {
@@ -146,7 +187,38 @@ export function telemostUrlMatches(pageUrl, targetUrl) {
   if (user && here.includes(`/user/${user}`)) return true;
   const join = (target.match(/join#([^/?#]+)/i) || [])[1];
   if (join && /join#/i.test(here) && here.includes(join)) return true;
+  const pageToken = telemostUrlToken(here);
+  const targetToken = telemostUrlToken(target);
+  if (pageToken && targetToken && pageToken === targetToken) return true;
   return false;
+}
+
+// Stable id from a Telemost chat URL: hash (join links) or last path segment (channel / user).
+export function telemostUrlToken(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    const hash = decodeURIComponent((u.hash || '').replace(/^#/, '')).trim();
+    if (hash.length >= 8) return hash.toLowerCase();
+    const parts = u.pathname.split('/').filter(Boolean);
+    const last = decodeURIComponent(parts[parts.length - 1] || '').trim();
+    if (last.length >= 8) return last.toLowerCase();
+  } catch {
+    const hash = (raw.match(/#([^/?#]+)/) || [])[1] || '';
+    if (hash.length >= 8) return hash.toLowerCase();
+  }
+  return '';
+}
+
+// Chrome 111+ rejects GET /json/new. The hash must be percent-encoded or fetch drops it.
+export function devtoolsNewTabRequests(devtools, targetUrl) {
+  const base = String(devtools || '').replace(/\/$/, '');
+  const encoded = encodeURIComponent(String(targetUrl || ''));
+  return [
+    { method: 'PUT', url: `${base}/json/new?${encoded}` },
+    { method: 'GET', url: `${base}/json/new?${encoded}` },
+  ];
 }
 
 async function attachCdp(page) {
@@ -180,9 +252,29 @@ async function listDevToolsPages() {
   return (await fetch(DEVTOOLS + '/json/list')).json();
 }
 
+async function createDevToolsPage(targetUrl) {
+  const errors = [];
+  for (const req of devtoolsNewTabRequests(DEVTOOLS, targetUrl)) {
+    try {
+      const created = await fetch(req.url, { method: req.method });
+      if (!created.ok) {
+        errors.push(`${req.method} ${created.status}`);
+        continue;
+      }
+      const page = await created.json();
+      if (page && (page.webSocketDebuggerUrl || page.id)) return page;
+      errors.push(`${req.method} empty target`);
+    } catch (e) {
+      errors.push(`${req.method} ${e && e.message ? e.message : e}`);
+    }
+  }
+  throw new Error(`could not open Telemost tab for ${targetUrl} (${errors.join('; ') || 'no response'})`);
+}
+
 async function findOrCreatePage(list, targetUrl) {
   const target = String(targetUrl || '').trim();
   let pages = list || [];
+  let lastError = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt) {
       await sleep(400 * attempt);
@@ -190,10 +282,13 @@ async function findOrCreatePage(list, targetUrl) {
     }
     const hit = pages.find((t) => t.type === 'page' && telemostUrlMatches(t.url, target));
     if (hit) return hit;
-    const created = await fetch(`${DEVTOOLS}/json/new?${encodeURIComponent(target)}`);
-    if (created.ok) return created.json();
+    try {
+      return await createDevToolsPage(target);
+    } catch (e) {
+      lastError = e;
+    }
   }
-  throw new Error(`could not open Telemost tab for ${target}`);
+  throw lastError || new Error(`could not open Telemost tab for ${target}`);
 }
 
 async function warmPageChat(c, targetUrl) {
@@ -235,17 +330,13 @@ async function connect(urls = loadTelemostUrls(), { openStagingTab = true } = {}
   try {
     stagingPage = await findOrCreatePage(freshList, urls.stagingUrl);
   } catch (e) {
-    console.log('staging tab unavailable, single-tab fallback', e.message || e);
-    return {
-      bot,
-      staging: bot,
-      dualTab: false,
-      close: () => bot.close(),
-    };
+    const message = e && e.message ? e.message : String(e);
+    console.log('buffer tab unavailable', message);
+    throw new Error(`buffer tab did not open for ${urls.stagingUrl}: ${message}`);
   }
   const staging = await attachCdp(stagingPage);
   await warmPageChat(staging, urls.stagingUrl);
-  console.log('dual-tab', 'bot', botPage.url || botUrl, 'staging', stagingPage.url || urls.stagingUrl);
+  console.log('dual-tab', 'bot', botPage.url || botUrl, 'buffer', stagingPage.url || urls.stagingUrl);
   return {
     bot,
     staging,
@@ -282,6 +373,8 @@ class Bot {
     this.c = this.cBot;
     this.botUrl = urls.botUrl || DEFAULT_BOT_URL;
     this.stagingUrl = urls.stagingUrl || '';
+    this.botName = urls.botName || 'Стикеры';
+    this.forwardTarget = this.botName;
     this.chatUrl = this.botUrl;
     this.settledByTarget = Object.create(null);
   }
@@ -384,16 +477,24 @@ class Bot {
       const s = document.querySelector('.ui-InfiniteList-ScrollContainer');
       if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight;
       window.__tg2tmNext = window.__tg2tmNext || 1;
-      const rows = [...document.querySelectorAll('article.message')].filter((a) => a.querySelector('.yamb-message-row'));
+      const rows = [...document.querySelectorAll('article.message')].filter((a) => a.querySelector('.yamb-message-row, img, picture, video, canvas, [style*="background-image"]'));
       const hasImageInBubble = (a) => {
-        if (a.querySelector('img[src], img[data-src], img[data-original], img[data-lazy-src], img[data-url], picture img, picture source[srcset]')) return true;
-        if (a.querySelector('video[src], video source[src]')) return true;
-        if (a.querySelector('.yamb-message-row__attachment, [class*="MessageMedia" i], [class*="message-media" i], [class*="Attachment" i][class*="media" i]')) {
-          if (a.querySelector('img, video, picture, canvas')) return true;
+        const stack = [a];
+        while (stack.length) {
+          const node = stack.pop();
+          if (!node || node.nodeType !== 1) continue;
+          const tag = node.tagName;
+          if (tag === 'IMG' && (node.currentSrc || node.getAttribute('src') || node.getAttribute('data-src') || node.src)) return true;
+          if (tag === 'VIDEO' && (node.currentSrc || node.getAttribute('src'))) return true;
+          if (tag === 'SOURCE' && node.getAttribute('srcset')) return true;
+          const style = node.getAttribute && node.getAttribute('style');
+          if (style && /background-image\\s*:\\s*url\\(/i.test(style)) return true;
+          const cls = String(node.className || '');
+          if (/yamb-message-row__image|yamb-image|message-image|ImageMessage|message-photo|PhotoMessage/i.test(cls)) return true;
+          if (node.shadowRoot) stack.push(node.shadowRoot);
+          const ch = node.children;
+          if (ch) for (let i = ch.length - 1; i >= 0; i--) stack.push(ch[i]);
         }
-        if (a.querySelector('[class*="attachment" i] img, [class*="Attachment" i] img, [class*="photo" i] img, [class*="Photo" i] img')) return true;
-        const bg = a.querySelector('[style*="background-image"]');
-        if (bg && /url\\(/i.test(bg.getAttribute('style') || '')) return true;
         return false;
       };
       return rows.map((a) => {
@@ -625,15 +726,13 @@ class Bot {
     return this.waitForReply(baseline, { until: 'sticker', ownBeforeIds, ...(opts || {}) });
   }
 
-  // Staging buffer: put the file in the open chat and return when our bubble
-  // appears. Do not wait for a bot reply — that chat is only an image queue.
+  // Buffer channel: post the file and return only after the image-bubble count grows.
+  // A new tg2tmId on a recycled row is not a post. Channel posts often lack _own.
   async sendImageNoWait(path, { timeoutMs = 60000 } = {}) {
     await this.ensureChat();
     await this.scrollToBottom();
-    const threadBefore = await this.chatRows();
-    const beforeOwnIds = ownIds(threadBefore);
-    const beforeCount = (threadBefore || []).length;
-    const beforeAllIds = rowIds(threadBefore);
+    const beforeRows = await this.chatRows();
+    const before = bufferImageCount(beforeRows);
     const nodeId = await this.fileInput();
     await this.c.send('DOM.setFileInputFiles', { nodeId, files: [path] });
     for (let i = 0; i < 80; i++) {
@@ -645,17 +744,27 @@ class Bot {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       const rows = await this.chatRows();
-      const ownId = stagingOwnIdAfterSend(beforeOwnIds, beforeCount, rows, beforeAllIds);
-      if (ownId) return ownId;
+      const grown = bufferImagesGrown(beforeRows, rows);
+      if (grown.ok) return grown;
       await sleep(POLL_MS);
     }
     const rows = await this.chatRows();
-    console.log('staging upload timeout', {
-      beforeCount,
-      rowCount: (rows || []).length,
-      ownCount: ownIds(rows).length,
-    });
-    throw new Error('staging upload: own message did not appear');
+    const after = bufferImageCount(rows);
+    console.log('staging upload timeout', { before, msgCount: after, rowCount: (rows || []).length });
+    throw new Error(`staging upload: image count did not grow (msgCount=${before})`);
+  }
+
+  async chatTitle() {
+    return this.c.ev(`(() => {
+      const nodes = [...document.querySelectorAll('header, [class*="ChatHeader" i], [class*="chat-header" i], [class*="ChatTitle" i]')];
+      for (const el of nodes) {
+        const r = el.getBoundingClientRect();
+        if (r.width < 40 || r.height < 10) continue;
+        const line = (el.innerText || '').split('\\n').map((s) => s.trim()).filter(Boolean)[0] || '';
+        if (line && line.length < 80 && !/^https?:/i.test(line)) return line;
+      }
+      return '';
+    })()`);
   }
 
   async clickLabel(label) {
@@ -1059,107 +1168,176 @@ class Bot {
     }
   }
 
-  // Forward one staging bubble into the stickers bot chat (no disk upload there).
-  async forwardOwnToBot(ownId, botUrl = this.botUrl) {
-    await this.scrollToBottom();
-    let pickedForward = false;
-    for (let attempt = 0; attempt < 4 && !pickedForward; attempt++) {
-      if (attempt) await this.dismissOverlay();
-      try {
-        await this.openMessageMenu(ownId, { maxCycles: attempt === 0 ? 8 : 4 });
-      } catch (e) {
-        if (stagingForwardMenuBlocked(e)) throw e;
-        if (attempt >= 3) throw e;
-        continue;
-      }
-      await sleep(attempt === 0 ? 280 : 450);
-      pickedForward = await this.clickAnyMenuLabel(STAGING_FORWARD_MENU_LABELS);
-      if (!pickedForward) {
-        for (const label of STAGING_FORWARD_MENU_LABELS) {
-          if (await this.clickLabel(label)) {
-            pickedForward = true;
-            break;
-          }
-        }
-      }
-      if (!pickedForward && attempt >= 1) {
-        pickedForward = await this.c.ev(`(() => {
-          ${TG2TM_DEEP_WALK}
-          const labels = ${JSON.stringify([...STAGING_FORWARD_MENU_LABELS])};
-          const matchText = (t, a) => labels.some((L) => {
-            const s = String(L);
-            return t === s || a === s || t.startsWith(s + ' ') || (s.length >= 4 && (t.includes(s) || a.includes(s)));
-          });
-          const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li').filter((e) => {
-            const r = e.getBoundingClientRect();
-            return r.width > 2 && r.height > 2;
-          });
-          let idx = items.findIndex((e) => matchText(
-            (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim(),
-            (e.getAttribute('aria-label') || '').trim(),
-          ));
-          if (idx < 0) return false;
-          items[idx].click();
-          return true;
-        })()`);
-      }
-    }
-    if (!pickedForward) {
-      const hint = await this.stagingForwardMenuDebug().catch(() => null);
-      if (hint && hint.labels && hint.labels.length) {
-        console.log('staging forward menu debug', hint);
-      }
-      throw new Error('staging forward: Переслать not found');
-    }
-    await sleep(300);
-    const botName = 'Стикеры';
-    const botUser = (String(botUrl).match(/\/user\/([^/?#]+)/) || [])[1] || '';
-    const picked = await this.c.ev(`(() => {
-      const want = ${JSON.stringify(botName)};
-      const user = ${JSON.stringify(botUser)};
-      const nodes = [...document.querySelectorAll('button, [role="option"], [role="listitem"], a, div, span')];
-      const el = nodes.find((e) => {
-        const text = (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim();
-        const href = e.getAttribute && (e.getAttribute('href') || '');
+  // «Переслать» is a submenu, not a separate chat picker. Hover opens the chat list.
+  async forwardMenuItemPoint() {
+    return this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const norm = (s) => String(s || '').replace(/\\s+/g, ' ').replace(/[›>»]\\s*$/, '').trim();
+      const vis = (e) => {
         const r = e.getBoundingClientRect();
-        if (r.width < 2 || r.height < 2) return false;
-        if (text === want || text.startsWith(want + ' ')) return true;
-        if (user && href && href.includes(user)) return true;
-        return false;
+        return r.width > 4 && r.height > 4;
+      };
+      const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a, div, span').filter(vis);
+      const hits = items.filter((e) => {
+        const aria = norm(e.getAttribute('aria-label') || '');
+        const raw = String(e.innerText || e.textContent || '');
+        const lines = raw.split(/\\n/).map(norm).filter(Boolean);
+        const text = norm(raw);
+        const exact = text === 'Переслать' || text === 'Forward' || aria === 'Переслать' || aria === 'Forward'
+          || lines[0] === 'Переслать' || lines[0] === 'Forward';
+        if (!exact) return false;
+        if (lines.length > 2) return false;
+        return true;
+      });
+      hits.sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return (ra.width * ra.height) - (rb.width * rb.height);
+      });
+      const el = hits[0];
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    })()`);
+  }
+
+  async hoverForwardMenuItem() {
+    const point = await this.forwardMenuItemPoint();
+    if (!point) return false;
+    await this.cdpHover(point.x, point.y);
+    await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const norm = (s) => String(s || '').replace(/\\s+/g, ' ').replace(/[›>»]\\s*$/, '').trim();
+      const vis = (e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 4 && r.height > 4;
+      };
+      const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a').filter(vis);
+      const el = items.find((e) => {
+        const aria = norm(e.getAttribute('aria-label') || '');
+        const lines = String(e.innerText || e.textContent || '').split(/\\n/).map(norm).filter(Boolean);
+        const text = norm(e.innerText || e.textContent || '');
+        return (text === 'Переслать' || text === 'Forward' || aria === 'Переслать' || aria === 'Forward' || lines[0] === 'Переслать' || lines[0] === 'Forward') && lines.length <= 2;
       });
       if (!el) return false;
-      el.click();
+      const r = el.getBoundingClientRect();
+      const o = { bubbles: true, cancelable: true, composed: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+      for (const type of ['pointerover', 'pointerenter', 'pointermove', 'mouseover', 'mouseenter', 'mousemove']) {
+        el.dispatchEvent(new PointerEvent(type, o));
+      }
       return true;
     })()`);
-    if (!picked) {
-      const search = await this.c.ev(`(() => {
-        const el = document.querySelector('input[type="search"], input[placeholder*="Поиск"], input[aria-label*="Поиск"]');
-        if (!el) return false;
-        el.focus();
-        return true;
-      })()`);
-      if (search) {
-        await this.c.send('Input.insertText', { text: botName });
-        await sleep(400);
-        if (!(await this.clickLabel(botName))) {
-          throw new Error('staging forward: stickers chat not in picker');
-        }
-      } else {
-        throw new Error('staging forward: stickers chat not in picker');
+    return true;
+  }
+
+  async pressForwardMenuItem() {
+    const point = await this.forwardMenuItemPoint();
+    if (!point) return false;
+    await this.cdpClickAt(point.x, point.y, 'left');
+    await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const norm = (s) => String(s || '').replace(/\\s+/g, ' ').replace(/[›>»]\\s*$/, '').trim();
+      const vis = (e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 4 && r.height > 4;
+      };
+      const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a').filter(vis);
+      const el = items.find((e) => {
+        const text = norm(e.innerText || e.textContent || '');
+        const aria = norm(e.getAttribute('aria-label') || '');
+        return text === 'Переслать' || text === 'Forward' || aria === 'Переслать' || aria === 'Forward';
+      });
+      if (!el) return false;
+      return tg2tmPress(el, 0);
+    })()`);
+    return true;
+  }
+
+  // Click the submenu row whose title is exactly the stickers chat name.
+  // The chat list on the left also contains that name; only the popup to the
+  // right of «Переслать» is the forward target.
+  async clickSubmenuChat(target) {
+    const lit = JSON.stringify(String(target || ''));
+    const point = await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const want = ${lit};
+      if (!want) return null;
+      const vis = (e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 4 && r.height > 4;
+      };
+      const normLine = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
+      const matches = (e) => {
+        const aria = normLine(e.getAttribute && e.getAttribute('aria-label'));
+        if (aria === want) return true;
+        const raw = String(e.innerText || e.textContent || '').replace(/\\u00a0/g, ' ');
+        const lines = raw.split(/\\n/).map(normLine).filter(Boolean);
+        if (lines.length && lines[0] === want && lines.length <= 3) return true;
+        if (normLine(raw) === want) return true;
+        return false;
+      };
+      const norm = (s) => normLine(s).replace(/[›>»]\\s*$/, '').trim();
+      const forwardItems = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a').filter(vis).filter((e) => {
+        const text = norm(e.innerText || e.textContent || '');
+        const aria = norm(e.getAttribute('aria-label') || '');
+        const lines = String(e.innerText || e.textContent || '').split(/\\n/).map(norm).filter(Boolean);
+        return (text === 'Переслать' || text === 'Forward' || aria === 'Переслать' || aria === 'Forward' || lines[0] === 'Переслать' || lines[0] === 'Forward') && lines.length <= 2;
+      });
+      if (!forwardItems.length) return null;
+      const forwardX = forwardItems[0].getBoundingClientRect().x;
+      let items = tg2tmDeepMatch('[role="menuitem"], [role="option"], button, a, li, div, span').filter(vis).filter(matches);
+      items = items.filter((e) => e.getBoundingClientRect().x + 4 >= forwardX);
+      items.sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return (ra.width * ra.height) - (rb.width * rb.height);
+      });
+      const el = items[0];
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const x = r.x + Math.min(r.width - 4, Math.max(8, r.width * 0.35));
+      const y = r.y + r.height / 2;
+      el.dataset.tg2tmSubmenuHit = '1';
+      return { x, y };
+    })()`);
+    if (!point) return false;
+    await this.cdpClickAt(point.x, point.y, 'left');
+    const pressed = await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const el = tg2tmDeepMatch('[data-tg2tm-submenu-hit="1"]')[0];
+      if (!el) return false;
+      delete el.dataset.tg2tmSubmenuHit;
+      return tg2tmPress(el, 0);
+    })()`);
+    return Boolean(point && (pressed || point.x));
+  }
+
+  // Forward one buffer image into the stickers chat via Переслать › target.
+  async forwardOwnToBot(ownId, botUrl = this.botUrl, targetName = '') {
+    const target = String(targetName || this.forwardTarget || this.botName || 'Стикеры').trim() || 'Стикеры';
+    await this.scrollToBottom();
+    await this.openMessageMenu(ownId, { maxCycles: 8 });
+    let forwarded = false;
+    for (let attempt = 0; attempt < 6 && !forwarded; attempt++) {
+      const hovered = await this.hoverForwardMenuItem();
+      if (!hovered) await this.pressForwardMenuItem();
+      await sleep(attempt === 0 ? 280 : 420);
+      if (await this.clickSubmenuChat(target)) {
+        forwarded = true;
+        break;
       }
+      await this.pressForwardMenuItem();
+      await sleep(320);
+      if (await this.clickSubmenuChat(target)) forwarded = true;
+    }
+    if (!forwarded) {
+      const hint = await this.stagingForwardMenuDebug().catch(() => null);
+      const labels = hint && hint.labels && hint.labels.length
+        ? ` (${JSON.stringify(hint.labels).slice(0, 320)})`
+        : '';
+      throw new Error(`staging forward: submenu target ${target} not found${labels}`);
     }
     await sleep(200);
-    const sent = await this.c.ev(`(() => {
-      const buttons = [...document.querySelectorAll('[aria-label="Отправить сообщение"], button')].filter((e) => e.getBoundingClientRect().width > 0);
-      const confirm = buttons.find((e) => {
-        const t = (e.innerText || e.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
-        return t === 'Переслать' || t === 'Отправить' || t === 'Отправить сообщение';
-      });
-      if (!confirm) return false;
-      confirm.click();
-      return true;
-    })()`);
-    void sent;
     if (!this.dualTab) await this.openChat(botUrl);
     else await this.dismissOverlay();
   }
@@ -1488,6 +1666,96 @@ export function adminPhaseForStagingStep(step) {
   const s = String(step || '').trim();
   if (s === 'buffer' || s === 'buffering') return 'buffering';
   return 'sending';
+}
+
+// Channel posts often omit .yamb-message-row_own. Forward the image bubbles in order.
+export function channelImageBubbles(rows) {
+  return (rows || []).filter((row) => row && row.hasImage);
+}
+
+export function bufferImageCount(rows) {
+  return channelImageBubbles(rows).length;
+}
+
+export function bufferCountGrew(beforeCount, afterCount) {
+  return Number(afterCount) > Number(beforeCount);
+}
+
+// A post counts only when the image-bubble count grows. Recycled tg2tm ids do not.
+export function bufferImagesGrown(beforeRows, afterRows) {
+  const before = channelImageBubbles(beforeRows);
+  const after = channelImageBubbles(afterRows);
+  const beforeCount = before.length;
+  const afterCount = after.length;
+  if (!bufferCountGrew(beforeCount, afterCount)) {
+    return { ok: false, msgCount: afterCount, id: '', before: beforeCount };
+  }
+  const row = after[afterCount - 1];
+  return {
+    ok: true,
+    msgCount: afterCount,
+    id: row && row.id != null ? String(row.id) : '',
+    before: beforeCount,
+  };
+}
+
+// Absolute index from the pre-upload count, else the tail of this batch (virtualized history).
+export function bufferBatchBubble(rows, batchStartCount, batchSize, indexInBatch) {
+  const images = channelImageBubbles(rows);
+  const absolute = (Number(batchStartCount) || 0) + (Number(indexInBatch) || 0);
+  if (absolute >= 0 && absolute < images.length && images.length > (Number(batchStartCount) || 0)) {
+    return images[absolute];
+  }
+  const size = Number(batchSize) || 0;
+  const index = Number(indexInBatch) || 0;
+  if (size > 0 && images.length >= size && index >= 0 && index < size) {
+    return images[images.length - size + index];
+  }
+  return null;
+}
+
+export function bufferUploadLogLine(index, total, msgCount) {
+  return `buffer-upload ${index}/${total} ok msgCount=${msgCount}`;
+}
+
+export function forwardSubmenuLogLine(index, total, target) {
+  return `forward ${index}/${total} via submenu target=${target}`;
+}
+
+export function botReplyLogLine(index, total, detail) {
+  return `bot-reply ${index}/${total} ${String(detail || '').replace(/\s+/g, ' ').trim()}`;
+}
+
+export function forwardTargetFromTitle(title, fallback = 'Стикеры') {
+  const line = String(title || '').split('\n').map((s) => s.trim()).filter(Boolean)[0] || '';
+  const clean = line.replace(/\s+/g, ' ').trim();
+  const backup = String(fallback || '').trim() || 'Стикеры';
+  if (!clean || clean.length > 80 || /^https?:/i.test(clean)) return backup;
+  return clean;
+}
+
+export function isForwardSubmenuLabel(text, aria = '') {
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').replace(/[›>»]\s*$/, '').trim();
+  const t = norm(text);
+  const a = norm(aria);
+  return t === 'Переслать' || t === 'Forward' || a === 'Переслать' || a === 'Forward';
+}
+
+// Submenu row: exact title, or a first line that is exact (subtitle like «Стикер» is allowed).
+// The chat list sits left of the message menu. The forward submenu opens to its right.
+export function forwardSubmenuOpensRight(itemX, forwardX) {
+  return Number(itemX) + 4 >= Number(forwardX);
+}
+
+export function submenuChatMatches(text, aria, target) {
+  const want = String(target || '').trim();
+  if (!want) return false;
+  const ariaText = String(aria || '').replace(/\s+/g, ' ').trim();
+  if (ariaText === want) return true;
+  const raw = String(text || '').replace(/\u00a0/g, ' ');
+  const lines = raw.split(/\n/).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (lines.length && lines[0] === want && lines.length <= 3) return true;
+  return raw.replace(/\s+/g, ' ').trim() === want;
 }
 
 /** Scroll staging join chat so lazy history repaints (single tab; dual-tab keeps DOM warm). */
@@ -2508,29 +2776,22 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
 
   const urls = loadTelemostUrls();
   const useStaging = Boolean(urls.stagingEnabled && (bot.stagingUrl || urls.stagingUrl));
-  const stagingUrl = bot.stagingUrl || urls.stagingUrl;
   const botUrl = bot.botUrl || urls.botUrl;
   const stagedIndices = new Set();
   let stagingFilled = tm.uploaded;
-  let stagingBaseRowCount = null;
-  let stagingBaseBufferCount = null;
+  let stagingBaseImageCount = null;
+  let stagingBasePackIndex = tm.uploaded;
   let stagingJoinPreloaded = false;
   let stagingPackStarted = false;
+  const forwardTargetName = () => bot.forwardTarget || urls.botName || 'Стикеры';
 
   async function startStagingPack() {
     if (!useStaging || stagingPackStarted) return;
     stagingPackStarted = true;
     await bot.onStaging(async () => {
-      try {
-        const removed = await bot.clearChatResidue();
-        console.log(dir, 'staging-pack-start', 'cleared', removed);
-      } catch (e) {
-        console.log(dir, 'staging-pack-start', 'cleanup-skip', e && e.message ? e.message : e);
-      }
-      stagingBaseRowCount = null;
-      stagingBaseBufferCount = null;
+      stagingBaseImageCount = null;
       await ensureStagingBase();
-      console.log(dir, 'staging-base', stagingBaseRowCount, 'buffer', stagingBaseBufferCount);
+      console.log(dir, 'buffer-base', `msgCount=${stagingBaseImageCount}`);
     });
   }
 
@@ -2541,11 +2802,22 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   }
 
   async function ensureStagingBase() {
-    if (stagingBaseRowCount != null) return;
+    if (stagingBaseImageCount != null) return;
     await bot.scrollToBottom();
     const rows = await bot.chatRows();
-    stagingBaseRowCount = (rows || []).length;
-    stagingBaseBufferCount = stagingBufferRows(rows).length;
+    stagingBaseImageCount = bufferImageCount(rows);
+    stagingBasePackIndex = tm.uploaded;
+  }
+
+  async function postBufferImage(idx, path) {
+    const posted = await bot.sendImageNoWait(path);
+    if (!posted || !posted.ok || !bufferCountGrew(posted.before, posted.msgCount)) {
+      const seen = posted && posted.msgCount != null ? posted.msgCount : 'none';
+      throw new Error(`staging upload: image count did not grow (msgCount=${seen})`);
+    }
+    console.log(bufferUploadLogLine(idx + 1, m.images.length, posted.msgCount));
+    stagedIndices.add(idx);
+    stagingFilled = Math.max(stagingFilled, idx + 1);
   }
 
   async function fillStagingWindow(onBufferNote = async () => {}) {
@@ -2559,11 +2831,8 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       for (const idx of need) {
         const item = m.images[idx];
         const path = join(PACKS, dir, item.file);
-        console.log(dir, 'stage', item.file);
         await onBufferNote(idx);
-        await bot.sendImageNoWait(path);
-        stagedIndices.add(idx);
-        stagingFilled = idx + 1;
+        await postBufferImage(idx, path);
       }
     });
   }
@@ -2587,10 +2856,8 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
           total: m.images.length,
           lastLine: lastText,
         });
-        await bot.sendImageNoWait(file);
+        await postBufferImage(index, file);
       });
-      stagedIndices.add(index);
-      stagingFilled = Math.max(stagingFilled, index + 1);
     }
     const { baseline, ownBeforeIds } = await bot.onBot(async () => {
       const thread = await bot.chatRows();
@@ -2600,45 +2867,30 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       };
     });
     await onSendNote(index);
-    const ownId = await resolveStagingForwardId(bot, index, stagingBaseRowCount, stagingBaseBufferCount, {
-      stagingFilled,
-      uploaded: tm.uploaded,
-      stagingUrl,
+    const targetName = forwardTargetName();
+    const batchSize = Math.max(0, stagingFilled - stagingBasePackIndex);
+    const indexInBatch = index - stagingBasePackIndex;
+    const bubble = await bot.onStaging(async () => {
+      await bot.scrollToBottom();
+      const rows = await bot.chatRows();
+      return bufferBatchBubble(rows, stagingBaseImageCount, batchSize, indexInBatch);
     });
-    if (!ownId) {
-      const snap = await stagingRowsForForward(bot);
+    if (!bubble || bubble.id == null) {
+      const snap = await bot.onStaging(() => bot.chatRows());
       throw new Error(
-        `staging forward: image ${index} not found (base rows ${stagingBaseRowCount}, `
-        + `${(snap || []).length} rows, ${stagingImageRows(snap).length} with img, `
-        + `buffer ${stagingBufferRows(snap).length})`,
+        `staging forward: image ${index + 1} not in buffer (base ${stagingBaseImageCount}, `
+        + `msgCount=${bufferImageCount(snap)}, batch ${batchSize})`,
       );
     }
-    console.log(dir, 'forward', m.images[index].file, 'id', ownId);
-    try {
-      await bot.onStaging(() => bot.forwardOwnToBot(ownId, botUrl));
-    } catch (e) {
-      if (!stagingForwardMenuBlocked(e)) throw e;
-      const msg = e && e.message ? String(e.message) : String(e);
-      console.log(dir, 'forward-fallback-send', m.images[index].file, msg.replace(/\s+/g, ' ').slice(0, 240));
-      await note({
-        phase: 'sending',
-        pack: m.title,
-        index: index + 1,
-        total: m.images.length,
-        lastLine: 'пересылка недоступна — прямая отправка файла',
-      });
-      return bot.onBot(async () => {
-        if (!bot.dualTab) await bot.openChat(botUrl);
-        return bot.sendImage(file, { onWait });
-      });
-    }
+    console.log(forwardSubmenuLogLine(index + 1, m.images.length, targetName));
+    await bot.onStaging(() => bot.forwardOwnToBot(bubble.id, botUrl, targetName));
     return bot.onBot(() => bot.waitForReply(baseline, { until: 'sticker', ownBeforeIds, onWait }));
   }
 
   for (let i = tm.uploaded; i < m.images.length; i++) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
-    console.log(dir, useStaging ? 'forward-send' : 'send', img.file);
+    if (!useStaging) console.log(dir, 'send', img.file);
     if (!useStaging) {
       await note({ phase: 'sending', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
     }
@@ -2694,7 +2946,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
         });
       }
       const shown = String(reply.text || '').replace(/\s+/g, ' ').trim();
-      console.log(dir, 'bot', outboundStep, reply.kind, shown.slice(0, 180));
+      console.log(botReplyLogLine(i + 1, m.images.length, `${outboundStep} ${reply.kind} ${shown.slice(0, 180)}`));
       if (reply.kind === 'stall' || afterSendReply(reply.kind) === 'recover') {
         await recoverFromStall(reply, outboundStep === 'image' ? 'зависание, перезагрузка' : 'зависание после эмодзи');
         continue;
@@ -2741,7 +2993,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
           continue;
         }
         const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
-        console.log(dir, 'bot', done.kind, doneText.slice(0, 180));
+        console.log(botReplyLogLine(i + 1, m.images.length, `emoji ${done.kind} ${doneText.slice(0, 180)}`));
         if (done.kind === 'reject') {
           rejects += 1;
           log(m.title, img.file, `ошибка, попытка ${rejects}`, doneText);
@@ -3019,13 +3271,40 @@ async function main() {
   if (skipped.length) console.log('skip', skipped.join(' '));
   dirs = dirsForRun(dirs, { finalize, close });
   const urls = loadTelemostUrls();
-  const sessions = await connect(urls, { openStagingTab: !peek });
-  const bot = new Bot(sessions, urls);
-  if (urls.stagingEnabled) {
-    console.log('staging', urls.stagingUrl, 'window', urls.stagingWindow, sessions.dualTab ? 'dual-tab' : 'single-tab');
-  }
+  console.log(`telemost-urls bot=${urls.botUrl} source=${urls.botUrlSource} buffer=${urls.stagingUrl} source=${urls.stagingUrlSource} name=${urls.botName}`);
   const dirRef = { dir: '', title: '' };
   const note = openAdminFeed(dirRef);
+  const urlError = !peek && githubActionsChatUrlError(urls, process.env);
+  if (urlError) {
+    log('restart', '', 'остановлено', urlError);
+    await note({ phase: 'error', pack: 'буфер', error: urlError });
+    process.exitCode = 1;
+    return;
+  }
+  let sessions;
+  try {
+    sessions = await connect(urls, { openStagingTab: !peek });
+  } catch (e) {
+    const message = e && e.message ? e.message : String(e);
+    log('restart', '', 'остановлено', message);
+    await note({ phase: 'error', pack: 'буфер', error: message });
+    process.exitCode = 1;
+    return;
+  }
+  const bot = new Bot(sessions, urls);
+  if (urls.stagingEnabled) {
+    if (!peek) {
+      try {
+        const title = await bot.onBot(() => bot.chatTitle());
+        bot.forwardTarget = forwardTargetFromTitle(title, urls.botName);
+      } catch (e) {
+        console.log('forward-target title skipped', e && e.message ? e.message : e);
+        bot.forwardTarget = urls.botName || 'Стикеры';
+      }
+      console.log('forward-target', bot.forwardTarget);
+    }
+    console.log('staging', urls.stagingUrl, 'window', urls.stagingWindow, sessions.dualTab ? 'dual-tab' : 'single-tab');
+  }
   if (peek) {
     try {
       await peekRestart(bot);

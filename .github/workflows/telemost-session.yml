@@ -143,6 +143,8 @@ jobs:
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
           PROXY_HOST: ${{ secrets.PROXY_HOST }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TELEMOST_BOT_URL: ${{ vars.telemoststickerbot }}
+          TELEMOST_STAGING_URL: ${{ vars.telemostbufferchannel }}
         run: |
           mkdir -p sessions logs .cache
           chmod a+rwx logs .cache
@@ -153,6 +155,7 @@ jobs:
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
             -e GITHUB_ACTIONS -e GITHUB_RUN_ID -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e RUN_URL \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
+            -e TELEMOST_BOT_URL -e TELEMOST_STAGING_URL \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
             -e HOME=/tmp \
             -e SESSION_DIR=/var/lib/tg2tm/sessions \
@@ -194,6 +197,8 @@ jobs:
           TG2TM_QUEUE_DRAIN: "1"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TELEMOST_BOT_URL: ${{ vars.telemoststickerbot }}
+          TELEMOST_STAGING_URL: ${{ vars.telemostbufferchannel }}
         run: |
           mkdir -p sessions logs .cache
           chmod a+rwx logs .cache
@@ -207,6 +212,7 @@ jobs:
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
             -e GITHUB_ACTIONS -e GITHUB_RUN_ID -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e RUN_URL \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
+            -e TELEMOST_BOT_URL -e TELEMOST_STAGING_URL \
             -e UPLOADER_SECRET -e TG2TM_PROGRESS_URL \
             -e TELEGRAM_BOT_TOKEN \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \

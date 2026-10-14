@@ -39,7 +39,21 @@ import {
   menuLabelMatches,
   botRepliesAfterOwn,
   loadTelemostUrls,
+  githubActionsChatUrlError,
   telemostUrlMatches,
+  telemostUrlToken,
+  devtoolsNewTabRequests,
+  bufferImageCount,
+  bufferCountGrew,
+  bufferImagesGrown,
+  bufferBatchBubble,
+  bufferUploadLogLine,
+  forwardSubmenuLogLine,
+  botReplyLogLine,
+  forwardTargetFromTitle,
+  isForwardSubmenuLabel,
+  submenuChatMatches,
+  forwardSubmenuOpensRight,
   adminPhaseForStagingStep,
   stagingOperationTarget,
   stagingForwardExpectsRows,
@@ -536,7 +550,13 @@ test("staging message menu uses deep press helpers and CDP hover", () => {
   assert.match(src, /async pressMessageRowActions/);
   assert.match(src, /async focusMessageRow/);
   assert.match(src, /stagingForwardDebugCapture/);
-  assert.match(src, /forward-fallback-send/);
+  assert.match(src, /buffer-upload \$\{index\}\/\$\{total\} ok msgCount=/);
+  assert.match(src, /via submenu target=/);
+  assert.match(src, /bot-reply \$\{index\}\/\$\{total\}/);
+  assert.match(src, /async clickSubmenuChat/);
+  assert.match(src, /async hoverForwardMenuItem/);
+  assert.equal(src.includes('forward-fallback-send'), false);
+  assert.equal(src.includes('single-tab fallback'), false);
   assert.match(src, /stagingForwardMenuBlocked/);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /Действия с сообщением/);
   assert.match(STAGING_MESSAGE_ACTIONS_SELECTOR, /MessageActions/i);
@@ -631,12 +651,106 @@ test("staging URLs come from settings or env, and the fill window stays ahead of
   });
   assert.equal(custom.botUrl, 'https://telemost.yandex.ru/user/abc');
   assert.equal(custom.stagingUrl, 'https://telemost.yandex.ru/join#buffer');
+  assert.equal(custom.botUrlSource, 'env:TELEMOST_BOT_URL');
+  assert.equal(custom.stagingUrlSource, 'env:TELEMOST_STAGING_URL');
   assert.equal(custom.stagingWindow, 3);
+  const fromVars = loadTelemostUrls({
+    telemostbufferchannel: 'https://telemost.yandex.ru/chat/tg2tm-channel',
+    telemoststickerbot: 'https://telemost.yandex.ru/user/stickers-bot',
+  });
+  assert.equal(fromVars.stagingUrl, 'https://telemost.yandex.ru/chat/tg2tm-channel');
+  assert.equal(fromVars.stagingUrlSource, 'env:telemostbufferchannel');
+  assert.equal(fromVars.botUrl, 'https://telemost.yandex.ru/user/stickers-bot');
+  assert.equal(fromVars.botUrlSource, 'env:telemoststickerbot');
+  assert.equal(fromVars.botName, 'Стикеры');
+  assert.equal(githubActionsChatUrlError(fromVars, { GITHUB_ACTIONS: 'true' }), '');
+  assert.match(
+    githubActionsChatUrlError(loadTelemostUrls({}), { GITHUB_ACTIONS: 'true' }),
+    /telemostbufferchannel/,
+  );
+  assert.equal(githubActionsChatUrlError(loadTelemostUrls({}), {}), '');
   assert.deepEqual(stagingFillTo(0, 0, 144, 5), [0, 1, 2, 3, 4]);
   assert.deepEqual(stagingFillTo(2, 5, 144, 5), [5, 6]);
   assert.deepEqual(stagingFillTo(2, 7, 144, 5), []);
   assert.deepEqual(stagingFillTo(2, 3, 144, 5), [3, 4, 5, 6]);
   assert.deepEqual(stagingFillTo(140, 140, 144, 5), [140, 141, 142, 143]);
+});
+
+test("buffer channel counts image bubbles and ignores id churn and _own", () => {
+  const oldImage = { id: "1", own: false, hasImage: true, text: "20:43" };
+  const textRow = { id: "2", own: false, hasImage: false, text: "system" };
+  const before = [oldImage, textRow];
+  assert.equal(bufferImageCount(before), 1);
+  const recycled = [
+    { id: "9", own: false, hasImage: true, text: "20:43" },
+    { id: "10", own: false, hasImage: false, text: "system" },
+  ];
+  assert.equal(bufferImagesGrown(before, recycled).ok, false);
+  assert.equal(bufferCountGrew(1, 1), false);
+  const posted = [
+    oldImage,
+    textRow,
+    { id: "3", own: false, hasImage: true, text: "" },
+  ];
+  const grown = bufferImagesGrown(before, posted);
+  assert.equal(grown.ok, true);
+  assert.equal(grown.msgCount, 2);
+  assert.equal(grown.before, 1);
+  assert.equal(grown.id, "3");
+  assert.equal(bufferUploadLogLine(1, 116, grown.msgCount), "buffer-upload 1/116 ok msgCount=2");
+  assert.equal(bufferBatchBubble(posted, 1, 1, 0).id, "3");
+  assert.equal(bufferBatchBubble(posted, 1, 1, 1), null);
+  const channel = [
+    { id: "a", own: false, hasImage: true },
+    { id: "b", own: false, hasImage: true },
+    { id: "c", own: false, hasImage: true },
+  ];
+  assert.equal(bufferBatchBubble(channel, 0, 3, 0).id, "a");
+  assert.equal(bufferBatchBubble(channel, 0, 3, 2).id, "c");
+  const tail = channel.slice(1);
+  assert.equal(bufferBatchBubble(tail, 5, 2, 1).id, "c");
+  assert.equal(bufferBatchBubble([{ id: "1", own: false, hasImage: false, text: "menu" }], 0, 1, 0), null);
+});
+
+test("forward submenu matches Переслать and the exact chat title", () => {
+  assert.equal(isForwardSubmenuLabel("Переслать", ""), true);
+  assert.equal(isForwardSubmenuLabel("Переслать ›", ""), true);
+  assert.equal(isForwardSubmenuLabel("Forward >", ""), true);
+  assert.equal(isForwardSubmenuLabel("Удалить", ""), false);
+  assert.equal(isForwardSubmenuLabel("Переслать сообщение", ""), false);
+  assert.equal(submenuChatMatches("Стикеры", "", "Стикеры"), true);
+  assert.equal(submenuChatMatches("Стикеры\nСтикер", "", "Стикеры"), true);
+  assert.equal(submenuChatMatches("Стикеры Стикер", "", "Стикеры"), false);
+  assert.equal(submenuChatMatches("Сохранённые сообщения", "", "Стикеры"), false);
+  assert.equal(submenuChatMatches("TG2TM", "", "Стикеры"), false);
+  assert.equal(submenuChatMatches("", "Стикеры", "Стикеры"), true);
+  assert.equal(forwardSubmenuOpensRight(640, 480), true);
+  assert.equal(forwardSubmenuOpensRight(80, 480), false);
+  assert.equal(forwardTargetFromTitle("Стикеры\nв сети", "бот"), "Стикеры");
+  assert.equal(forwardTargetFromTitle("", "Стикеры"), "Стикеры");
+  assert.equal(forwardSubmenuLogLine(1, 116, "Стикеры"), "forward 1/116 via submenu target=Стикеры");
+  assert.equal(botReplyLogLine(1, 116, "image emoji hi"), "bot-reply 1/116 image emoji hi");
+});
+
+test("devtools opens a buffer tab with PUT and keeps the URL hash", () => {
+  const target = "https://telemost.yandex.ru/chat/tg2tm-channel#room";
+  const reqs = devtoolsNewTabRequests("http://127.0.0.1:9222", target);
+  assert.equal(reqs[0].method, "PUT");
+  assert.equal(reqs[1].method, "GET");
+  assert.match(reqs[0].url, /^http:\/\/127\.0\.0\.1:9222\/json\/new\?/);
+  assert.match(reqs[0].url, /%23room/);
+  assert.equal(telemostUrlToken(target), telemostUrlToken("https://telemost.yandex.ru/chat/tg2tm-channel#room"));
+  assert.equal(
+    telemostUrlMatches("https://telemost.yandex.ru/chat/tg2tm-channel", "https://telemost.yandex.ru/chat/tg2tm-channel"),
+    true,
+  );
+  assert.equal(
+    telemostUrlMatches(
+      "https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d",
+      "https://telemost.yandex.ru/chat/tg2tm-channel",
+    ),
+    false,
+  );
 });
 
 test("addsticker continues a short saved pack from pack.json", () => {
