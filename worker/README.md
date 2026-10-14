@@ -16,8 +16,8 @@ uploader  --Bearer-->   POST /progress   Worker  --KV-->           подпис�
 - `POST /telegram` — обновления Telegram. Заголовок `X-Telegram-Bot-Api-Secret-Token` равен секрету `WEBHOOK_SECRET`.
 - `POST /progress` — ход загрузки. Заголовок `Authorization: Bearer <UPLOADER_SECRET>`. Тело: `slug`, `title`, `source`, `status` (`pending` / `uploading` / `done` / `error`), `uploaded`, `total`, `packUrl`, `error`, `requesterChatId`, `queueRequestId`. Можно прислать и блок `telemost` из `pack.json`.
 - `POST /session-started` — один раз на run Actions: `runId`, `url`, `reason` (или `mode` для подписи по умолчанию).
-- `GET /project/prompt?id=<prompt_id>` — текст запроса из `/project` (Bearer `UPLOADER_SECRET`). Workflow `project-prompt.yml` читает перед созданием issue.
-- `POST /project/reply` — краткий ответ в админ-чат Telegram: `{ "id": "<prompt_id>", "summary": "…", "chatId"?: "…", "issueUrl"?: "…" }` (Bearer `UPLOADER_SECRET`). Вызывают Actions или cloud agent после обработки в Cursor Project.
+- `GET /project/prompt?id=<prompt_id>` — текст запроса из `/project` (Bearer `UPLOADER_SECRET`). Его читают `cursor-agent.yml` и, если включён, `project-prompt.yml`.
+- `POST /project/reply` — краткий ответ в админ-чат Telegram: `{ "id": "<prompt_id>", "summary": "…", "chatId"?: "…", "issueUrl"?: "…" }` (Bearer `UPLOADER_SECRET`). `cursor-agent.yml` шлёт итог сюда после Cloud Agent; сам агент может вызвать тот же путь.
 - «Готово» подписчику и пост в канал уходят только когда `packUrl` — настоящая ссылка `http(s)`. Пока её нет, воркер лишь помнит статус. Если «готово» уже уходило без ссылки, следующее сообщение со ссылкой досылает её и тогда же публикует пост.
 - Пост в канале — название и ссылка Телемоста, без `t.me/addstickers`.
 - KV `BOT_KV`: `sub:<chat id>`, `await:<chat id>` (ждёт сообщение после `/create`), `state:<slug>`, `pack:<slug>`, `meta:seeded`, один ключ `queue` (приоритетные chat id и очередь запросов).
@@ -67,6 +67,8 @@ npx wrangler deploy
 ```
 
 `TELEGRAM_BOT_TOKEN` воркер тоже принимает, если секрет назван так. `TG2TMBOT_TOKEN` — то же значение, что в `config/tg2tmbot.token`.
+
+`CURSOR_API_KEY` в этом дизайне — секрет **GitHub Actions**, не секрет воркера. `/project` только делает `workflow_dispatch` на `cursor-agent.yml`. Команда `npx wrangler secret put CURSOR_API_KEY` нужна лишь если сам воркер начнёт звонить в Cursor API. Пока этого нет, ключ в Cloudflare не кладите и в `wrangler.toml` `[vars]` не пишите.
 
 Пока на машине переноса крутится `python scripts/tg2tmbot.py`, вебхук не ставить: Telegram перестанет отдавать `getUpdates`. Когда polling остановлен:
 

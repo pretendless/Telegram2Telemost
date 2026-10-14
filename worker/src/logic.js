@@ -77,7 +77,7 @@ export const ADMIN_ONLY_COMMANDS = [
   { command: "unstick", description: "Снять зависшую загрузку" },
   { command: "skip", description: "Пропустить текущий пак" },
   { command: "restart", description: "Перезапустить загрузку" },
-  { command: "project", description: "Вопрос или задача для Cursor Project" },
+  { command: "project", description: "Вопрос или задача для Cursor Cloud Agent" },
   { command: "ghrun", description: "Запустить GitHub workflow" },
   { command: "login", description: "Войти в Яндекс" },
   { command: "connect", description: "Войти в аккаунт с меткой" },

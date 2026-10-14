@@ -28,7 +28,7 @@ export function missingWorkerConfigError({ progressUrl, secret, promptId }) {
     return (
       "TG2TM_PROGRESS_URL is empty: set GitHub repo secret TG2TM_PROGRESS_URL to the worker progress endpoint " +
       "(for example https://tg2tmbot.prtndz.workers.dev/progress). " +
-      "project-prompt uses the same base URL as telemost-session (script strips /progress for GET /project/prompt)."
+      "cursor-agent and project-prompt use the same base URL as telemost-session (script strips /progress for GET /project/prompt)."
     );
   }
   if (!bearer) return "UPLOADER_SECRET is empty: set GitHub repo secret UPLOADER_SECRET to match the worker.";

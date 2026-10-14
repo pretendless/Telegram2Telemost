@@ -126,6 +126,7 @@ export function ghrunUsageText(error) {
     return (
       "Формат: /ghrun <workflow.yml> [ключ=значение …]\n\n" +
       "Пример: /ghrun setup-bot.yml\n" +
+      "Пример: /ghrun check-cursor-api.yml\n" +
       "Пример: /ghrun project-prompt.yml prompt_id=tg-1 chat_id=8502935020"
     );
   }

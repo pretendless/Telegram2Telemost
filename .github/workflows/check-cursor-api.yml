@@ -1,0 +1,19 @@
+# Read-only Cursor API check. Does not POST /v1/agents (that starts a billed run).
+# Prints HTTP status and apiKeyName/items flags only — never the key, email, or body.
+name: Check Cursor API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: GET /v1/me and GET /v1/agents
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: node scripts/check_cursor_api.mjs

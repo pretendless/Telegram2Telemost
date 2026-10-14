@@ -6,6 +6,7 @@ import {
   newPromptId,
   normalizeProjectReplyBody,
   parseProjectCommand,
+  optionalProjectIssueWorkflow,
   projectDispatchedText,
   projectFastAckSummary,
   projectIssueTitle,
@@ -25,7 +26,7 @@ test("newPromptId is stable prefix", () => {
   assert.match(id, /^tg-2026-10-14T12-00-00-000Z/);
 });
 
-test("buildProjectPromptDispatch targets project-prompt workflow", () => {
+test("buildProjectPromptDispatch targets cursor-agent workflow", () => {
   const built = buildProjectPromptDispatch({
     repo: "pretendless/tg2tm",
     promptId: "tg-1",
@@ -33,9 +34,12 @@ test("buildProjectPromptDispatch targets project-prompt workflow", () => {
   });
   assert.equal(
     built.url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/project-prompt.yml/dispatches",
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/cursor-agent.yml/dispatches",
   );
   assert.deepEqual(built.body.inputs, { prompt_id: "tg-1", chat_id: "8502935020" });
+  assert.equal(optionalProjectIssueWorkflow("1"), "project-prompt.yml");
+  assert.equal(optionalProjectIssueWorkflow(""), "");
+  assert.equal(optionalProjectIssueWorkflow("no"), "");
 });
 
 test("normalizeProjectReplyBody", () => {
