@@ -27,7 +27,7 @@
 | `/skip` | Пометить текущую «загружается» как ошибку и перейти к следующему в очереди (если Actions не идут) |
 | `/status` | Кратко: `идёт` / `простаивает` и текущий пак |
 | `/restart` | Прервать текущий Actions и один новый запуск с `main`; выбор пака — только **queued/uploading** из KV, не «призраки» из каталога `packs/07…` без активной строки очереди |
-| `/project` | Вопрос или задача для Cursor Project: мгновенный ack в TG, затем фоновый dispatch `project-prompt.yml` (fast ack + issue). Краткий итог — после `POST /project/reply` |
+| `/project` | Вопрос или задача для Cursor Project: мгновенный ack в TG, затем фоновый dispatch `project-prompt.yml` (fast ack + issue). Краткий итог — после `POST /project/reply`. В GitHub нужны секреты `UPLOADER_SECRET` и (рекомендуется) `TG2TM_PROGRESS_URL` = `https://tg2tmbot.prtndz.workers.dev/progress` — тот же URL, что в `telemost-session.yml`; без URL workflow падает на загрузке prompt из Worker KV |
 | `/ghrun` | Запуск произвольного workflow: `/ghrun <file.yml> [key=value …]`. Только админ; опционально `GH_WORKFLOW_ALLOWLIST` |
 | `/login`, `/connect`, `/upload` | Запуск браузера / ручная загрузка (как раньше) |
 

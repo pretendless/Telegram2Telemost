@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Fast ack to Telegram
         env:
-          TG2TM_PROGRESS_URL: ${{ secrets.TG2TM_PROGRESS_URL }}
+          TG2TM_PROGRESS_URL: ${{ secrets.TG2TM_PROGRESS_URL || 'https://tg2tmbot.prtndz.workers.dev/progress' }}
           UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
           PROMPT_ID: ${{ inputs.prompt_id }}
           CHAT_ID: ${{ inputs.chat_id }}
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Load prompt from Worker KV
         env:
-          TG2TM_PROGRESS_URL: ${{ secrets.TG2TM_PROGRESS_URL }}
+          TG2TM_PROGRESS_URL: ${{ secrets.TG2TM_PROGRESS_URL || 'https://tg2tmbot.prtndz.workers.dev/progress' }}
           UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
           PROMPT_ID: ${{ inputs.prompt_id }}
           CHAT_ID: ${{ inputs.chat_id }}
@@ -55,7 +55,7 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
       - name: Post issue link to admin chat
         env:
-          TG2TM_PROGRESS_URL: ${{ secrets.TG2TM_PROGRESS_URL }}
+          TG2TM_PROGRESS_URL: ${{ secrets.TG2TM_PROGRESS_URL || 'https://tg2tmbot.prtndz.workers.dev/progress' }}
           UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
           PROMPT_ID: ${{ inputs.prompt_id }}
           CHAT_ID: ${{ inputs.chat_id }}
