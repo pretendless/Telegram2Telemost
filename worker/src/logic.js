@@ -78,6 +78,7 @@ export const ADMIN_ONLY_COMMANDS = [
   { command: "skip", description: "Пропустить текущий пак" },
   { command: "restart", description: "Перезапустить загрузку" },
   { command: "project", description: "Вопрос или задача для Cursor Project" },
+  { command: "ghrun", description: "Запустить GitHub workflow" },
   { command: "login", description: "Войти в Яндекс" },
   { command: "connect", description: "Войти в аккаунт с меткой" },
   { command: "upload", description: "Загрузить паки этой сессией" },

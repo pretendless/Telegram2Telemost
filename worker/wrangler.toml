@@ -10,6 +10,7 @@ workers_dev = true
 binding = "BOT_KV"
 id = "69c9d9f3572a48469a312e5914e8a233"
 
-# Chat ids allowed to run /login, /connect and /upload. Not a credential.
+# Chat ids allowed to run /login, /connect, /upload, /project, /ghrun. Not a credential.
+# Optional GH_WORKFLOW_ALLOWLIST = "setup-bot.yml,project-prompt.yml" — if set, /ghrun only those basenames.
 [vars]
 LOGIN_CHAT_IDS = "8502935020"

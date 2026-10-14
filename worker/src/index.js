@@ -57,6 +57,7 @@ import {
 } from "./logic.js";
 import { loadAdminQueueState, reconcileTerminalUploadingFromProgress } from "./queue_view.js";
 import { applyProjectReply, handleProjectCommand, readProjectPrompt } from "./project_prompt.js";
+import { handleGhrunCommand } from "./ghrun.js";
 import { normalizeProjectReplyBody } from "../../vm/project_prompt.js";
 
 export function botToken(env) {
@@ -729,6 +730,15 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     return;
   } else if (cmd === "/project") {
     await handleProjectCommand(env, message, {
+      send,
+      fetch: deps.fetch,
+      now: deps.now,
+      waitUntil: deps.waitUntil,
+      sleep: deps.sleep,
+    });
+    return;
+  } else if (cmd === "/ghrun") {
+    await handleGhrunCommand(env, message, {
       send,
       fetch: deps.fetch,
       now: deps.now,
