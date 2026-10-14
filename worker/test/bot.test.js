@@ -1900,3 +1900,102 @@ test("GET /project/prompt returns stored prompt for uploader secret", async () =
   const denied = await handle(new Request("https://tg2tmbot.example/project/prompt?id=tg-fetch"), env);
   assert.equal(denied.status, 401);
 });
+
+test("/ghrun is admin-only and dispatches with parsed inputs", async () => {
+  const sent = [];
+  const calls = [];
+  const env = {
+    ...envWith(),
+    LOGIN_CHAT_IDS: String(INITIAL_SUBSCRIBER),
+    GH_DISPATCH_TOKEN: "dispatch-token",
+    GH_WORKFLOW_ALLOWLIST: "setup-bot.yml,check-bot.yml",
+  };
+  const runListUrl =
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/setup-bot.yml/runs?per_page=20";
+  const fetch = async (url, init) => {
+    const href = String(url);
+    if (href === runListUrl) {
+      return {
+        status: 200,
+        json: async () => ({
+          workflow_runs: [
+            {
+              id: 42,
+              created_at: "2026-10-14T12:00:01.000Z",
+              html_url: "https://github.com/pretendless/tg2tm/actions/runs/42",
+            },
+          ],
+        }),
+      };
+    }
+    calls.push({ url: href, body: JSON.parse(init.body) });
+    return new Response(null, { status: 204 });
+  };
+  const sendMessage = async (_env, chatId, text) => sent.push({ chatId, text });
+  await handle(telegramRequest(111, "/ghrun setup-bot.yml"), env, { sendMessage, fetch });
+  assert.equal(sent[0].text, "Эта команда только для администратора.");
+  assert.equal(calls.length, 0);
+  sent.length = 0;
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/ghrun telemost-session.yml"), env, {
+    sendMessage,
+    fetch,
+  });
+  assert.match(sent[0].text, /GH_WORKFLOW_ALLOWLIST/);
+  assert.equal(calls.length, 0);
+  sent.length = 0;
+  calls.length = 0;
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/ghrun setup-bot.yml"), env, {
+    sendMessage,
+    fetch,
+    now: () => new Date("2026-10-14T12:00:00.000Z"),
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].url,
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/setup-bot.yml/dispatches",
+  );
+  assert.deepEqual(calls[0].body, { ref: "main", inputs: {} });
+  assert.ok(sent.some((row) => /⏳/.test(row.text)));
+  assert.ok(sent.some((row) => /actions\/runs\/42/.test(row.text)));
+});
+
+test("/ghrun waitUntil defers GitHub dispatch", async () => {
+  const sent = [];
+  const calls = [];
+  const env = { ...envWith(), LOGIN_CHAT_IDS: String(INITIAL_SUBSCRIBER), GH_DISPATCH_TOKEN: "dispatch-token" };
+  let pending;
+  let releaseDispatch;
+  const dispatchGate = new Promise((resolve) => {
+    releaseDispatch = resolve;
+  });
+  const fetch = async (url, init) => {
+    const href = String(url);
+    if (href.includes("/dispatches")) await dispatchGate;
+    calls.push({ url: href, body: init && init.body ? JSON.parse(init.body) : null });
+    if (href.includes("/runs?")) return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    return new Response(null, { status: 204 });
+  };
+  const sendMessage = async (_env, chatId, text) => sent.push({ chatId, text });
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/ghrun check-bot.yml foo=bar"), env, {
+    sendMessage,
+    fetch,
+    waitUntil: (promise) => {
+      pending = promise;
+    },
+  });
+  assert.ok(pending);
+  assert.ok(sent.some((row) => /⏳/.test(row.text)));
+  assert.equal(
+    calls.some((call) => call.url && call.url.includes("/dispatches")),
+    false,
+  );
+  releaseDispatch();
+  await pending;
+  const dispatchCalls = calls.filter((call) => call.url && call.url.includes("/dispatches"));
+  assert.equal(dispatchCalls.length, 1);
+  assert.deepEqual(dispatchCalls[0].body.inputs, { foo: "bar" });
+});
+
+test("ADMIN menu lists ghrun", () => {
+  assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "ghrun").description, "Запустить GitHub workflow");
+});

@@ -28,6 +28,7 @@
 | `/status` | Кратко: `идёт` / `простаивает` и текущий пак |
 | `/restart` | Прервать текущий Actions и один новый запуск с `main`; выбор пака — только **queued/uploading** из KV, не «призраки» из каталога `packs/07…` без активной строки очереди |
 | `/project` | Вопрос или задача для Cursor Project: мгновенный ack в TG, затем фоновый dispatch `project-prompt.yml` (fast ack + issue). Краткий итог — после `POST /project/reply` |
+| `/ghrun` | Запуск произвольного workflow: `/ghrun <file.yml> [key=value …]`. Только админ; опционально `GH_WORKFLOW_ALLOWLIST` |
 | `/login`, `/connect`, `/upload` | Запуск браузера / ручная загрузка (как раньше) |
 
 При **каждом новом** запуске workflow Telemost в админ-чат приходит одно сообщение: **причина** (новый запрос в очереди, следующий пак, `/restart`, `/login`, …) и ссылка на run Actions. Ход загрузки по-прежнему правит одну **карточку** «стикер N из TOTAL».
@@ -45,6 +46,6 @@
 Список у BotFather обновляет `worker/setup-bot.mjs` (`npm run setup-bot` в каталоге `worker/`).
 
 - **Все чаты** — `USER_COMMANDS`: `/start`, `/create`, `/format`, `/status`, `/stop`.
-- **Админ-чаты** из `LOGIN_CHAT_IDS` (воркер и переменная окружения при `setup-bot`) — полный список `ADMIN_COMMANDS`: пользовательские команды плюс `/queue`, `/unstick`, `/skip`, `/restart`, `/project`, `/login`, `/connect`, `/upload` (scope `chat` в API Telegram).
+- **Админ-чаты** из `LOGIN_CHAT_IDS` (воркер и переменная окружения при `setup-bot`) — полный список `ADMIN_COMMANDS`: пользовательские команды плюс `/queue`, `/unstick`, `/skip`, `/restart`, `/project`, `/ghrun`, `/login`, `/connect`, `/upload` (scope `chat` в API Telegram).
 
 `/help` в меню нет — работает как `/start`.
