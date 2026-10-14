@@ -128,8 +128,11 @@ export function loadTelemostUrls(env = process.env, settingsPath = join(ROOT, 'c
     || { url: String(t.stagingUrl || DEFAULT_STAGING_URL).trim(), source: t.stagingUrl ? 'settings' : 'default' };
   const windowRaw = Number(env.TELEMOST_STAGING_WINDOW || t.stagingWindow || 5);
   const stagingWindow = Number.isFinite(windowRaw) && windowRaw > 0 ? Math.floor(windowRaw) : 5;
-  const flag = env.TELEMOST_STAGING != null ? env.TELEMOST_STAGING : t.staging;
-  const stagingEnabled = Boolean(stagingPick.url) && String(flag == null ? '1' : flag) !== '0' && String(flag) !== 'false';
+  // Buffer channel + Переслать is kept in the code but off unless staging is set to 1/true.
+  const flag = env.TELEMOST_STAGING != null && String(env.TELEMOST_STAGING).trim() !== ''
+    ? env.TELEMOST_STAGING
+    : t.staging;
+  const stagingEnabled = Boolean(stagingPick.url) && /^(1|true|yes)$/i.test(String(flag == null ? '' : flag).trim());
   const botName = String(env.TELEMOST_BOT_NAME || t.botName || 'Стикеры').trim() || 'Стикеры';
   return {
     botUrl: botPick.url,
