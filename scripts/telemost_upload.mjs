@@ -6,7 +6,7 @@
 import { readFileSync, writeFileSync, readdirSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { createAdminFeed, postProgress, telegramIo } from './admin_status.mjs';
+import { actionsRunUrl, createAdminFeed, postProgress, telegramIo } from './admin_status.mjs';
 import { drainRemainingQueue } from './queue_drain.mjs';
 import { queueCredentialsReadable } from './queue_client.mjs';
 
@@ -981,33 +981,18 @@ class Bot {
     for (let i = 0; i < steps; i++) {
       const open = await this.c.ev(`(() => {
         ${TG2TM_DEEP_WALK}
-        const vis = (e) => {
-          const r = e.getBoundingClientRect();
-          return r.width > 4 && r.height > 4;
+        const labelOf = (e) => {
+          const aria = (e.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().replace(/[›>»]\\s*$/, '');
+          const line = String(e.innerText || e.textContent || '').split(/\\n/).map((s) => s.replace(/\\s+/g, ' ').trim()).filter(Boolean)[0] || '';
+          return (aria || line).replace(/[›>»]\\s*$/, '').trim();
         };
-        const menus = tg2tmDeepMatch('[role="menu"], [class*="ContextMenu" i], [class*="MenuList" i], [class*="context-menu" i], [class*="Dropdown" i][class*="Menu" i], [class*="PopupMenu" i], [class*="popup-menu" i], [class*="yamb" i][class*="menu" i]');
-        for (const menu of menus) {
-          if (!vis(menu)) continue;
-          const items = [...menu.querySelectorAll('[role="menuitem"], button, [role="button"], li, a')].filter(vis);
-          if (items.length >= 2) return true;
-          if (items.length === 1) {
-            const t = (items[0].innerText || items[0].textContent || '').replace(/\\s+/g, ' ').trim();
-            const a = (items[0].getAttribute('aria-label') || '').trim();
-            if (/пересл|forward|удал|delete|копир|copy/i.test(t + ' ' + a)) return true;
-          }
-        }
-        const looseItems = tg2tmDeepMatch('[role="menuitem"], button, [role="button"]').filter(vis);
-        if (looseItems.length >= 2) return true;
-        const forwardish = looseItems.some((e) => {
-          const t = (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim();
-          const a = (e.getAttribute('aria-label') || '').trim();
-          return /пересл|forward|удал|delete|копир|copy/i.test(t + ' ' + a);
+        const menus = tg2tmDeepMatch('[role="menu"], [role="listbox"], [class*="Menu" i], [class*="menu" i], [class*="Popup" i], [class*="popup" i], [class*="Context" i]').filter((e) => {
+          const r = e.getBoundingClientRect();
+          return r.width > 120 && r.width < 480 && r.height > 48 && r.height < 680;
         });
-        if (forwardish) return true;
-        const popups = tg2tmDeepMatch('[class*="Popup" i], [class*="popup" i], [class*="Dropdown" i]').filter(vis);
-        for (const pop of popups) {
-          const t = (pop.innerText || pop.textContent || '').replace(/\\s+/g, ' ').trim();
-          if (/пересл|forward/i.test(t)) return true;
+        for (const menu of menus) {
+          const rows = tg2tmDeepWithin(menu, '[role="menuitem"], button, [role="button"], li, a').map(labelOf);
+          if (rows.some((t) => t === 'Переслать' || t === 'Forward' || t === 'Ответить' || t === 'Скачать изображение')) return true;
         }
         return false;
       })()`);
@@ -1168,174 +1153,217 @@ class Bot {
     }
   }
 
-  // «Переслать» is a submenu, not a separate chat picker. Hover opens the chat list.
-  async forwardMenuItemPoint() {
+  // «Переслать» row inside the message menu, not a sidebar button.
+  async forwardMenuAnchor() {
     return this.c.ev(`(() => {
       ${TG2TM_DEEP_WALK}
-      const norm = (s) => String(s || '').replace(/\\s+/g, ' ').replace(/[›>»]\\s*$/, '').trim();
+      const vis = (e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 8 && r.height > 8;
+      };
+      const bare = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim().replace(/[›>»]\\s*$/, '').trim();
+      const firstLine = (e) => {
+        const aria = bare(e.getAttribute && e.getAttribute('aria-label'));
+        const lines = String(e.innerText || e.textContent || '').replace(/\\u00a0/g, ' ').split(/\\n/).map(bare).filter(Boolean);
+        return { aria, first: lines[0] || '', count: lines.length };
+      };
+      const isForward = (e) => {
+        const row = firstLine(e);
+        if (row.count > 2 && row.aria !== 'Переслать' && row.aria !== 'Forward') return false;
+        const label = row.aria || row.first;
+        return label === 'Переслать' || label === 'Forward';
+      };
+      const rows = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a, div, span').filter(vis).filter(isForward);
+      rows.sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return (ra.width * ra.height) - (rb.width * rb.height);
+      });
+      const el = rows.find((row) => {
+        const r = row.getBoundingClientRect();
+        return r.height < 80 && r.height > 12 && r.width > 40 && r.width < 420;
+      }) || null;
+      document.querySelectorAll('[data-tg2tm-forward-anchor]').forEach((n) => { delete n.dataset.tg2tmForwardAnchor; });
+      if (!el) return null;
+      el.dataset.tg2tmForwardAnchor = '1';
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    })()`);
+  }
+
+  async hoverForwardAnchor(anchor, attempt = 0) {
+    if (!anchor || !anchor.width) return false;
+    const midY = anchor.y + anchor.height / 2;
+    const chevronX = anchor.x + Math.max(12, anchor.width - 14);
+    const centerX = anchor.x + anchor.width / 2;
+    await this.cdpHover(Math.max(0, anchor.x - 30), midY);
+    await sleep(40);
+    await this.cdpHover(centerX, midY);
+    await sleep(60);
+    await this.cdpHover(chevronX, midY);
+    await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const el = tg2tmDeepMatch('[data-tg2tm-forward-anchor="1"]')[0];
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const o = { bubbles: true, cancelable: true, composed: true, clientX: r.x + r.width - 12, clientY: r.y + r.height / 2, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+      for (const type of ['pointerover', 'pointerenter', 'pointermove', 'mouseover', 'mouseenter', 'mousemove']) {
+        el.dispatchEvent(new PointerEvent(type, o));
+      }
+      if (el.focus) el.focus();
+      return true;
+    })()`);
+    if (attempt >= 1) {
+      await this.cdpKeyTap('ArrowRight', { code: 'ArrowRight', windowsVirtualKeyCode: 39 });
+    }
+    if (attempt >= 3) {
+      await this.cdpClickAt(chevronX, midY, 'left');
+    }
+    return true;
+  }
+
+  // Popup anchored beside «Переслать». Search only inside that box.
+  async readForwardFlyout(target) {
+    const lit = JSON.stringify(String(target || ''));
+    return this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const want = ${lit};
       const vis = (e) => {
         const r = e.getBoundingClientRect();
         return r.width > 4 && r.height > 4;
       };
-      const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a, div, span').filter(vis);
-      const hits = items.filter((e) => {
-        const aria = norm(e.getAttribute('aria-label') || '');
-        const raw = String(e.innerText || e.textContent || '');
-        const lines = raw.split(/\\n/).map(norm).filter(Boolean);
-        const text = norm(raw);
-        const exact = text === 'Переслать' || text === 'Forward' || aria === 'Переслать' || aria === 'Forward'
-          || lines[0] === 'Переслать' || lines[0] === 'Forward';
-        if (!exact) return false;
-        if (lines.length > 2) return false;
-        return true;
+      const bare = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim().replace(/[›>»]\\s*$/, '').trim();
+      const linesOf = (e) => String(e.innerText || e.textContent || '').replace(/\\u00a0/g, ' ').split(/\\n/).map((s) => s.replace(/\\s+/g, ' ').trim()).filter(Boolean);
+      const anchor = tg2tmDeepMatch('[data-tg2tm-forward-anchor="1"]')[0];
+      if (!anchor || !want) return { hit: false, flyout: false, labels: [] };
+      const ar = anchor.getBoundingClientRect();
+      const a = { x: ar.x, y: ar.y, right: ar.right, bottom: ar.bottom, width: ar.width, height: ar.height };
+      const anchored = (r) => {
+        if (r.width < 100 || r.width > 460 || r.height < 36 || r.height > 560) return false;
+        const overlap = Math.min(r.bottom, a.bottom) - Math.max(r.y, a.y);
+        if (overlap < Math.min(20, a.height * 0.5)) return false;
+        const contains = r.x <= a.x + 4 && r.right >= a.right - 4 && r.y <= a.y + 4 && r.bottom >= a.bottom - 4;
+        if (contains) return false;
+        const gapRight = r.x - a.right;
+        const besideRight = gapRight >= -28 && gapRight <= 64 && r.x >= a.x + a.width * 0.35;
+        const gapLeft = a.x - r.right;
+        const besideLeft = gapLeft >= -28 && gapLeft <= 64 && r.right <= a.x + a.width * 0.65;
+        return besideRight || besideLeft;
+      };
+      const rowMatches = (e) => {
+        const aria = bare(e.getAttribute && e.getAttribute('aria-label'));
+        if (aria === want) return true;
+        const lines = linesOf(e);
+        if (lines.length && lines[0] === want && lines.length <= 3) return true;
+        return bare(e.innerText || e.textContent || '') === want;
+      };
+      const candidates = tg2tmDeepMatch('[role="menu"], [role="listbox"], div, ul, nav').filter(vis).filter((el) => {
+        if (el === anchor || el.contains(anchor) || anchor.contains(el)) return false;
+        return anchored(el.getBoundingClientRect());
       });
+      candidates.sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return (ra.width * ra.height) - (rb.width * rb.height);
+      });
+      const labelsOf = (root) => {
+        const seen = [];
+        const nodes = tg2tmDeepWithin(root, '[role="menuitem"], [role="option"], button, a, li, div, span').filter(vis);
+        for (const n of nodes) {
+          const r = n.getBoundingClientRect();
+          if (r.height < 16 || r.height > 72 || r.width < 40) continue;
+          const lines = linesOf(n);
+          if (!lines.length || lines.length > 3) continue;
+          const label = lines[0];
+          if (!seen.includes(label)) seen.push(label);
+          if (seen.length >= 8) break;
+        }
+        return seen;
+      };
+      let flyout = null;
+      let labels = [];
+      for (const el of candidates) {
+        const rows = labelsOf(el);
+        if (!rows.length) continue;
+        flyout = el;
+        labels = rows;
+        if (rows.some((label) => label === want)) break;
+      }
+      if (!flyout) return { hit: false, flyout: false, labels: [] };
+      const hits = tg2tmDeepWithin(flyout, '[role="menuitem"], [role="option"], button, a, li, div, span').filter(vis).filter(rowMatches);
       hits.sort((a, b) => {
         const ra = a.getBoundingClientRect();
         const rb = b.getBoundingClientRect();
         return (ra.width * ra.height) - (rb.width * rb.height);
       });
       const el = hits[0];
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-    })()`);
-  }
-
-  async hoverForwardMenuItem() {
-    const point = await this.forwardMenuItemPoint();
-    if (!point) return false;
-    await this.cdpHover(point.x, point.y);
-    await this.c.ev(`(() => {
-      ${TG2TM_DEEP_WALK}
-      const norm = (s) => String(s || '').replace(/\\s+/g, ' ').replace(/[›>»]\\s*$/, '').trim();
-      const vis = (e) => {
-        const r = e.getBoundingClientRect();
-        return r.width > 4 && r.height > 4;
-      };
-      const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a').filter(vis);
-      const el = items.find((e) => {
-        const aria = norm(e.getAttribute('aria-label') || '');
-        const lines = String(e.innerText || e.textContent || '').split(/\\n/).map(norm).filter(Boolean);
-        const text = norm(e.innerText || e.textContent || '');
-        return (text === 'Переслать' || text === 'Forward' || aria === 'Переслать' || aria === 'Forward' || lines[0] === 'Переслать' || lines[0] === 'Forward') && lines.length <= 2;
-      });
-      if (!el) return false;
-      const r = el.getBoundingClientRect();
-      const o = { bubbles: true, cancelable: true, composed: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, pointerId: 1, pointerType: 'mouse', isPrimary: true };
-      for (const type of ['pointerover', 'pointerenter', 'pointermove', 'mouseover', 'mouseenter', 'mousemove']) {
-        el.dispatchEvent(new PointerEvent(type, o));
-      }
-      return true;
-    })()`);
-    return true;
-  }
-
-  async pressForwardMenuItem() {
-    const point = await this.forwardMenuItemPoint();
-    if (!point) return false;
-    await this.cdpClickAt(point.x, point.y, 'left');
-    await this.c.ev(`(() => {
-      ${TG2TM_DEEP_WALK}
-      const norm = (s) => String(s || '').replace(/\\s+/g, ' ').replace(/[›>»]\\s*$/, '').trim();
-      const vis = (e) => {
-        const r = e.getBoundingClientRect();
-        return r.width > 4 && r.height > 4;
-      };
-      const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a').filter(vis);
-      const el = items.find((e) => {
-        const text = norm(e.innerText || e.textContent || '');
-        const aria = norm(e.getAttribute('aria-label') || '');
-        return text === 'Переслать' || text === 'Forward' || aria === 'Переслать' || aria === 'Forward';
-      });
-      if (!el) return false;
-      return tg2tmPress(el, 0);
-    })()`);
-    return true;
-  }
-
-  // Click the submenu row whose title is exactly the stickers chat name.
-  // The chat list on the left also contains that name; only the popup to the
-  // right of «Переслать» is the forward target.
-  async clickSubmenuChat(target) {
-    const lit = JSON.stringify(String(target || ''));
-    const point = await this.c.ev(`(() => {
-      ${TG2TM_DEEP_WALK}
-      const want = ${lit};
-      if (!want) return null;
-      const vis = (e) => {
-        const r = e.getBoundingClientRect();
-        return r.width > 4 && r.height > 4;
-      };
-      const normLine = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
-      const matches = (e) => {
-        const aria = normLine(e.getAttribute && e.getAttribute('aria-label'));
-        if (aria === want) return true;
-        const raw = String(e.innerText || e.textContent || '').replace(/\\u00a0/g, ' ');
-        const lines = raw.split(/\\n/).map(normLine).filter(Boolean);
-        if (lines.length && lines[0] === want && lines.length <= 3) return true;
-        if (normLine(raw) === want) return true;
-        return false;
-      };
-      const norm = (s) => normLine(s).replace(/[›>»]\\s*$/, '').trim();
-      const forwardItems = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li, a').filter(vis).filter((e) => {
-        const text = norm(e.innerText || e.textContent || '');
-        const aria = norm(e.getAttribute('aria-label') || '');
-        const lines = String(e.innerText || e.textContent || '').split(/\\n/).map(norm).filter(Boolean);
-        return (text === 'Переслать' || text === 'Forward' || aria === 'Переслать' || aria === 'Forward' || lines[0] === 'Переслать' || lines[0] === 'Forward') && lines.length <= 2;
-      });
-      if (!forwardItems.length) return null;
-      const forwardX = forwardItems[0].getBoundingClientRect().x;
-      let items = tg2tmDeepMatch('[role="menuitem"], [role="option"], button, a, li, div, span').filter(vis).filter(matches);
-      items = items.filter((e) => e.getBoundingClientRect().x + 4 >= forwardX);
-      items.sort((a, b) => {
-        const ra = a.getBoundingClientRect();
-        const rb = b.getBoundingClientRect();
-        return (ra.width * ra.height) - (rb.width * rb.height);
-      });
-      const el = items[0];
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      const x = r.x + Math.min(r.width - 4, Math.max(8, r.width * 0.35));
-      const y = r.y + r.height / 2;
+      if (!el) return { hit: false, flyout: true, labels };
+      document.querySelectorAll('[data-tg2tm-submenu-hit]').forEach((n) => { delete n.dataset.tg2tmSubmenuHit; });
       el.dataset.tg2tmSubmenuHit = '1';
-      return { x, y };
+      const r = el.getBoundingClientRect();
+      return {
+        hit: true,
+        flyout: true,
+        labels,
+        x: r.x + Math.min(r.width - 4, Math.max(8, r.width * 0.35)),
+        y: r.y + r.height / 2,
+      };
     })()`);
-    if (!point) return false;
-    await this.cdpClickAt(point.x, point.y, 'left');
-    const pressed = await this.c.ev(`(() => {
+  }
+
+  async pressFlyoutHit() {
+    return this.c.ev(`(() => {
       ${TG2TM_DEEP_WALK}
       const el = tg2tmDeepMatch('[data-tg2tm-submenu-hit="1"]')[0];
       if (!el) return false;
       delete el.dataset.tg2tmSubmenuHit;
       return tg2tmPress(el, 0);
     })()`);
-    return Boolean(point && (pressed || point.x));
   }
 
-  // Forward one buffer image into the stickers chat via Переслать › target.
+  // Forward one buffer image: hover «Переслать», then click «Стикеры» inside that flyout only.
   async forwardOwnToBot(ownId, botUrl = this.botUrl, targetName = '') {
     const target = String(targetName || this.forwardTarget || this.botName || 'Стикеры').trim() || 'Стикеры';
     await this.scrollToBottom();
     await this.openMessageMenu(ownId, { maxCycles: 8 });
+    let sawFlyout = false;
+    let flyoutLabels = [];
     let forwarded = false;
     for (let attempt = 0; attempt < 6 && !forwarded; attempt++) {
-      const hovered = await this.hoverForwardMenuItem();
-      if (!hovered) await this.pressForwardMenuItem();
-      await sleep(attempt === 0 ? 280 : 420);
-      if (await this.clickSubmenuChat(target)) {
-        forwarded = true;
-        break;
+      let anchor = await this.forwardMenuAnchor();
+      if (!anchor) {
+        try {
+          await this.openMessageMenu(ownId, { maxCycles: 4 });
+        } catch (e) {
+          const msg = e && e.message ? String(e.message) : String(e);
+          if (/message .+ not found/.test(msg)) throw e;
+        }
+        anchor = await this.forwardMenuAnchor();
       }
-      await this.pressForwardMenuItem();
-      await sleep(320);
-      if (await this.clickSubmenuChat(target)) forwarded = true;
+      if (anchor) await this.hoverForwardAnchor(anchor, attempt);
+      const deadline = Date.now() + 1400;
+      while (Date.now() < deadline && !forwarded) {
+        const fly = await this.readForwardFlyout(target);
+        if (fly && fly.flyout) {
+          sawFlyout = true;
+          flyoutLabels = fly.labels || [];
+        }
+        if (fly && fly.hit) {
+          await this.cdpClickAt(fly.x, fly.y, 'left');
+          await this.pressFlyoutHit();
+          forwarded = true;
+          break;
+        }
+        await sleep(POLL_MS);
+      }
     }
     if (!forwarded) {
-      const hint = await this.stagingForwardMenuDebug().catch(() => null);
-      const labels = hint && hint.labels && hint.labels.length
-        ? ` (${JSON.stringify(hint.labels).slice(0, 320)})`
-        : '';
-      throw new Error(`staging forward: submenu target ${target} not found${labels}`);
+      throw new Error(forwardFlyoutFailure({
+        opened: sawFlyout,
+        target,
+        flyoutLabels,
+        runUrl: actionsRunUrl(),
+      }));
     }
     await sleep(200);
     if (!this.dualTab) await this.openChat(botUrl);
@@ -1745,6 +1773,57 @@ export function isForwardSubmenuLabel(text, aria = '') {
 // The chat list sits left of the message menu. The forward submenu opens to its right.
 export function forwardSubmenuOpensRight(itemX, forwardX) {
   return Number(itemX) + 4 >= Number(forwardX);
+}
+
+export function boxEdges(box) {
+  const x = Number(box && box.x) || 0;
+  const y = Number(box && box.y) || 0;
+  const width = Number(box && box.width) || 0;
+  const height = Number(box && box.height) || 0;
+  return { x, y, width, height, right: x + width, bottom: y + height };
+}
+
+// Message menu only. Sidebar chrome (Ещё, Настройки, Аккаунт, …) is not a menu.
+export function contextMenuLooksOpen(labels) {
+  const rows = (labels || []).map((s) => String(s || '').replace(/\s+/g, ' ').trim().replace(/[›>»]\s*$/, '').trim());
+  return rows.some((t) => t === 'Переслать' || t === 'Forward' || t === 'Ответить' || t === 'Скачать изображение');
+}
+
+// Flyout is the popup beside the «Переслать» row, not the menu that contains that row and not the sidebar.
+export function flyoutAnchoredBeside(popup, anchor) {
+  const p = boxEdges(popup);
+  const a = boxEdges(anchor);
+  if (p.width < 100 || p.width > 460 || p.height < 36 || p.height > 560) return false;
+  if (a.width < 20 || a.height < 8) return false;
+  const overlap = Math.min(p.bottom, a.bottom) - Math.max(p.y, a.y);
+  if (overlap < Math.min(20, a.height * 0.5)) return false;
+  const containsAnchor = p.x <= a.x + 4 && p.right >= a.right - 4 && p.y <= a.y + 4 && p.bottom >= a.bottom - 4;
+  if (containsAnchor) return false;
+  const gapRight = p.x - a.right;
+  const besideRight = gapRight >= -28 && gapRight <= 64 && p.x >= a.x + a.width * 0.35;
+  const gapLeft = a.x - p.right;
+  const besideLeft = gapLeft >= -28 && gapLeft <= 64 && p.right <= a.x + a.width * 0.65;
+  return besideRight || besideLeft;
+}
+
+export function flyoutLabelsHaveTarget(labels, target) {
+  return (labels || []).some((label) => submenuChatMatches(label, '', target));
+}
+
+export function forwardFlyoutFailure({ opened = false, target = 'Стикеры', runUrl = '', flyoutLabels = [] } = {}) {
+  const url = String(runUrl || '').trim();
+  let msg;
+  if (!opened) {
+    msg = 'staging forward: Переслать flyout did not open';
+  } else {
+    const labels = (flyoutLabels || [])
+      .map((s) => String(s || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    msg = `staging forward: submenu target ${target} not in flyout`;
+    if (labels.length) msg += ` (${labels.join(', ')})`;
+  }
+  return url ? `${msg} ${url}` : msg;
 }
 
 export function submenuChatMatches(text, aria, target) {

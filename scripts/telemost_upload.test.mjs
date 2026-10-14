@@ -54,6 +54,10 @@ import {
   isForwardSubmenuLabel,
   submenuChatMatches,
   forwardSubmenuOpensRight,
+  contextMenuLooksOpen,
+  flyoutAnchoredBeside,
+  flyoutLabelsHaveTarget,
+  forwardFlyoutFailure,
   adminPhaseForStagingStep,
   stagingOperationTarget,
   stagingForwardExpectsRows,
@@ -553,8 +557,9 @@ test("staging message menu uses deep press helpers and CDP hover", () => {
   assert.match(src, /buffer-upload \$\{index\}\/\$\{total\} ok msgCount=/);
   assert.match(src, /via submenu target=/);
   assert.match(src, /bot-reply \$\{index\}\/\$\{total\}/);
-  assert.match(src, /async clickSubmenuChat/);
-  assert.match(src, /async hoverForwardMenuItem/);
+  assert.match(src, /async readForwardFlyout/);
+  assert.match(src, /async hoverForwardAnchor/);
+  assert.match(src, /Переслать flyout did not open/);
   assert.equal(src.includes('forward-fallback-send'), false);
   assert.equal(src.includes('single-tab fallback'), false);
   assert.match(src, /stagingForwardMenuBlocked/);
@@ -726,6 +731,26 @@ test("forward submenu matches Переслать and the exact chat title", () =
   assert.equal(submenuChatMatches("", "Стикеры", "Стикеры"), true);
   assert.equal(forwardSubmenuOpensRight(640, 480), true);
   assert.equal(forwardSubmenuOpensRight(80, 480), false);
+  const sidebar = ["Ещё", "Настройки", "Аккаунт", "Все", "Личные", "TG2TM 1 подписчик F", "Отправить файлы", "Эмодзи, стикеры и картинки"];
+  assert.equal(contextMenuLooksOpen(sidebar), false);
+  assert.equal(flyoutLabelsHaveTarget(sidebar, "Стикеры"), false);
+  assert.equal(contextMenuLooksOpen(["Ответить", "Переслать ›", "Обсудить", "Скачать изображение"]), true);
+  const flyout = ["Сохранённые сообщения", "TG2TM", "Стикеры", "NikGonzalez", "Ещё"];
+  assert.equal(flyoutLabelsHaveTarget(flyout, "Стикеры"), true);
+  assert.equal(flyoutLabelsHaveTarget(flyout, "Стикер"), false);
+  const anchor = { x: 480, y: 120, width: 220, height: 36 };
+  assert.equal(flyoutAnchoredBeside({ x: 708, y: 110, width: 240, height: 280 }, anchor), true);
+  assert.equal(flyoutAnchoredBeside({ x: 480, y: 80, width: 220, height: 360 }, anchor), false);
+  assert.equal(flyoutAnchoredBeside({ x: 0, y: 0, width: 280, height: 800 }, anchor), false);
+  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38613076217";
+  const closed = forwardFlyoutFailure({ opened: false, runUrl });
+  assert.equal(closed, `staging forward: Переслать flyout did not open ${runUrl}`);
+  assert.equal(closed.includes("Ещё"), false);
+  assert.equal(closed.includes("Настройки"), false);
+  assert.equal(
+    forwardFlyoutFailure({ opened: true, target: "Стикеры", flyoutLabels: flyout, runUrl }),
+    `staging forward: submenu target Стикеры not in flyout (Сохранённые сообщения, TG2TM, Стикеры, NikGonzalez, Ещё) ${runUrl}`,
+  );
   assert.equal(forwardTargetFromTitle("Стикеры\nв сети", "бот"), "Стикеры");
   assert.equal(forwardTargetFromTitle("", "Стикеры"), "Стикеры");
   assert.equal(forwardSubmenuLogLine(1, 116, "Стикеры"), "forward 1/116 via submenu target=Стикеры");
