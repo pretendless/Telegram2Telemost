@@ -42,6 +42,19 @@ export function formatClock(now = new Date()) {
   return now.toISOString().slice(11, 16);
 }
 
+// github.server_url/owner/repo/actions/runs/id. RUN_URL wins. A bare GITHUB_RUN_ID
+// still builds a link (this repo, github.com) so a pasted admin error can be opened.
+export function actionsRunUrl(env = process.env) {
+  const source = env || {};
+  const existing = String(source.RUN_URL || source.GITHUB_RUN_URL || '').trim();
+  if (/^https?:\/\//i.test(existing)) return existing;
+  const id = String(source.GITHUB_RUN_ID || source.RUN_ID || '').trim();
+  if (!/^[0-9]+$/.test(id)) return '';
+  const server = String(source.GITHUB_SERVER_URL || 'https://github.com').replace(/\/+$/, '');
+  const repo = String(source.GITHUB_REPOSITORY || '').trim() || 'pretendless/tg2tm';
+  return `${server}/${repo}/actions/runs/${id}`;
+}
+
 export function adminChatIds(raw) {
   const ids = String(raw || ADMIN_CHAT_ID)
     .split(/[\s,]+/)
@@ -137,6 +150,7 @@ export function eventFromProgress(pack, prev) {
     error: pack.error || '',
     link: pack.url || '',
     requester: pack.requester || '',
+    runUrl: pack.runUrl || '',
     seconds: pack.seconds,
     attempt: pack.attempt,
   };
@@ -186,11 +200,15 @@ function withSticker(event, previous) {
   return { ...event, index, total };
 }
 
-export function createAdminFeed({ io, requester, writeState, onDelivered, now } = {}) {
+export function createAdminFeed({ io, requester, writeState, onDelivered, now, env = process.env } = {}) {
   let cursor = null;
   return async function notify(event) {
     const carried = withSticker(event, cursor);
-    const full = { ...carried, requester: carried.requester || requester || '' };
+    let full = { ...carried, requester: carried.requester || requester || '' };
+    if ((full.phase === 'error' || full.phase === 'failed') && !oneLine(full.runUrl)) {
+      const runUrl = actionsRunUrl(env);
+      if (runUrl) full = { ...full, runUrl };
+    }
     let delivery = { action: 'record', event: full };
     if (io) {
       try {

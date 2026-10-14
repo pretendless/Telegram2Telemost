@@ -142,21 +142,23 @@ jobs:
           TELEMOST_SESSION_KEY: ${{ secrets.TELEMOST_SESSION_KEY }}
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
           PROXY_HOST: ${{ secrets.PROXY_HOST }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          mkdir -p sessions logs
-          chmod a+rwx logs
+          mkdir -p sessions logs .cache
+          chmod a+rwx logs .cache
           ENABLE_TUNNEL=0
           export ENABLE_TUNNEL
           docker run --rm --shm-size=1g \
             --user "$(id -u):$(id -g)" \
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
-            -e GITHUB_ACTIONS \
+            -e GITHUB_ACTIONS -e GITHUB_RUN_ID -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e RUN_URL \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
             -e HOME=/tmp \
             -e SESSION_DIR=/var/lib/tg2tm/sessions \
             -v "$PWD/sessions:/var/lib/tg2tm/sessions" \
             -v "$PWD/packs:/opt/tg2tm/packs" \
+            -v "$PWD/.cache:/opt/tg2tm/.cache" \
             -v "$PWD/logs:/opt/tg2tm/logs" \
             -v "$PWD/scripts:/opt/tg2tm/scripts:ro" \
             tg2tm-browser
@@ -191,9 +193,10 @@ jobs:
           TG2TM_PROGRESS_URL: https://tg2tmbot.prtndz.workers.dev/progress
           TG2TM_QUEUE_DRAIN: "1"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          mkdir -p sessions logs
-          chmod a+rwx logs
+          mkdir -p sessions logs .cache
+          chmod a+rwx logs .cache
           # Main turns the noVNC tunnel on for upload. This pack reached Telemost
           # without it. Keep that off. A browser proxy is used only when PROXY_HOST
           # is set. PROXY_LOGIN and PROXY_PASSWORD are not required.
@@ -202,14 +205,16 @@ jobs:
           docker run --rm --shm-size=1g \
             --user "$(id -u):$(id -g)" \
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
-            -e GITHUB_ACTIONS \
+            -e GITHUB_ACTIONS -e GITHUB_RUN_ID -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e RUN_URL \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
             -e UPLOADER_SECRET -e TG2TM_PROGRESS_URL \
+            -e TELEGRAM_BOT_TOKEN \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
             -e HOME=/tmp \
             -e SESSION_DIR=/var/lib/tg2tm/sessions \
             -v "$PWD/sessions:/var/lib/tg2tm/sessions" \
             -v "$PWD/packs:/opt/tg2tm/packs" \
+            -v "$PWD/.cache:/opt/tg2tm/.cache" \
             -v "$PWD/logs:/opt/tg2tm/logs" \
             -v "$PWD/scripts:/opt/tg2tm/scripts:ro" \
             tg2tm-browser

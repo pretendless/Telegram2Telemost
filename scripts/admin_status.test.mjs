@@ -7,6 +7,7 @@ import {
   createAdminFeed,
   currentAdminJob,
   deliverAdminStatus,
+  actionsRunUrl,
   formatAdminStatus,
   isAdminChat,
   failurePackName,
@@ -79,6 +80,62 @@ test('the card names the pack, the step, the bot line, and another user only by 
   assert.match(failed, /сбой Actions \| отправка/);
   assert.match(failed, /ошибка: Actions завершились с ошибкой/);
   assert.match(failed, /actions\/runs\/1/);
+});
+
+test('actionsRunUrl uses RUN_URL, or builds github.server_url/repo/actions/runs/id', () => {
+  assert.equal(
+    actionsRunUrl({ RUN_URL: 'https://github.com/pretendless/tg2tm/actions/runs/9' }),
+    'https://github.com/pretendless/tg2tm/actions/runs/9',
+  );
+  assert.equal(
+    actionsRunUrl({
+      GITHUB_RUN_ID: '38602403732',
+      GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_REPOSITORY: 'pretendless/tg2tm',
+    }),
+    'https://github.com/pretendless/tg2tm/actions/runs/38602403732',
+  );
+  assert.equal(
+    actionsRunUrl({ GITHUB_RUN_ID: '38602403732' }),
+    'https://github.com/pretendless/tg2tm/actions/runs/38602403732',
+  );
+  assert.equal(actionsRunUrl({}), '');
+  assert.equal(actionsRunUrl({ RUN_URL: 'not a url', GITHUB_RUN_ID: '4', GITHUB_REPOSITORY: 'acme/widgets' }), 'https://github.com/acme/widgets/actions/runs/4');
+});
+
+test('an error card gains the Actions run URL once and the next identical error does not send another message', async () => {
+  const calls = [];
+  const io = {
+    send: async (_chatId, text) => {
+      calls.push(['send', text]);
+      return { message_id: 21 };
+    },
+    edit: async (_chatId, id, text) => {
+      calls.push(['edit', id, text]);
+    },
+    delete: async () => {
+      calls.push(['delete']);
+    },
+  };
+  const notify = createAdminFeed({
+    io,
+    env: {
+      GITHUB_RUN_ID: '38602403732',
+      GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_REPOSITORY: 'pretendless/tg2tm',
+    },
+  });
+  const error = 'fetch failed for /opt/tg2tm/packs/request-2026-10-13T180955555Z-2 | slug request-2026-10-13T180955555Z-2 | стикер 0 из 116: exit 1: PermissionError: [Errno 13] Permission denied';
+  await notify(card({ phase: 'sending', index: 0, total: 116 }));
+  await notify(card({ phase: 'error', index: 0, total: 116, error }));
+  await notify(card({ phase: 'error', index: 0, total: 116, error }));
+  assert.deepEqual(calls.map((call) => call[0]), ['send', 'edit']);
+  assert.equal(calls[0][1].includes('actions/runs/'), false);
+  assert.match(calls[1][2], /стикер 0 из 116 \| ошибка/);
+  assert.match(calls[1][2], /slug request-2026-10-13T180955555Z-2/);
+  assert.match(calls[1][2], /PermissionError/);
+  assert.match(calls[1][2], /https:\/\/github\.com\/pretendless\/tg2tm\/actions\/runs\/38602403732/);
+  assert.equal(calls[1][2].match(/actions\/runs\/38602403732/g).length, 1);
 });
 
 test('/status says the job is running or idle', () => {

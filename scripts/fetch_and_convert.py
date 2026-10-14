@@ -1,7 +1,9 @@
 """Download every sticker for packs/*/pack.json via the Bot API and write Telemost-ready PNGs.
 
 Needs TELEGRAM_BOT_TOKEN in the environment (any bot works; getStickerSet is public).
-Originals are cached under .cache/originals/ (git-ignored).
+Originals are cached under .cache/originals/ (git-ignored). Queue drain runs this
+script inside the browser image as the GitHub runner uid. /opt/tg2tm is root-owned,
+so a cache directory that cannot be created falls back to /tmp/tg2tm-cache.
 
 Runtime deps: python3-pil (apt) and rlottie-python (pip; see scripts/requirements-fetch.txt).
 Used on GitHub Actions (upload/restart prepare), locally, and in the tg2tm-browser image for queue drain.
@@ -20,23 +22,61 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from PIL import Image
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ROOT / "packs"
-CACHE = ROOT / ".cache" / "originals"
 SETTINGS = json.loads((ROOT / "config" / "settings.json").read_text(encoding="utf-8"))["telemost"]
 SIDE = SETTINGS["minWidth"]
 MAX_BYTES = SETTINGS["maxBytes"]
 MAX_PER_PACK = SETTINGS["maxStickersPerPack"]
 
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-if not TOKEN:
-    sys.exit("TELEGRAM_BOT_TOKEN is not set")
+_CACHE: Path | None = None
+
+
+def choose_cache_dir(candidates: list[Path] | None = None) -> Path:
+    """Pick a directory the current uid can create sticker originals in."""
+    if candidates is None:
+        override = os.environ.get("TG2TM_CACHE_DIR", "").strip()
+        candidates = []
+        if override:
+            candidates.append(Path(override))
+        candidates.append(ROOT / ".cache")
+        candidates.append(Path("/tmp/tg2tm-cache"))
+    errors: list[str] = []
+    for base in candidates:
+        originals = Path(base) / "originals"
+        try:
+            originals.mkdir(parents=True, exist_ok=True)
+            probe = originals / ".write-probe"
+            probe.write_bytes(b"ok")
+            probe.unlink(missing_ok=True)
+            return originals
+        except OSError as err:
+            errors.append(f"{base}: {type(err).__name__}: {err}")
+    raise RuntimeError("sticker cache is not writable: " + "; ".join(errors))
+
+
+def cache_dir() -> Path:
+    global _CACHE
+    if _CACHE is None:
+        _CACHE = choose_cache_dir()
+        print(f"cache {_CACHE}", file=sys.stderr)
+    return _CACHE
+
+
+def bot_token() -> str:
+    value = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if not value:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
+    return value
 
 
 def api(method: str, **params) -> dict:
-    url = f"https://api.telegram.org/bot{TOKEN}/{method}?{urllib.parse.urlencode(params)}"
+    url = f"https://api.telegram.org/bot{bot_token()}/{method}?{urllib.parse.urlencode(params)}"
     for attempt in range(5):
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
@@ -55,7 +95,7 @@ def download(file_id: str, dest: Path) -> Path:
     if dest.exists() and dest.stat().st_size:
         return dest
     info = api("getFile", file_id=file_id)
-    url = f"https://api.telegram.org/file/bot{TOKEN}/{info['file_path']}"
+    url = f"https://api.telegram.org/file/bot{bot_token()}/{info['file_path']}"
     dest.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(5):
         try:
@@ -146,7 +186,7 @@ def process_pack(folder: Path) -> None:
             kind = "video" if st.get("is_video") else "animated" if st.get("is_animated") else "static"
             kinds[kind] += 1
             ext = {"video": "webm", "animated": "tgs", "static": "webp"}[kind]
-            src = download(st["file_id"], CACHE / entry["name"] / f"{pos:03d}.{ext}")
+            src = download(st["file_id"], cache_dir() / entry["name"] / f"{pos:03d}.{ext}")
             if kind == "video":
                 img = frame_from_webm(src)
             elif kind == "animated":
@@ -176,6 +216,10 @@ def process_pack(folder: Path) -> None:
 
 
 def main(argv: list[str]) -> int:
+    if Image is None:
+        sys.exit("Pillow is not installed (apt install python3-pil)")
+    if not os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():
+        sys.exit("TELEGRAM_BOT_TOKEN is not set")
     if argv[:1] == ["--dir"]:
         folders = [Path(argv[1])]
     else:

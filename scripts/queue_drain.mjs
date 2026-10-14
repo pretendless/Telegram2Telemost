@@ -44,15 +44,76 @@ export function nextDrainWait({ claimed, queued, now, idleDeadline, idleMs, sawW
   return { action: 'wait', idleDeadline: deadline };
 }
 
-export function fetchPackImages(packDir, env = process.env) {
+function collapse(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function spawnText(value) {
+  if (value == null) return '';
+  return Buffer.isBuffer(value) ? value.toString('utf8') : String(value);
+}
+
+/** Last traceback line plus exit code / spawn errno. Empty when the child succeeded. */
+export function spawnFailureDetail(result) {
+  if (!result) return { cause: '', code: '' };
+  if (result.error) {
+    return {
+      cause: collapse(result.error.message || result.error),
+      code: result.error.code ? String(result.error.code) : '',
+    };
+  }
+  const stderr = spawnText(result.stderr);
+  const stdout = spawnText(result.stdout);
+  const lines = (stderr || stdout).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let code = '';
+  if (result.status != null) code = `exit ${result.status}`;
+  else if (result.signal) code = `signal ${result.signal}`;
+  return { cause: collapse(lines.length ? lines[lines.length - 1] : ''), code };
+}
+
+/**
+ * One line an admin can paste: path, slug, sticker index, exit code, and the underlying error.
+ * Capped so the status card keeps the cause inside its 300-character error line.
+ */
+export function formatPackFetchError({ packDir = '', index = null, total = null, cause = '', code = '' } = {}) {
+  const path = String(packDir || '').trim();
+  const slug = path.split(/[/\\]/).filter(Boolean).pop() || '';
+  const parts = [`fetch failed for ${path || '(no path)'}`];
+  if (slug) parts.push(`slug ${slug}`);
+  if (index != null && index !== '' && total != null && total !== '') {
+    const n = Number(index);
+    const all = Number(total);
+    if (Number.isFinite(n) && Number.isFinite(all)) parts.push(`стикер ${n} из ${all}`);
+  }
+  const status = collapse(code);
+  const why = collapse(cause);
+  let text = parts.join(' | ');
+  if (status || why) text += ': ' + [status, why].filter(Boolean).join(': ');
+  return text.slice(0, 300);
+}
+
+export function fetchPackImages(packDir, env = process.env, opts = {}) {
   const token = env.TELEGRAM_BOT_TOKEN || env.TG2TMBOT_TOKEN || '';
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not set');
-  const result = spawnSync('python3', ['scripts/fetch_and_convert.py', '--dir', packDir], {
-    cwd: ROOT,
-    env: { ...env, TELEGRAM_BOT_TOKEN: token },
-    stdio: 'inherit',
+  const spawn = opts.spawn || spawnSync;
+  const result = spawn('python3', ['scripts/fetch_and_convert.py', '--dir', packDir], {
+    cwd: opts.cwd || ROOT,
+    env: { ...env, TELEGRAM_BOT_TOKEN: token, PYTHONUNBUFFERED: '1' },
+    encoding: 'utf8',
+    stdio: ['inherit', 'pipe', 'pipe'],
   });
-  if (result.status !== 0) throw new Error(`fetch failed for ${packDir}`);
+  if (result && result.stdout) process.stdout.write(result.stdout);
+  if (result && result.stderr) process.stderr.write(result.stderr);
+  if (!result || result.status !== 0) {
+    const detail = spawnFailureDetail(result);
+    throw new Error(formatPackFetchError({
+      packDir,
+      index: opts.index,
+      total: opts.total,
+      cause: detail.cause,
+      code: detail.code,
+    }));
+  }
 }
 
 /**
@@ -123,7 +184,10 @@ export async function drainRemainingQueue(ctx) {
     let slug;
     try {
       slug = writeRequestPack(target);
-      fetchPackImages(join(ROOT, 'packs', slug));
+      fetchPackImages(join(ROOT, 'packs', slug), process.env, {
+        index: 0,
+        total: item.stickers ?? null,
+      });
       ctx.dirRef.dir = slug;
       ctx.dirRef.title = item.title;
       ctx.dirRef.queueRequestId = item.id;

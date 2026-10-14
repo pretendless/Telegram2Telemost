@@ -48,7 +48,10 @@ COPY config/settings.json config/settings.json
 
 # packs/ and logs/ are mounted by the workflow when that checkout has them.
 # They are not copied here, so this image builds on a branch that has no sticker catalog.
-RUN mkdir -p packs logs && chmod 755 vm/start.sh
+# .cache must be writable by the runner uid: the workflow starts the container with --user.
+RUN mkdir -p packs logs .cache/originals \
+    && chmod 755 vm/start.sh \
+    && chmod 777 .cache .cache/originals
 
 EXPOSE 6080
 
