@@ -6,6 +6,7 @@
     "test": "node --test",
     "deploy": "wrangler deploy",
     "setup-bot": "node setup-bot.mjs",
+    "check-bot": "node check-bot.mjs",
     "set-webhook": "node set-webhook.mjs"
   },
   "devDependencies": {

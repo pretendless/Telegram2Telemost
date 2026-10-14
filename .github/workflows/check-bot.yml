@@ -1,0 +1,27 @@
+# Log @tg2tmbot username and webhook state (getMe + getWebhookInfo). No secrets in output.
+name: Check bot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Install worker dependencies
+        working-directory: worker
+        run: npm ci
+      - name: getMe and getWebhookInfo
+        working-directory: worker
+        run: npm run check-bot
+        env:
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
