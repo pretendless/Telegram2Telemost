@@ -22,6 +22,8 @@ import {
   stickerReplyText,
   newOwnId,
   ownIds,
+  stagingOwnIdAfterSend,
+  stagingNewRows,
   botRepliesAfterOwn,
   loadTelemostUrls,
   stagingFillTo,
@@ -361,6 +363,42 @@ test("stall timer ignores busy flicker in the progress key", () => {
   assert.equal(stallDue(1000, 0, STALL_MS), false);
   assert.equal(stallDue(STALL_MS, 0, STALL_MS), true);
   assert.equal(stallDue(STALL_MS + 1, 1, STALL_MS), true);
+});
+
+test("staging own-id detection falls back when join chat omits row_own", () => {
+  const beforeOwn = ["1"];
+  const beforeAll = ["1", "2"];
+  const beforeCount = 2;
+  const withOwn = [
+    { id: "1", own: true, text: "old photo", hasImage: true },
+    { id: "2", own: false, text: "hi", hasImage: false },
+    { id: "3", own: true, text: "new photo", hasImage: true },
+  ];
+  assert.equal(stagingOwnIdAfterSend(beforeOwn, beforeCount, withOwn, beforeAll), "3");
+  assert.equal(newOwnId(beforeOwn, withOwn), "3");
+
+  const joinBuffer = [
+    { id: "1", own: false, text: "old", hasImage: true },
+    { id: "2", own: false, text: "old2", hasImage: false },
+    { id: "3", own: false, text: "", hasImage: true },
+  ];
+  assert.equal(newOwnId(beforeOwn, joinBuffer), null);
+  assert.equal(stagingOwnIdAfterSend(beforeOwn, beforeCount, joinBuffer, beforeAll), "3");
+
+  const twoNew = [
+    { id: "1", own: false, text: "a", hasImage: false },
+    { id: "2", own: false, text: "b", hasImage: false },
+    { id: "3", own: false, text: "text", hasImage: false },
+    { id: "4", own: false, text: "", hasImage: true },
+  ];
+  assert.deepEqual(stagingNewRows(2, ["1", "2"], twoNew).map((r) => r.id), ["3", "4"]);
+  assert.equal(stagingOwnIdAfterSend(beforeOwn, beforeCount, twoNew, beforeAll), "4");
+
+  const countOnly = [
+    { id: "10", own: false, hasImage: true },
+    { id: "11", own: false, hasImage: true },
+  ];
+  assert.equal(stagingOwnIdAfterSend([], 1, countOnly, null), "11");
 });
 
 test("staging URLs come from settings or env, and the fill window stays ahead of the bot", () => {

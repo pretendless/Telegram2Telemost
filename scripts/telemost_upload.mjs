@@ -152,6 +152,7 @@ class Bot {
         return {
           id: a.dataset.tg2tmId,
           own: !!a.querySelector('.yamb-message-row_own'),
+          hasImage: !!a.querySelector('img[src], img[data-src], picture img'),
           text: (a.innerText || '').replace(/\\s+/g, ' ').trim(),
           // «сохранён и доступен по ссылке» keeps the pack URL only on <a href>.
           links: [...a.querySelectorAll('a[href]')].map((x) => x.href),
@@ -378,7 +379,10 @@ class Bot {
   async sendImageNoWait(path, { timeoutMs = 60000 } = {}) {
     await this.ensureChat();
     await this.scrollToBottom();
-    const before = ownIds(await this.chatRows());
+    const threadBefore = await this.chatRows();
+    const beforeOwnIds = ownIds(threadBefore);
+    const beforeCount = (threadBefore || []).length;
+    const beforeAllIds = rowIds(threadBefore);
     const nodeId = await this.fileInput();
     await this.c.send('DOM.setFileInputFiles', { nodeId, files: [path] });
     for (let i = 0; i < 80; i++) {
@@ -389,10 +393,17 @@ class Bot {
     await this.clickSend(true);
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
-      const ownId = newOwnId(before, await this.chatRows());
+      const rows = await this.chatRows();
+      const ownId = stagingOwnIdAfterSend(beforeOwnIds, beforeCount, rows, beforeAllIds);
       if (ownId) return ownId;
       await sleep(POLL_MS);
     }
+    const rows = await this.chatRows();
+    console.log('staging upload timeout', {
+      beforeCount,
+      rowCount: (rows || []).length,
+      ownCount: ownIds(rows).length,
+    });
     throw new Error('staging upload: own message did not appear');
   }
 
@@ -724,6 +735,35 @@ export function sameBotLine(left, right) {
 
 export function ownIds(rows) {
   return (rows || []).filter((row) => row && row.own).map((row) => String(row.id));
+}
+
+export function rowIds(rows) {
+  return (rows || []).filter((row) => row && row.id != null).map((row) => String(row.id));
+}
+
+// Rows that appeared after a staging send (join buffer may omit .yamb-message-row_own).
+export function stagingNewRows(beforeCount, beforeAllIds, rows) {
+  const list = rows || [];
+  if (beforeAllIds && beforeAllIds.length) {
+    const have = new Set(beforeAllIds.map(String));
+    const byId = list.filter((row) => row && !have.has(String(row.id)));
+    if (byId.length) return byId;
+  }
+  if (list.length > beforeCount) return list.slice(beforeCount);
+  return [];
+}
+
+// Staging buffer: accept .own bubbles or any new row (prefer one with an image).
+export function stagingOwnIdAfterSend(beforeOwnIds, beforeCount, rows, beforeAllIds = null) {
+  const ownId = newOwnId(beforeOwnIds, rows);
+  if (ownId) return ownId;
+  const newcomers = stagingNewRows(beforeCount, beforeAllIds, rows);
+  for (let i = newcomers.length - 1; i >= 0; i--) {
+    const row = newcomers[i];
+    if (row && row.hasImage) return String(row.id);
+  }
+  const last = newcomers[newcomers.length - 1];
+  return last ? String(last.id) : null;
 }
 
 // Newest outbound bubble that was not present before the send.
