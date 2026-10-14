@@ -101,4 +101,12 @@ TG2TMBOT_TOKEN=... npm run setup-bot
 
 С корпоративного ПК, где Telegram недоступен, проще запустить workflow **Setup bot** в GitHub Actions (`workflow_dispatch`): runner достаёт `api.telegram.org` напрямую, секрет `TG2TMBOT_TOKEN`, переменная репозитория `LOGIN_CHAT_IDS` (по умолчанию `8502935020`, как в `wrangler.toml`).
 
+**Setup bot** не регистрирует webhook — только имя, описание и команды.
+
+### Бот молчит на команды
+
+1. Запустите workflow **Check bot** — в логе: username, URL webhook, `pending_update_count`, последняя ошибка webhook.
+2. Если webhook пустой или неверный: остановите polling на машине переноса (`python scripts/tg2tmbot.py`), затем workflow **Set webhook** (нужны секреты `TG2TMBOT_TOKEN` и `WEBHOOK_SECRET`, тот же `WEBHOOK_SECRET`, что на воркере).
+3. Код обработчика на Worker обновляется отдельно: `cd worker && npx wrangler deploy` (не через Actions).
+
 Машина переноса сообщает ход через `scripts/telemost_upload.mjs`. Тот же адрес и секрет можно передать переменными `TG2TM_PROGRESS_URL` и `UPLOADER_SECRET`.

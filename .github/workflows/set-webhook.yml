@@ -1,0 +1,37 @@
+# Register @tg2tmbot webhook on the Cloudflare Worker. Stop local polling (scripts/tg2tmbot.py)
+# before running — Telegram delivers each update to only webhook or getUpdates, not both.
+name: Set webhook
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Require WEBHOOK_SECRET
+        run: |
+          if [ -z "${{ secrets.WEBHOOK_SECRET }}" ]; then
+            echo "::error::Repository secret WEBHOOK_SECRET is not set. Add it (same value as on the Worker) before running this workflow."
+            exit 1
+          fi
+      - name: Install worker dependencies
+        working-directory: worker
+        run: npm ci
+      - name: setWebhook on Worker URL
+        working-directory: worker
+        run: npm run set-webhook
+        env:
+          CONFIRM_STOP_POLLING: "1"
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          TG2TM_WEBHOOK_URL: https://tg2tmbot.prtndz.workers.dev/telegram
