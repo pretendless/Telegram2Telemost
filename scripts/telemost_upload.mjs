@@ -18,6 +18,26 @@ const DEFAULT_STAGING_URL = 'https://telemost.yandex.ru/join#87de7b40-0e2e-0557-
 const DEVTOOLS = process.env.DEVTOOLS || 'http://127.0.0.1:9222';
 const POLL_MS = 100;
 
+// Injected into page scripts: walk light DOM + open shadow roots (Telemost menus use portals).
+const TG2TM_DEEP_WALK = `
+function tg2tmWalkDeep(fn) {
+  const stack = [document.body];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || node.nodeType !== 1) continue;
+    fn(node);
+    if (node.shadowRoot) stack.push(node.shadowRoot);
+    const ch = node.children;
+    if (ch) for (let i = ch.length - 1; i >= 0; i--) stack.push(ch[i]);
+  }
+}
+function tg2tmDeepMatch(sel) {
+  const out = [];
+  tg2tmWalkDeep((node) => { if (node.matches && node.matches(sel)) out.push(node); });
+  return out;
+}
+`;
+
 // Bot + staging chat URLs live in config/settings.json (overridable by env).
 export function loadTelemostUrls(env = process.env, settingsPath = join(ROOT, 'config', 'settings.json')) {
   let file = {};
@@ -457,11 +477,19 @@ class Bot {
     const steps = Math.max(1, Math.ceil(maxMs / POLL_MS));
     for (let i = 0; i < steps; i++) {
       const open = await this.c.ev(`(() => {
-        const nodes = [...document.querySelectorAll('[role="menu"], [role="menuitem"], [class*="ContextMenu" i], [class*="MenuList" i], [class*="Popup" i] [role="button"]')];
-        return nodes.some((e) => {
+        ${TG2TM_DEEP_WALK}
+        const vis = (e) => {
           const r = e.getBoundingClientRect();
           return r.width > 4 && r.height > 4;
-        });
+        };
+        const menus = tg2tmDeepMatch('[role="menu"], [class*="ContextMenu" i], [class*="MenuList" i], [class*="context-menu" i], [class*="Dropdown" i][class*="Menu" i]');
+        for (const menu of menus) {
+          if (!vis(menu)) continue;
+          const items = [...menu.querySelectorAll('[role="menuitem"], button, [role="button"], li, a')].filter(vis);
+          if (items.length >= 2) return true;
+        }
+        const looseItems = tg2tmDeepMatch('[role="menuitem"]').filter(vis);
+        return looseItems.length >= 2;
       })()`);
       if (open) return true;
       await sleep(POLL_MS);
@@ -471,8 +499,9 @@ class Bot {
 
   async clickAnyMenuLabel(labels) {
     const lit = JSON.stringify((labels || STAGING_FORWARD_MENU_LABELS).map(String));
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 50; i++) {
       const ok = await this.c.ev(`(() => {
+        ${TG2TM_DEEP_WALK}
         const labels = ${lit};
         const match = (e) => {
           if (!e || !e.getBoundingClientRect) return false;
@@ -488,12 +517,15 @@ class Bot {
           }
           return false;
         };
-        const popups = [...document.querySelectorAll('[role="menu"], [role="dialog"], [class*="Popup" i], [class*="popup" i]')]
-          .filter((e) => e.getBoundingClientRect().width > 4);
-        const scopes = popups.length ? popups : [document.body];
+        const vis = (e) => e.getBoundingClientRect().width > 4;
+        const menus = tg2tmDeepMatch('[role="menu"], [role="dialog"], [class*="ContextMenu" i], [class*="MenuList" i], [class*="Popup" i], [class*="popup" i]').filter(vis);
+        const scopes = menus.length ? menus : [document.body];
         for (const scope of scopes) {
           const nodes = [...scope.querySelectorAll('button, [role="menuitem"], [role="button"], [aria-label], a, li, span, div')];
-          const el = nodes.find(match);
+          const deepNodes = scope === document.body
+            ? tg2tmDeepMatch('button, [role="menuitem"], [role="button"], [aria-label], a, li, span, div')
+            : nodes;
+          const el = deepNodes.find(match);
           if (el) {
             el.click();
             return true;
@@ -507,57 +539,122 @@ class Bot {
     return false;
   }
 
+  async stagingForwardMenuDebug() {
+    return this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const vis = (e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 2 && r.height > 2;
+      };
+      const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"]').filter(vis);
+      const sample = items.slice(0, 24).map((e) => {
+        const aria = (e.getAttribute('aria-label') || '').trim();
+        const text = (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+        return aria || text || e.tagName;
+      }).filter(Boolean);
+      return { menuItems: sample.length, labels: sample };
+    })()`);
+  }
+
   async openMessageMenu(ownId) {
     const id = JSON.stringify(String(ownId));
     let sawRow = false;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const useButton = attempt % 2 === 0;
+    let menuOpened = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const mode = attempt % 4;
       const step = await this.c.ev(`(() => {
         const want = ${id};
         const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
         if (!row) return { ok: false, reason: 'missing' };
         row.scrollIntoView({ block: 'center' });
-        const r = row.getBoundingClientRect();
+        const media = row.querySelector('.yamb-message-row__attachment, .yamb-message-row__body, .yamb-message-row__content, img[src], video, canvas, [class*="attachment" i], [class*="Attachment" i]');
+        const target = media && media.getBoundingClientRect().width > 2 ? media : row;
+        const r = target.getBoundingClientRect();
         const x = r.x + Math.min(r.width - 4, Math.max(4, r.width * 0.5));
         const y = r.y + Math.min(r.height - 4, Math.max(4, r.height * 0.5));
         for (const type of ['mouseover', 'mouseenter', 'mousemove']) {
+          target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
           row.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
         }
-        const btnSel = '[aria-label="Действия с сообщением"], [aria-label="Ещё"], [aria-label="More actions"], [aria-label="Message actions"], button[aria-haspopup="menu"]';
-        const useButton = ${useButton ? 'true' : 'false'};
-        if (useButton) {
+        const btnSel = '[aria-label="Действия с сообщением"], [aria-label="Ещё"], [aria-label="More actions"], [aria-label="Message actions"], [aria-label="Дополнительно"], button[aria-haspopup="menu"]';
+        const mode = ${mode};
+        const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2, buttons: 2 };
+        if (mode === 0 || mode === 2) {
           const btn = row.querySelector(btnSel);
           if (btn) btn.click();
-          else return { ok: true, reason: 'no-btn' };
+          else target.dispatchEvent(new MouseEvent('contextmenu', opts));
+        } else if (mode === 1) {
+          target.dispatchEvent(new MouseEvent('contextmenu', opts));
         } else {
-          const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2, buttons: 2 };
-          row.dispatchEvent(new MouseEvent('contextmenu', opts));
+          target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
         }
-        return { ok: true, reason: useButton ? 'btn' : 'ctx' };
+        return { ok: true, reason: 'opened' };
       })()`);
       if (!step || !step.ok) {
         if (step && step.reason === 'missing') break;
         continue;
       }
       sawRow = true;
-      if (await this.waitForContextMenu(1800)) return;
-      await sleep(120);
+      if (await this.waitForContextMenu(attempt < 2 ? 2200 : 3200)) {
+        menuOpened = true;
+        return;
+      }
+      await this.dismissOverlay();
+      await sleep(150);
     }
     if (!sawRow) throw new Error(`staging forward: message ${ownId} not found`);
+    if (!menuOpened) throw new Error(`staging forward: context menu did not open for ${ownId}`);
   }
 
   // Forward one staging bubble into the stickers bot chat (no disk upload there).
   async forwardOwnToBot(ownId, botUrl = this.botUrl) {
     await this.scrollToBottom();
     let pickedForward = false;
-    for (let attempt = 0; attempt < 3 && !pickedForward; attempt++) {
+    for (let attempt = 0; attempt < 4 && !pickedForward; attempt++) {
       if (attempt) await this.dismissOverlay();
-      await this.openMessageMenu(ownId);
-      await sleep(attempt === 0 ? 250 : 400);
+      try {
+        await this.openMessageMenu(ownId);
+      } catch (e) {
+        if (attempt >= 3) throw e;
+        continue;
+      }
+      await sleep(attempt === 0 ? 280 : 450);
       pickedForward = await this.clickAnyMenuLabel(STAGING_FORWARD_MENU_LABELS);
-      if (!pickedForward) pickedForward = await this.clickLabel('Переслать');
+      if (!pickedForward) {
+        for (const label of STAGING_FORWARD_MENU_LABELS) {
+          if (await this.clickLabel(label)) {
+            pickedForward = true;
+            break;
+          }
+        }
+      }
+      if (!pickedForward && attempt >= 1) {
+        pickedForward = await this.c.ev(`(() => {
+          ${TG2TM_DEEP_WALK}
+          const labels = ${JSON.stringify([...STAGING_FORWARD_MENU_LABELS])};
+          const matchText = (t, a) => labels.some((L) => {
+            const s = String(L);
+            return t === s || a === s || t.startsWith(s + ' ') || (s.length >= 4 && (t.includes(s) || a.includes(s)));
+          });
+          const items = tg2tmDeepMatch('[role="menuitem"], button, [role="button"], li').filter((e) => {
+            const r = e.getBoundingClientRect();
+            return r.width > 2 && r.height > 2;
+          });
+          let idx = items.findIndex((e) => matchText(
+            (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim(),
+            (e.getAttribute('aria-label') || '').trim(),
+          ));
+          if (idx < 0) return false;
+          items[idx].click();
+          return true;
+        })()`);
+      }
     }
     if (!pickedForward) {
+      const hint = await this.stagingForwardMenuDebug().catch(() => null);
+      if (hint && hint.labels && hint.labels.length) {
+        console.log('staging forward menu debug', hint);
+      }
       throw new Error('staging forward: Переслать not found');
     }
     await sleep(300);
@@ -920,7 +1017,7 @@ export function stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBuff
 
 export const STAGING_FORWARD_POLL_MS = 8000;
 
-export const STAGING_FORWARD_MENU_LABELS = Object.freeze(['Переслать', 'Forward']);
+export const STAGING_FORWARD_MENU_LABELS = Object.freeze(['Переслать сообщение', 'Переслать', 'Forward']);
 
 // Match Telemost/Yamb context menu rows (exact label, prefix, or substring for RU/EN).
 export function menuLabelMatches(text, aria, labels = STAGING_FORWARD_MENU_LABELS) {
