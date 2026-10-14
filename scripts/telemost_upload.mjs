@@ -147,12 +147,23 @@ class Bot {
       if (s && 'scrollTop' in s) s.scrollTop = s.scrollHeight;
       window.__tg2tmNext = window.__tg2tmNext || 1;
       const rows = [...document.querySelectorAll('article.message')].filter((a) => a.querySelector('.yamb-message-row'));
+      const hasImageInBubble = (a) => {
+        if (a.querySelector('img[src], img[data-src], img[data-original], img[data-lazy-src], img[data-url], picture img, picture source[srcset]')) return true;
+        if (a.querySelector('video[src], video source[src]')) return true;
+        if (a.querySelector('.yamb-message-row__attachment, [class*="MessageMedia" i], [class*="message-media" i], [class*="Attachment" i][class*="media" i]')) {
+          if (a.querySelector('img, video, picture, canvas')) return true;
+        }
+        if (a.querySelector('[class*="attachment" i] img, [class*="Attachment" i] img, [class*="photo" i] img, [class*="Photo" i] img')) return true;
+        const bg = a.querySelector('[style*="background-image"]');
+        if (bg && /url\\(/i.test(bg.getAttribute('style') || '')) return true;
+        return false;
+      };
       return rows.map((a) => {
         if (!a.dataset.tg2tmId) a.dataset.tg2tmId = String(window.__tg2tmNext++);
         return {
           id: a.dataset.tg2tmId,
           own: !!a.querySelector('.yamb-message-row_own'),
-          hasImage: !!a.querySelector('img[src], img[data-src], picture img'),
+          hasImage: hasImageInBubble(a),
           text: (a.innerText || '').replace(/\\s+/g, ' ').trim(),
           // «сохранён и доступен по ссылке» keeps the pack URL only on <a href>.
           links: [...a.querySelectorAll('a[href]')].map((x) => x.href),
@@ -748,16 +759,58 @@ export function stagingImageRows(rows) {
   return (rows || []).filter((row) => row && row.hasImage);
 }
 
-export function stagingForwardMessageId(rows, imageIndex, baseCount) {
-  const images = stagingImageRows(rows);
-  const idx = (Number(baseCount) || 0) + (Number(imageIndex) || 0);
-  const row = images[idx];
-  return row ? String(row.id) : null;
+// Join staging may omit img[src] in the snapshot; empty or clock-only text often means image-only.
+export function stagingImageOnlyRow(row) {
+  const text = String(row?.text || '').replace(/\s+/g, ' ').trim();
+  if (!text) return true;
+  if (/^\d{1,2}:\d{2}$/.test(text)) return true;
+  return false;
 }
 
-export async function resolveStagingForwardId(bot, imageIndex, baseCount) {
-  const rows = await bot.chatRows();
-  return stagingForwardMessageId(rows, imageIndex, baseCount);
+// Prefer rows we can forward: images, then own, then image-only bubbles, else all chat rows.
+export function stagingBufferRows(rows) {
+  const list = (rows || []).filter((row) => row);
+  const images = list.filter((row) => row.hasImage);
+  if (images.length) return images;
+  const own = list.filter((row) => row.own);
+  if (own.length) return own;
+  const minimal = list.filter((row) => stagingImageOnlyRow(row));
+  if (minimal.length) return minimal;
+  return list;
+}
+
+export function stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount = null) {
+  const list = rows || [];
+  const idx = (Number(baseRowCount) || 0) + (Number(imageIndex) || 0);
+  const direct = list[idx];
+  if (direct && direct.id != null) return String(direct.id);
+
+  const buffer = stagingBufferRows(list);
+  const bufBase = baseBufferCount != null ? Number(baseBufferCount) : Number(baseRowCount) || 0;
+  const fromBuf = buffer[bufBase + (Number(imageIndex) || 0)];
+  if (fromBuf && fromBuf.id != null) return String(fromBuf.id);
+
+  const images = stagingImageRows(list);
+  const legacy = images[(Number(baseRowCount) || 0) + (Number(imageIndex) || 0)];
+  if (legacy && legacy.id != null) return String(legacy.id);
+  return null;
+}
+
+export const STAGING_FORWARD_POLL_MS = 3000;
+
+export async function resolveStagingForwardId(bot, imageIndex, baseRowCount, baseBufferCount = null) {
+  const needRows = (Number(baseRowCount) || 0) + (Number(imageIndex) || 0) + 1;
+  const deadline = Date.now() + STAGING_FORWARD_POLL_MS;
+  let rows = [];
+  while (Date.now() <= deadline) {
+    if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
+    rows = await bot.chatRows();
+    const id = stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount);
+    if (id) return id;
+    if ((rows || []).length < needRows) await sleep(POLL_MS * 5);
+    else await sleep(POLL_MS * 5);
+  }
+  return stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount);
 }
 
 // Rows that appeared after a staging send (join buffer may omit .yamb-message-row_own).
@@ -1650,22 +1703,37 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   const botUrl = bot.botUrl || urls.botUrl;
   const stagedIndices = new Set();
   let stagingFilled = tm.uploaded;
-  let stagingBaseImageCount = null;
+  let stagingBaseRowCount = null;
+  let stagingBaseBufferCount = null;
+  let stagingJoinPreloaded = false;
 
-  async function ensureStagingBaseImageCount() {
-    if (stagingBaseImageCount != null) return;
+  async function preloadStagingJoinChat() {
+    if (!useStaging || stagingJoinPreloaded) return;
+    stagingJoinPreloaded = true;
+    await bot.openChat(stagingUrl);
+    for (let i = 0; i < 4; i++) {
+      await bot.scrollToBottom();
+      await sleep(200);
+      await bot.chatRows();
+    }
+  }
+
+  async function ensureStagingBase() {
+    if (stagingBaseRowCount != null) return;
     await bot.openChat(stagingUrl);
     await bot.scrollToBottom();
     const rows = await bot.chatRows();
-    stagingBaseImageCount = stagingImageRows(rows).length;
+    stagingBaseRowCount = (rows || []).length;
+    stagingBaseBufferCount = stagingBufferRows(rows).length;
   }
 
   async function fillStagingWindow() {
     if (!useStaging) return;
     const need = stagingFillTo(tm.uploaded, stagingFilled, m.images.length, urls.stagingWindow);
     if (!need.length) return;
+    await preloadStagingJoinChat();
     await bot.openChat(stagingUrl);
-    await ensureStagingBaseImageCount();
+    await ensureStagingBase();
     for (const idx of need) {
       const item = m.images[idx];
       const path = join(PACKS, dir, item.file);
@@ -1682,7 +1750,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     await fillStagingWindow();
     if (!stagedIndices.has(index)) {
       await bot.openChat(stagingUrl);
-      await ensureStagingBaseImageCount();
+      await ensureStagingBase();
       await bot.sendImageNoWait(file);
       stagedIndices.add(index);
       stagingFilled = Math.max(stagingFilled, index + 1);
@@ -1692,12 +1760,14 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     const baseline = (thread || []).filter((row) => row && !row.own).map(({ id, text, links }) => ({ id, text, links }));
     const ownBeforeIds = ownIds(thread);
     await bot.openChat(stagingUrl);
-    await ensureStagingBaseImageCount();
-    const ownId = await resolveStagingForwardId(bot, index, stagingBaseImageCount);
+    await ensureStagingBase();
+    const ownId = await resolveStagingForwardId(bot, index, stagingBaseRowCount, stagingBaseBufferCount);
     if (!ownId) {
+      const snap = await bot.chatRows();
       throw new Error(
-        `staging forward: image ${index} not found (base ${stagingBaseImageCount}, `
-        + `${stagingImageRows(await bot.chatRows()).length} images in chat)`,
+        `staging forward: image ${index} not found (base rows ${stagingBaseRowCount}, `
+        + `${(snap || []).length} rows, ${stagingImageRows(snap).length} with img, `
+        + `buffer ${stagingBufferRows(snap).length})`,
       );
     }
     console.log(dir, 'forward', m.images[index].file, 'id', ownId);
