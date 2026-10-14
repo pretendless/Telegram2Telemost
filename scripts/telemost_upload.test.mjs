@@ -59,6 +59,17 @@ import {
   BUFFER_DELETE_ATTEMPTS,
   bufferDeleteReduced,
   messageMenuHasDelete,
+  isDeleteMessageOk,
+  dialogAsksDeleteMessage,
+  botClearStartLine,
+  botClearConfirmedLine,
+  botClearSkippedLine,
+  botReopenLine,
+  botClearFailed,
+  isClearHistoryMenu,
+  isClearHistoryConfirmButton,
+  dialogWarnsClearHistory,
+  sidebarTitleIsChat,
   forwardSubmenuLogLine,
   botReplyLogLine,
   forwardTargetFromTitle,
@@ -805,6 +816,27 @@ test("buffer clear empties TG2TM before upload and does not treat leftovers as t
   assert.match(src, /onStaging\(\(\) => bot\.clearBufferChannel\(\)\)/);
   assert.match(src, /new image did not appear/);
   assert.equal(src.includes("image count did not grow"), false);
+  assert.equal(isDeleteMessageOk("ОК"), true);
+  assert.equal(isDeleteMessageOk("Отмена"), false);
+  assert.equal(dialogAsksDeleteMessage("Удалить сообщение?"), true);
+  assert.equal(botClearStartLine(), "bot-clear start");
+  assert.equal(botClearConfirmedLine(), "bot-clear confirmed");
+  assert.equal(botClearSkippedLine(), "bot-clear skipped: not in sidebar");
+  assert.equal(botReopenLine("https://telemost.yandex.ru/user/stickers"), "bot-reopen url=https://telemost.yandex.ru/user/stickers");
+  assert.equal(
+    botClearFailed(runUrl),
+    `staging upload: could not clear Стикеры history ${runUrl}`,
+  );
+  assert.equal(isClearHistoryMenu(["Информация о чате", "Пожаловаться", "Очистить историю"]), true);
+  assert.equal(isClearHistoryMenu(["Переслать", "Удалить", "Очистить историю"]), false);
+  assert.equal(isClearHistoryConfirmButton("Очистить историю"), true);
+  assert.equal(isClearHistoryConfirmButton("Очистить ис…"), true);
+  assert.equal(isClearHistoryConfirmButton("Отмена"), false);
+  assert.equal(dialogWarnsClearHistory("Чат пропадёт из общего списка. прошлые сообщения восстановить будет невозможно."), true);
+  assert.equal(sidebarTitleIsChat("Стикеры\nСоздан набор стикеров", "Стикеры"), true);
+  assert.equal(sidebarTitleIsChat("TG2TM\nИзображение", "Стикеры"), false);
+  assert.match(src, /bot-clear skipped: not in sidebar/);
+  assert.match(src, /clearStickersHistory/);
 });
 
 test("devtools opens a buffer tab with PUT and keeps the URL hash", () => {

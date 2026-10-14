@@ -1371,31 +1371,46 @@ class Bot {
     else await this.dismissOverlay();
   }
 
-  // Confirm «Удалить» only in a dialog that is not the message menu (that menu also contains Переслать).
+  // «Удалить сообщение?» → green «ОК». «Отмена» is not a confirm.
   async confirmBufferDelete() {
-    for (let i = 0; i < 8; i++) {
-      const clicked = await this.c.ev(`(() => {
+    for (let i = 0; i < 25; i++) {
+      const point = await this.c.ev(`(() => {
         ${TG2TM_DEEP_WALK}
-        const bare = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+        const bare = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
         const vis = (e) => {
           const r = e.getBoundingClientRect();
-          return r.width > 4 && r.height > 4;
+          return r.width > 8 && r.height > 8;
         };
-        const menus = tg2tmDeepMatch('[role="menu"], [role="dialog"], [class*="Popup" i], [class*="Dialog" i], [class*="Modal" i]').filter(vis);
-        for (const menu of menus) {
-          const text = bare(menu.innerText || '');
-          if (/Переслать|Ответить|Скачать изображение/.test(text)) continue;
-          const nodes = tg2tmDeepWithin(menu, 'button, [role="button"], [role="menuitem"]').filter(vis);
-          const el = nodes.find((n) => {
-            const t = bare(n.innerText || n.getAttribute('aria-label') || '');
-            return t === 'Удалить' || t === 'Удалить сообщение' || t === 'Удалить у всех';
+        const boxes = tg2tmDeepMatch('[role="dialog"], div').filter(vis);
+        for (const box of boxes) {
+          const r = box.getBoundingClientRect();
+          if (r.width < 180 || r.width > 560 || r.height < 70 || r.height > 280) continue;
+          const text = String(box.innerText || '');
+          if (!/Удалить сообщение\\?/.test(text)) continue;
+          const buttons = tg2tmDeepWithin(box, 'button, [role="button"]').filter(vis);
+          const ok = buttons.find((b) => {
+            const t = bare(b.innerText || b.getAttribute('aria-label') || '');
+            return t === 'ОК' || t === 'OK';
           });
-          if (!el) continue;
-          return tg2tmPress(el, 0);
+          if (!ok) continue;
+          document.querySelectorAll('[data-tg2tm-ok-hit]').forEach((n) => { delete n.dataset.tg2tmOkHit; });
+          ok.dataset.tg2tmOkHit = '1';
+          const br = ok.getBoundingClientRect();
+          return { x: br.x + br.width / 2, y: br.y + br.height / 2 };
         }
-        return false;
+        return null;
       })()`);
-      if (clicked) return true;
+      if (point) {
+        await this.cdpClickAt(point.x, point.y, 'left');
+        await this.c.ev(`(() => {
+          ${TG2TM_DEEP_WALK}
+          const el = tg2tmDeepMatch('[data-tg2tm-ok-hit="1"]')[0];
+          if (!el) return false;
+          delete el.dataset.tg2tmOkHit;
+          return tg2tmPress(el, 0);
+        })()`);
+        return true;
+      }
       await sleep(POLL_MS);
     }
     return false;
@@ -1459,11 +1474,9 @@ class Bot {
       await this.dismissOverlay();
       return false;
     }
-    await sleep(200);
-    await this.confirmBufferDelete();
-    await sleep(300);
+    const confirmed = await this.confirmBufferDelete();
     await this.dismissOverlay();
-    return true;
+    return confirmed;
   }
 
   // Delete each channel image via «Удалить». Stickers-bot tab is never used.
@@ -1518,6 +1531,177 @@ class Bot {
       return;
     }
     throw new Error(bufferClearFailed(remaining, actionsRunUrl()));
+  }
+
+  // Left-sidebar chat row whose title is exactly the stickers bot name. The open-chat header is not this row.
+  async stickersSidebarPoint(chatName) {
+    const lit = JSON.stringify(String(chatName || 'Стикеры'));
+    return this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const want = ${lit};
+      const bare = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
+      const nodes = tg2tmDeepMatch('a, li, button, [role="listitem"], [role="button"], div');
+      const hits = nodes.filter((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width < 80 || r.width > 420 || r.height < 36 || r.height > 96) return false;
+        if (r.x > 40 || r.x + r.width / 2 > 380) return false;
+        const lines = String(el.innerText || '').split(/\\n/).map(bare).filter(Boolean);
+        return lines[0] === want;
+      });
+      hits.sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return (ra.width * ra.height) - (rb.width * rb.height);
+      });
+      const el = hits[0];
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x + Math.min(r.width - 8, 48), y: r.y + r.height / 2 };
+    })()`);
+  }
+
+  async rightClickAt(x, y) {
+    await this.cdpClickAt(x, y, 'right');
+    const px = Math.round(Number(x) || 0);
+    const py = Math.round(Number(y) || 0);
+    await this.c.ev(`(() => {
+      const el = document.elementFromPoint(${px}, ${py});
+      if (!el) return false;
+      const o = { bubbles: true, cancelable: true, composed: true, clientX: ${px}, clientY: ${py}, button: 2, buttons: 2 };
+      el.dispatchEvent(new MouseEvent('contextmenu', o));
+      return true;
+    })()`);
+  }
+
+  async clickClearHistoryItem() {
+    const point = await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const bare = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
+      const vis = (e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 8 && r.height > 8 && r.height < 72;
+      };
+      const menus = tg2tmDeepMatch('[role="menu"], [class*="Menu" i], [class*="menu" i], [class*="Popup" i], [class*="Context" i]').filter((e) => {
+        const r = e.getBoundingClientRect();
+        if (r.width < 140 || r.width > 420 || r.height < 80 || r.height > 520) return false;
+        const text = String(e.innerText || '');
+        return text.includes('Очистить историю') && !text.includes('Скачать изображение') && !text.includes('Переслать');
+      });
+      const hits = [];
+      for (const menu of menus) {
+        const nodes = tg2tmDeepWithin(menu, '[role="menuitem"], button, [role="button"], li, div, span').filter(vis);
+        for (const n of nodes) {
+          const lines = String(n.innerText || '').split(/\\n/).map(bare).filter(Boolean);
+          const aria = bare(n.getAttribute && n.getAttribute('aria-label'));
+          if ((aria || lines[0]) !== 'Очистить историю' || lines.length > 2) continue;
+          hits.push(n);
+        }
+      }
+      hits.sort((a, b) => b.getBoundingClientRect().y - a.getBoundingClientRect().y);
+      const el = hits[0];
+      if (!el) return null;
+      document.querySelectorAll('[data-tg2tm-clear-hit]').forEach((n) => { delete n.dataset.tg2tmClearHit; });
+      el.dataset.tg2tmClearHit = '1';
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    })()`);
+    if (!point) return false;
+    await this.cdpClickAt(point.x, point.y, 'left');
+    await this.c.ev(`(() => {
+      ${TG2TM_DEEP_WALK}
+      const el = tg2tmDeepMatch('[data-tg2tm-clear-hit="1"]')[0];
+      if (!el) return false;
+      delete el.dataset.tg2tmClearHit;
+      return tg2tmPress(el, 0);
+    })()`);
+    return true;
+  }
+
+  async confirmClearHistory() {
+    for (let i = 0; i < 25; i++) {
+      const point = await this.c.ev(`(() => {
+        ${TG2TM_DEEP_WALK}
+        const bare = (s) => String(s || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
+        const vis = (e) => {
+          const r = e.getBoundingClientRect();
+          return r.width > 8 && r.height > 8;
+        };
+        const boxes = tg2tmDeepMatch('[role="dialog"], div').filter(vis);
+        for (const box of boxes) {
+          const r = box.getBoundingClientRect();
+          if (r.width < 220 || r.width > 560 || r.height < 80 || r.height > 360) continue;
+          const text = String(box.innerText || '');
+          if (!/Чат пропадёт из общего списка|восстановить будет невозможно/.test(text)) continue;
+          const buttons = tg2tmDeepWithin(box, 'button, [role="button"]').filter(vis);
+          const ok = buttons.find((b) => {
+            const t = bare(b.innerText || b.getAttribute('aria-label') || '');
+            return t !== 'Отмена' && (t === 'Очистить историю' || t.startsWith('Очистить'));
+          });
+          if (!ok) continue;
+          document.querySelectorAll('[data-tg2tm-clear-ok]').forEach((n) => { delete n.dataset.tg2tmClearOk; });
+          ok.dataset.tg2tmClearOk = '1';
+          const br = ok.getBoundingClientRect();
+          return { x: br.x + br.width / 2, y: br.y + br.height / 2 };
+        }
+        return null;
+      })()`);
+      if (point) {
+        await this.cdpClickAt(point.x, point.y, 'left');
+        await this.c.ev(`(() => {
+          ${TG2TM_DEEP_WALK}
+          const el = tg2tmDeepMatch('[data-tg2tm-clear-ok="1"]')[0];
+          if (!el) return false;
+          delete el.dataset.tg2tmClearOk;
+          return tg2tmPress(el, 0);
+        })()`);
+        return true;
+      }
+      await sleep(POLL_MS);
+    }
+    return false;
+  }
+
+  async reopenBotUrl(url) {
+    const target = String(url || this.botUrl || '').trim();
+    if (!target) throw new Error(botClearFailed(actionsRunUrl()));
+    console.log(botReopenLine(target));
+    delete this.settledByTarget[target];
+    this.chatUrl = target;
+    this.botUrl = target;
+    await this.c.send('Page.navigate', { url: target });
+    await this.ensureChat();
+  }
+
+  // Sidebar «Очистить историю», or skip when the chat row is already gone. Then open the bot by URL.
+  async clearStickersHistory(botUrl) {
+    const name = this.forwardTarget || this.botName || 'Стикеры';
+    const row = await this.stickersSidebarPoint(name);
+    if (!row) {
+      console.log(botClearSkippedLine());
+      await this.reopenBotUrl(botUrl);
+      return;
+    }
+    console.log(botClearStartLine());
+    let confirmed = false;
+    for (let attempt = 0; attempt < BUFFER_DELETE_ATTEMPTS && !confirmed; attempt++) {
+      const still = attempt === 0 ? row : await this.stickersSidebarPoint(name);
+      if (!still) {
+        confirmed = true;
+        break;
+      }
+      await this.rightClickAt(still.x, still.y);
+      await sleep(250);
+      const opened = await this.clickClearHistoryItem();
+      if (!opened) {
+        await this.dismissOverlay();
+        continue;
+      }
+      confirmed = await this.confirmClearHistory();
+      if (!confirmed) await this.dismissOverlay();
+    }
+    if (!confirmed) throw new Error(botClearFailed(actionsRunUrl()));
+    console.log(botClearConfirmedLine());
+    await this.reopenBotUrl(botUrl);
   }
 
   // Best-effort residue cleanup: delete recent own bubbles (staging or bot chat).
@@ -1942,6 +2126,61 @@ export function newImageDidNotAppear(before, after) {
   const prior = before == null || before === '' ? 'none' : String(before);
   const seen = after == null || after === '' ? 'none' : String(after);
   return `staging upload: new image did not appear (before ${prior}, msgCount=${seen})`;
+}
+
+export function isDeleteMessageOk(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  return t === 'ОК' || t === 'OK';
+}
+
+export function dialogAsksDeleteMessage(text) {
+  return /Удалить сообщение\?/.test(String(text || ''));
+}
+
+export function botClearStartLine() {
+  return 'bot-clear start';
+}
+
+export function botClearConfirmedLine() {
+  return 'bot-clear confirmed';
+}
+
+export function botClearSkippedLine() {
+  return 'bot-clear skipped: not in sidebar';
+}
+
+export function botReopenLine(url) {
+  return `bot-reopen url=${String(url || '').trim()}`;
+}
+
+export function botClearFailed(runUrl) {
+  const url = String(runUrl || '').trim();
+  const msg = 'staging upload: could not clear Стикеры history';
+  return url ? `${msg} ${url}` : msg;
+}
+
+export function isClearHistoryMenu(labels) {
+  const rows = (labels || []).map((s) => String(s || '').replace(/\s+/g, ' ').trim());
+  const hasClear = rows.some((t) => t === 'Очистить историю');
+  const isMessageMenu = rows.some((t) => t === 'Переслать' || t === 'Скачать изображение');
+  return hasClear && !isMessageMenu;
+}
+
+export function isClearHistoryConfirmButton(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t || t === 'Отмена') return false;
+  return t === 'Очистить историю' || t.startsWith('Очистить');
+}
+
+export function dialogWarnsClearHistory(text) {
+  const body = String(text || '');
+  return /Чат пропадёт из общего списка/.test(body) || /восстановить будет невозможно/.test(body);
+}
+
+export function sidebarTitleIsChat(text, chatName) {
+  const want = String(chatName || '').trim();
+  const lines = String(text || '').split('\n').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return Boolean(want) && lines[0] === want;
 }
 
 // A short dialog with Удалить and without Переслать is the confirm step, not the message menu.
@@ -2921,6 +3160,12 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     dirRef.queueRequestId = m.queueRequestId || '';
     dirRef.requesterChatId = m.requesterChatId || '';
   }
+  const earlyUrls = loadTelemostUrls();
+  if (earlyUrls.stagingEnabled && (bot.stagingUrl || earlyUrls.stagingUrl)) {
+    if (!bufferClearAllowed(bot.dualTab)) throw new Error(bufferClearFailed(0, actionsRunUrl()));
+    await bot.onStaging(() => bot.clearBufferChannel());
+    await bot.onBot(() => bot.clearStickersHistory(bot.botUrl || earlyUrls.botUrl));
+  }
   if (restart) {
     await closeOpenBotPackBeforeNew(bot, note, { label: m.title });
   }
@@ -3073,10 +3318,6 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   async function startStagingPack() {
     if (!useStaging || stagingPackStarted) return;
     stagingPackStarted = true;
-    if (!bufferClearAllowed(bot.dualTab)) {
-      throw new Error(bufferClearFailed(0, actionsRunUrl()));
-    }
-    await bot.onStaging(() => bot.clearBufferChannel());
     await bot.onStaging(async () => {
       stagingBaseImageCount = null;
       await ensureStagingBase();
