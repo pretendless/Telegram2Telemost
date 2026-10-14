@@ -2,12 +2,15 @@ import { isAdminChat } from "../../scripts/admin_status.mjs";
 import {
   DEFAULT_PROJECT_PROMPT_WORKFLOW,
   dispatchProjectPrompt,
+  findProjectPromptRunUrl,
   newPromptId,
   parseProjectCommand,
   projectAckText,
   projectDispatchFailText,
+  projectDispatchedText,
   projectMirrorText,
   projectPromptKey,
+  projectStartingText,
   projectUsageText,
 } from "../../vm/project_prompt.js";
 import { DEFAULT_REF, DEFAULT_REPO } from "../../vm/dispatch.js";
@@ -24,6 +27,54 @@ export async function readProjectPrompt(kv, id) {
   } catch {
     return null;
   }
+}
+
+export async function finishProjectPromptDispatch(env, { record, chatId, deps = {} }) {
+  const kv = env.BOT_KV;
+  const send = deps.send;
+  const fetchImpl = deps.fetch || fetch;
+  const repo = env.GH_REPO || DEFAULT_REPO;
+  const workflow = env.PROJECT_PROMPT_WORKFLOW || DEFAULT_PROJECT_PROMPT_WORKFLOW;
+  const ref = env.PROJECT_PROMPT_REF || DEFAULT_REF;
+  const startedAt = typeof deps.now === "function" ? deps.now().getTime() : Date.now();
+  let dispatched;
+  try {
+    dispatched = await dispatchProjectPrompt(fetchImpl, {
+      token: env.GH_DISPATCH_TOKEN,
+      repo,
+      workflow,
+      ref,
+      promptId: record.id,
+      chatId,
+    });
+  } catch (err) {
+    console.error("project dispatch failed", err && err.message);
+    dispatched = { ok: false, status: 0 };
+  }
+  if (!dispatched.ok) {
+    record.status = "error";
+    record.error = `dispatch ${dispatched.status || "error"}`;
+    await storeProjectPrompt(kv, record);
+    if (send) await send(env, chatId, projectDispatchFailText(dispatched.status || "error"));
+    return { ok: false };
+  }
+  record.status = "dispatched";
+  let runUrl = "";
+  try {
+    runUrl = await findProjectPromptRunUrl(fetchImpl, {
+      token: env.GH_DISPATCH_TOKEN,
+      repo,
+      workflow,
+      startedAt,
+      sleep: deps.sleep,
+    });
+  } catch (err) {
+    console.error("project run lookup failed", err && err.message);
+  }
+  if (runUrl) record.workflowRunUrl = runUrl;
+  await storeProjectPrompt(kv, record);
+  if (send) await send(env, chatId, projectDispatchedText({ promptId: record.id, runUrl }));
+  return { ok: true, runUrl };
 }
 
 export async function handleProjectCommand(env, message, deps = {}) {
@@ -58,33 +109,20 @@ export async function handleProjectCommand(env, message, deps = {}) {
     status: "pending",
     createdAt,
   };
-  await storeProjectPrompt(kv, record);
   await send(env, chatId, projectAckText(id));
   await send(env, chatId, projectMirrorText(parsed.prompt));
-  const fetchImpl = deps.fetch || fetch;
-  let dispatched;
-  try {
-    dispatched = await dispatchProjectPrompt(fetchImpl, {
-      token: env.GH_DISPATCH_TOKEN,
-      repo: env.GH_REPO || DEFAULT_REPO,
-      workflow: env.PROJECT_PROMPT_WORKFLOW || DEFAULT_PROJECT_PROMPT_WORKFLOW,
-      ref: env.PROJECT_PROMPT_REF || DEFAULT_REF,
-      promptId: id,
-      chatId,
-    });
-  } catch (err) {
-    console.error("project dispatch failed", err && err.message);
-    dispatched = { ok: false, status: 0 };
-  }
-  if (dispatched.ok) {
-    record.status = "dispatched";
+  await send(env, chatId, projectStartingText());
+
+  const background = async () => {
     await storeProjectPrompt(kv, record);
+    await finishProjectPromptDispatch(env, { record, chatId, deps: { ...deps, send } });
+  };
+
+  if (deps.waitUntil) {
+    deps.waitUntil(background());
     return true;
   }
-  record.status = "error";
-  record.error = `dispatch ${dispatched.status || "error"}`;
-  await storeProjectPrompt(kv, record);
-  await send(env, chatId, projectDispatchFailText(dispatched.status || "error"));
+  await background();
   return true;
 }
 

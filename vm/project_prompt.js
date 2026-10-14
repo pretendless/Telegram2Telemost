@@ -1,6 +1,13 @@
 // Telegram /project → GitHub project-prompt workflow. No Node builtins (Worker-safe).
 
-import { assertRef, DEFAULT_REF, DEFAULT_REPO, dispatchUrl, githubHeaders } from "./dispatch.js";
+import {
+  assertRef,
+  DEFAULT_REF,
+  DEFAULT_REPO,
+  dispatchUrl,
+  githubHeaders,
+  workflowRunsUrl,
+} from "./dispatch.js";
 
 export const DEFAULT_PROJECT_PROMPT_WORKFLOW = "project-prompt.yml";
 export const PROJECT_PROMPT_KV_PREFIX = "project:prompt:";
@@ -49,6 +56,73 @@ export async function dispatchProjectPrompt(fetchImpl, { token, repo, workflow, 
     body: JSON.stringify(built.body),
   });
   return { ok: res.status === 204, status: res.status };
+}
+
+async function readJsonBody(response) {
+  if (!response || typeof response.json !== "function") return {};
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+/** Best-effort: find a project-prompt workflow run that started around dispatch time. */
+export async function findProjectPromptRunUrl(
+  fetchImpl,
+  { token, repo, workflow, startedAt, sleep, attempts = 5 },
+) {
+  const headers = githubHeaders(token);
+  const listUrl = workflowRunsUrl(repo, workflow || DEFAULT_PROJECT_PROMPT_WORKFLOW);
+  const since = typeof startedAt === "number" ? startedAt : Date.now();
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (sleep && attempt) await sleep(800);
+    const res = await fetchImpl(listUrl, { headers });
+    if (res.status !== 200) continue;
+    const body = await readJsonBody(res);
+    const runs = (body.workflow_runs || []).filter((run) => run && run.html_url);
+    const fresh = runs.find((run) => Date.parse(run.created_at) >= since - 20_000);
+    if (fresh) return fresh.html_url;
+  }
+  return "";
+}
+
+export function projectStartingText() {
+  return "⏳ Запускаю GitHub Actions (project-prompt)…";
+}
+
+export function projectDispatchedText({ promptId, runUrl }) {
+  if (runUrl) {
+    return `✅ Очередь Project: workflow запущен.\n\n${runUrl}\n\nid: ${promptId}`;
+  }
+  return `✅ Запрос поставлен в очередь Project (GitHub dispatch ok).\n\nid: ${promptId}`;
+}
+
+export function projectFastAckSummary(prompt, max = 200) {
+  const one = String(prompt || "").replace(/\s+/g, " ").trim();
+  const head = one.slice(0, max);
+  const tail = one.length > max ? "…" : "";
+  return `Принято: ${head}${tail} Обработка в Project начата.`;
+}
+
+export function projectIssueTitle(prompt, max = 60) {
+  const one = String(prompt || "").replace(/\s+/g, " ").trim();
+  const head = one.slice(0, max);
+  return `[TG Project] ${head}${one.length > max ? "…" : ""}`;
+}
+
+export function cursorAgentIssueHint(repo = DEFAULT_REPO) {
+  const slug = String(repo || DEFAULT_REPO);
+  return [
+    "## Cursor cloud agent (ручной или automation)",
+    "",
+    "Публичного API «запустить Project» из GitHub нет. Варианты:",
+    "",
+    `1. Откройте репозиторий \`${slug}\` в Cursor → Cloud Agent / Project и вставьте блок **PROMPT_FOR_PROJECT** ниже.`,
+    "2. Или дождитесь координатора Project по метке `tg-project-prompt`.",
+    "",
+    `Deep link (открыть репо): https://github.com/${slug}`,
+  ].join("\n");
 }
 
 export function projectUsageText(error) {

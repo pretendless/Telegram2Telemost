@@ -728,7 +728,13 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     await handleVmCommand(env, message, { send, fetch: deps.fetch });
     return;
   } else if (cmd === "/project") {
-    await handleProjectCommand(env, message, { send, fetch: deps.fetch, now: deps.now });
+    await handleProjectCommand(env, message, {
+      send,
+      fetch: deps.fetch,
+      now: deps.now,
+      waitUntil: deps.waitUntil,
+      sleep: deps.sleep,
+    });
     return;
   } else if (cmd) {
     return;
