@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { githubOutputValue, patchRequestPack, restartGithubOutput, restartQuietReason } from './restart_prepare.mjs';
+import { githubOutputValue, patchRequestPack, restartGithubOutput, restartQuietReason, telemostForRequest } from './restart_prepare.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 import { restartTarget } from './telemost_upload.mjs';
@@ -85,6 +85,15 @@ test('empty or clock title on an open dialog closes or continues, not a hard fai
   });
   assert.match(output, /^action=close$/m);
   assert.match(output, /^restart_seen_title=$/m);
+});
+
+test('a finished telemost block is kept when the same request is claimed again', () => {
+  const done = { telemost: { status: 'done', uploaded: 111, packUrl: 'https://t.me/c/stickers/1', error: null } };
+  assert.equal(telemostForRequest(done).packUrl, 'https://t.me/c/stickers/1');
+  const partial = { telemost: { status: 'uploading', uploaded: 14, packUrl: null } };
+  assert.equal(telemostForRequest(partial).uploaded, 14);
+  assert.equal(telemostForRequest(null).status, 'pending');
+  assert.equal(telemostForRequest({ telemost: { status: 'error', uploaded: 3 } }).status, 'pending');
 });
 
 test('patchRequestPack adds queue requester metadata to an existing catalog pack', () => {

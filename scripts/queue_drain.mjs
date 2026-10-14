@@ -35,6 +35,13 @@ export function shouldWaitForQueue(idleDeadline, now) {
 }
 
 /** Pure plan for tests: when to stop idle polling. */
+/** A request this session already finished must not be /newpack'd again. */
+export function drainClaimAction(claimed, finishedIds) {
+  if (!claimed || !claimed.id) return 'idle';
+  if (finishedIds && finishedIds.has(String(claimed.id))) return 'skip-finished';
+  return 'upload';
+}
+
 export function nextDrainWait({ claimed, queued, now, idleDeadline, idleMs, sawWork = false }) {
   if (claimed) return { action: 'upload', idleDeadline: null };
   if (queued > 0) return { action: 'claim-again', idleDeadline: null };
@@ -143,6 +150,7 @@ export async function drainRemainingQueue(ctx) {
   let idleDeadline = null;
   let packs = 0;
   let sawWork = false;
+  const finishedIds = new Set();
 
   for (;;) {
     let claim;
@@ -175,6 +183,11 @@ export async function drainRemainingQueue(ctx) {
     sawWork = true;
     idleDeadline = null;
     const item = claim.claimed;
+    if (drainClaimAction(item, finishedIds) === 'skip-finished') {
+      console.log('queue-drain skip finished', item.title);
+      await sleep(pollMs);
+      continue;
+    }
     const target = {
       title: item.title,
       requestId: item.id,
@@ -198,6 +211,7 @@ export async function drainRemainingQueue(ctx) {
         note: ctx.note,
         dirRef: ctx.dirRef,
       });
+      finishedIds.add(String(item.id));
       packs++;
     } catch (err) {
       const message = err && err.message ? err.message : String(err);
