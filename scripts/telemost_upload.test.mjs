@@ -25,8 +25,11 @@ import {
   stagingOwnIdAfterSend,
   stagingNewRows,
   stagingImageRows,
+  stagingBufferRows,
+  stagingImageOnlyRow,
   stagingForwardMessageId,
   resolveStagingForwardId,
+  STAGING_FORWARD_POLL_MS,
   botRepliesAfterOwn,
   loadTelemostUrls,
   stagingFillTo,
@@ -401,10 +404,49 @@ test("resolveStagingForwardId reads fresh ids from bot.chatRows", async () => {
   ];
   const bot = {
     chatRows: async () => rows,
+    scrollToBottom: async () => {},
   };
   assert.equal(await resolveStagingForwardId(bot, 1, 0), "21");
   rows[1].id = "99";
   assert.equal(await resolveStagingForwardId(bot, 1, 0), "99");
+});
+
+test("staging forward uses row index when join chat omits hasImage", () => {
+  const baseRows = 2;
+  const joinAfterUpload = [
+    { id: "1", own: false, text: "system", hasImage: false },
+    { id: "2", own: false, text: "hello", hasImage: false },
+    { id: "3", own: false, text: "", hasImage: false },
+    { id: "4", own: false, text: "", hasImage: false },
+    { id: "5", own: false, text: "11:05", hasImage: false },
+  ];
+  assert.equal(stagingImageRows(joinAfterUpload).length, 0);
+  assert.deepEqual(stagingBufferRows(joinAfterUpload).map((r) => r.id), ["3", "4", "5"]);
+  assert.equal(stagingForwardMessageId(joinAfterUpload, 0, baseRows), "3");
+  assert.equal(stagingForwardMessageId(joinAfterUpload, 1, baseRows), "4");
+  assert.equal(stagingForwardMessageId(joinAfterUpload, 2, baseRows), "5");
+  assert.equal(stagingForwardMessageId(joinAfterUpload, 0, baseRows, 0), "3");
+  assert.equal(stagingImageOnlyRow({ text: "" }), true);
+  assert.equal(stagingImageOnlyRow({ text: "11:05" }), true);
+  assert.equal(stagingImageOnlyRow({ text: "caption" }), false);
+});
+
+test("resolveStagingForwardId polls until staged rows appear", async () => {
+  let calls = 0;
+  const bot = {
+    scrollToBottom: async () => {},
+    chatRows: async () => {
+      calls += 1;
+      if (calls < 3) return [{ id: "1", own: false, text: "old", hasImage: false }];
+      return [
+        { id: "1", own: false, text: "old", hasImage: false },
+        { id: "2", own: false, text: "", hasImage: false },
+      ];
+    },
+  };
+  assert.equal(await resolveStagingForwardId(bot, 0, 1), "2");
+  assert.ok(calls >= 3);
+  assert.ok(STAGING_FORWARD_POLL_MS >= 2000);
 });
 
 test("staging own-id detection falls back when join chat omits row_own", () => {
