@@ -39,6 +39,11 @@ import {
   menuLabelMatches,
   botRepliesAfterOwn,
   loadTelemostUrls,
+  telemostUrlMatches,
+  adminPhaseForStagingStep,
+  stagingOperationTarget,
+  stagingForwardExpectsRows,
+  STAGING_CHAT_WARM_ITERATIONS,
   stagingFillTo,
   waitLastLine,
   IMAGE_ATTEMPTS,
@@ -587,6 +592,28 @@ test("staging own-id detection falls back when join chat omits row_own", () => {
     { id: "11", own: false, hasImage: true },
   ];
   assert.equal(stagingOwnIdAfterSend([], 1, countOnly, null), "11");
+});
+
+test("two-tab routing and admin phases split buffer vs send", () => {
+  assert.equal(stagingOperationTarget("buffer"), "staging");
+  assert.equal(stagingOperationTarget("forward-resolve"), "staging");
+  assert.equal(stagingOperationTarget("send"), "bot");
+  assert.equal(stagingOperationTarget("say"), "bot");
+  assert.equal(adminPhaseForStagingStep("buffer"), "buffering");
+  assert.equal(adminPhaseForStagingStep("buffering"), "buffering");
+  assert.equal(adminPhaseForStagingStep("send"), "sending");
+  assert.equal(adminPhaseForStagingStep("forward"), "sending");
+  assert.equal(stagingForwardExpectsRows({ stagingFilled: 5, uploaded: 0 }), true);
+  assert.equal(stagingForwardExpectsRows({ stagingFilled: 3, uploaded: 3 }), false);
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: context menu did not open for 9")), true);
+  assert.equal(stagingForwardMenuBlocked(new Error("staging forward: image 2 not found")), false);
+  assert.equal(STAGING_CHAT_WARM_ITERATIONS, 4);
+  const botUrl = "https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d";
+  const joinUrl = "https://telemost.yandex.ru/join#87de7b40-0e2e-0557-537a-fa84858fd189";
+  assert.equal(telemostUrlMatches(botUrl, botUrl), true);
+  assert.equal(telemostUrlMatches(`${botUrl}/chat`, botUrl), true);
+  assert.equal(telemostUrlMatches(joinUrl, joinUrl), true);
+  assert.equal(telemostUrlMatches(botUrl, joinUrl), false);
 });
 
 test("staging URLs come from settings or env, and the fill window stays ahead of the bot", () => {

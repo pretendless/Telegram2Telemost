@@ -10,11 +10,12 @@ import { activeUploadJob } from '../worker/src/logic.js';
 
 export const ADMIN_CHAT_ID = '8502935020';
 
-const PHASES = new Set(['start', 'newpack', 'sending', 'waiting', 'retry', 'emoji', 'ready', 'done', 'saved', 'link', 'error', 'failed']);
+const PHASES = new Set(['start', 'newpack', 'buffering', 'sending', 'waiting', 'retry', 'emoji', 'ready', 'done', 'saved', 'link', 'error', 'failed']);
 
 const LABEL = {
   start: 'старт',
   newpack: '/newpack',
+  buffering: 'буфферизация',
   sending: 'отправка',
   waiting: 'жду бота',
   retry: 'повтор',

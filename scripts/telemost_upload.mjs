@@ -135,10 +135,21 @@ const log = (pack, item, status, err = '') => {
   }
 };
 
-async function connect() {
-  const list = await (await fetch(DEVTOOLS + '/json/list')).json();
-  const page = list.find(t => t.type === 'page' && t.url.includes('telemost.yandex.ru'));
-  if (!page) throw new Error('no Telemost tab open in Chrome');
+export function telemostUrlMatches(pageUrl, targetUrl) {
+  const here = String(pageUrl || '');
+  const target = String(targetUrl || '').trim();
+  if (!here.includes('telemost.yandex.ru') || !target) return false;
+  if (here === target) return true;
+  if (target.includes('#') && here.includes(target.slice(target.indexOf('#')))) return true;
+  if (!target.includes('#') && here.startsWith(target)) return true;
+  const user = (target.match(/\/user\/([^/?#]+)/) || [])[1];
+  if (user && here.includes(`/user/${user}`)) return true;
+  const join = (target.match(/join#([^/?#]+)/i) || [])[1];
+  if (join && /join#/i.test(here) && here.includes(join)) return true;
+  return false;
+}
+
+async function attachCdp(page) {
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   let id = 0;
   const pending = new Map();
@@ -162,7 +173,71 @@ async function connect() {
     return r.result.value;
   };
   await send('DOM.enable');
-  return { send, ev, close: () => ws.close() };
+  return { send, ev, page, close: () => ws.close() };
+}
+
+async function listDevToolsPages() {
+  return (await fetch(DEVTOOLS + '/json/list')).json();
+}
+
+async function findOrCreatePage(list, targetUrl) {
+  const target = String(targetUrl || '').trim();
+  let page = (list || []).find((t) => t.type === 'page' && telemostUrlMatches(t.url, target));
+  if (page) return page;
+  const created = await fetch(`${DEVTOOLS}/json/new?${encodeURIComponent(target)}`);
+  if (!created.ok) throw new Error(`could not open Telemost tab for ${target}`);
+  page = await created.json();
+  return page;
+}
+
+async function warmPageChat(c, targetUrl) {
+  const target = String(targetUrl || '').trim();
+  const href = await c.ev('location.href');
+  const here = String(href || '');
+  const onTarget = telemostUrlMatches(here, target);
+  if (!onTarget) await c.send('Page.navigate', { url: target });
+  for (let i = 0; i < 60; i++) {
+    if (await c.ev(`!!document.querySelector('[contenteditable=true]')`)) return;
+    await sleep(500);
+  }
+  throw new Error('Telemost chat did not load');
+}
+
+/** One CDP session per browser tab: stickers bot + optional staging join chat. */
+async function connect(urls = loadTelemostUrls()) {
+  const list = await listDevToolsPages();
+  const botUrl = urls.botUrl || DEFAULT_BOT_URL;
+  let botPage = list.find((t) => t.type === 'page' && telemostUrlMatches(t.url, botUrl));
+  if (!botPage) {
+    botPage = list.find((t) => t.type === 'page' && t.url.includes('telemost.yandex.ru'));
+  }
+  if (!botPage) throw new Error('no Telemost tab open in Chrome');
+  const bot = await attachCdp(botPage);
+  await warmPageChat(bot, botUrl);
+
+  if (!urls.stagingEnabled || !urls.stagingUrl) {
+    return {
+      bot,
+      staging: bot,
+      dualTab: false,
+      close: () => bot.close(),
+    };
+  }
+
+  const freshList = await listDevToolsPages();
+  const stagingPage = await findOrCreatePage(freshList, urls.stagingUrl);
+  const staging = await attachCdp(stagingPage);
+  await warmPageChat(staging, urls.stagingUrl);
+  console.log('dual-tab', 'bot', botPage.url || botUrl, 'staging', stagingPage.url || urls.stagingUrl);
+  return {
+    bot,
+    staging,
+    dualTab: true,
+    close: () => {
+      bot.close();
+      if (staging !== bot) staging.close();
+    },
+  };
 }
 
 // ui-pressable widgets ignore CDP mouse input; synthetic pointer events dispatched in the page work.
@@ -181,19 +256,86 @@ const pressJs = (sel) => `(() => {
 })()`;
 
 class Bot {
-  constructor(c, urls = loadTelemostUrls()) {
-    this.c = c;
+  constructor(sessions, urls = loadTelemostUrls()) {
+    const legacy = sessions && sessions.send && sessions.ev;
+    const pack = legacy ? { bot: sessions, staging: sessions, dualTab: false } : (sessions || {});
+    this.cBot = pack.bot;
+    this.cStaging = pack.staging || pack.bot;
+    this.dualTab = Boolean(pack.dualTab && this.cStaging !== this.cBot);
+    this.c = this.cBot;
     this.botUrl = urls.botUrl || DEFAULT_BOT_URL;
     this.stagingUrl = urls.stagingUrl || '';
     this.chatUrl = this.botUrl;
     this.settledByTarget = Object.create(null);
   }
 
+  closeAll() {
+    if (this.cBot && this.cBot.close) this.cBot.close();
+    if (this.dualTab && this.cStaging && this.cStaging.close) this.cStaging.close();
+  }
+
+  _sessionForUrl(url) {
+    const target = String(url || '').trim();
+    if (this.dualTab && this.stagingUrl && telemostUrlMatches(target, this.stagingUrl)) return 'staging';
+    return 'bot';
+  }
+
+  async onBot(work) {
+    const prevC = this.c;
+    const prevUrl = this.chatUrl;
+    this.c = this.cBot;
+    this.chatUrl = this.botUrl;
+    try {
+      await this.ensureChat();
+      return await work();
+    } finally {
+      this.c = prevC;
+      this.chatUrl = prevUrl;
+    }
+  }
+
+  async onStaging(work) {
+    const prevC = this.c;
+    const prevUrl = this.chatUrl;
+    this.c = this.cStaging;
+    this.chatUrl = this.stagingUrl;
+    try {
+      await this.ensureChat();
+      return await work();
+    } finally {
+      this.c = prevC;
+      this.chatUrl = prevUrl;
+    }
+  }
+
   async openChat(url) {
     const target = String(url || '').trim();
     if (!target) throw new Error('Telemost chat URL is empty');
-    this.chatUrl = target;
-    await this.ensureChat();
+    if (this._sessionForUrl(target) === 'staging') {
+      await this.onStaging(async () => {
+        this.chatUrl = target;
+        await this.ensureChat();
+      });
+      return;
+    }
+    await this.onBot(async () => {
+      this.chatUrl = target;
+      await this.ensureChat();
+    });
+  }
+
+  /** Force navigation when the SPA kept the URL but unloaded the message list. */
+  async revisitChat(url) {
+    const target = String(url || this.chatUrl || '').trim();
+    if (!target) throw new Error('Telemost chat URL is empty');
+    const run = async () => {
+      delete this.settledByTarget[target];
+      this.chatUrl = target;
+      await this.c.send('Page.navigate', { url: target });
+      await this.ensureChat();
+    };
+    if (this._sessionForUrl(target) === 'staging') await this.onStaging(run);
+    else await this.onBot(run);
   }
 
   async ensureChat() {
@@ -1001,7 +1143,8 @@ class Bot {
       return true;
     })()`);
     void sent;
-    await this.openChat(botUrl);
+    if (!this.dualTab) await this.openChat(botUrl);
+    else await this.dismissOverlay();
   }
 
   // Best-effort residue cleanup: delete recent own bubbles (staging or bot chat).
@@ -1314,6 +1457,60 @@ export const STAGING_FORWARD_POLL_MS = 8000;
 
 export const STAGING_FORWARD_MENU_LABELS = Object.freeze(['Переслать сообщение', 'Переслать', 'Forward']);
 
+export const STAGING_CHAT_WARM_ITERATIONS = 4;
+
+/** Which browser tab owns a staging upload step (pure routing for tests). */
+export function stagingOperationTarget(operation) {
+  const op = String(operation || '').trim();
+  if (/^(buffer|forward|forward-resolve|staging|stage|warm-staging|resolve-forward)/i.test(op)) return 'staging';
+  return 'bot';
+}
+
+/** Admin card phase: buffer fill vs forward/send to stickers bot. */
+export function adminPhaseForStagingStep(step) {
+  const s = String(step || '').trim();
+  if (s === 'buffer' || s === 'buffering') return 'buffering';
+  return 'sending';
+}
+
+/** Scroll staging join chat so lazy history repaints (single tab; dual-tab keeps DOM warm). */
+export async function warmStagingChatView(bot, { iterations = STAGING_CHAT_WARM_ITERATIONS } = {}) {
+  const n = Math.max(1, Number(iterations) || STAGING_CHAT_WARM_ITERATIONS);
+  const warm = async () => {
+    for (let i = 0; i < n; i++) {
+      if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
+      await sleep(200);
+      if (typeof bot.chatRows === 'function') await bot.chatRows();
+    }
+  };
+  if (typeof bot.onStaging === 'function' && bot.dualTab) return bot.onStaging(warm);
+  return warm();
+}
+
+/** Drop cached settlement and reload staging when the message list is empty. */
+export async function reopenStagingChat(bot, stagingUrl) {
+  const target = String(stagingUrl || bot.stagingUrl || '').trim();
+  if (!target) return;
+  const reopen = async () => {
+    if (typeof bot.revisitChat === 'function') await bot.revisitChat(target);
+    else {
+      if (bot.settledByTarget) delete bot.settledByTarget[target];
+      await bot.openChat(target);
+    }
+    await warmStagingChatView(bot, { iterations: STAGING_CHAT_WARM_ITERATIONS + 2 });
+  };
+  if (typeof bot.onStaging === 'function' && bot.dualTab) return bot.onStaging(reopen);
+  return reopen();
+}
+
+export function stagingForwardExpectsRows(opts) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const filled = Number(o.stagingFilled);
+  const up = Number(o.uploaded);
+  if (!Number.isFinite(filled) || !Number.isFinite(up)) return false;
+  return filled > up;
+}
+
 /** Forward-via-staging failed in a way direct sendImage from disk can recover. */
 export function stagingForwardMenuBlocked(err) {
   const msg = err && typeof err === 'object' && err.message != null ? String(err.message) : String(err || '');
@@ -1334,23 +1531,59 @@ export function menuLabelMatches(text, aria, labels = STAGING_FORWARD_MENU_LABEL
 }
 
 export async function stagingRowsForForward(bot) {
-  if (typeof bot.surveyChat === 'function') {
-    const surveyed = await bot.surveyChat();
-    const messages = surveyed.messages || [];
+  const read = async () => {
+    if (typeof bot.surveyChat === 'function') {
+      const surveyed = await bot.surveyChat();
+      const messages = surveyed.messages || [];
+      if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
+      const live = typeof bot.chatRows === 'function' ? await bot.chatRows() : [];
+      const byId = new Map((live || []).filter((row) => row && row.id != null).map((row) => [String(row.id), row]));
+      return messages.map((message) => {
+        const hit = byId.get(String(message.id));
+        if (hit) return hit;
+        return {
+          ...message,
+          hasImage: stagingImageOnlyRow(message),
+        };
+      });
+    }
     if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
-    const live = typeof bot.chatRows === 'function' ? await bot.chatRows() : [];
-    const byId = new Map((live || []).filter((row) => row && row.id != null).map((row) => [String(row.id), row]));
-    return messages.map((message) => {
-      const hit = byId.get(String(message.id));
-      if (hit) return hit;
-      return {
-        ...message,
-        hasImage: stagingImageOnlyRow(message),
-      };
-    });
+    return bot.chatRows();
+  };
+  if (typeof bot.onStaging === 'function' && bot.dualTab) return bot.onStaging(read);
+  return read();
+}
+
+async function resolveStagingForwardIdOnSession(
+  bot,
+  imageIndex,
+  baseRowCount,
+  baseBufferCount,
+  o,
+) {
+  const { stagingFilled, uploaded } = o;
+  const resolveOpts = stagingFilled != null && uploaded != null ? { stagingFilled, uploaded } : null;
+  const pollMs = Number(o.pollMs) > 0 ? Number(o.pollMs) : STAGING_FORWARD_POLL_MS;
+  const deadline = Date.now() + pollMs;
+  let rows = [];
+  let reopened = false;
+  if (o.stagingUrl) await warmStagingChatView(bot);
+  while (Date.now() <= deadline) {
+    rows = await stagingRowsForForward(bot);
+    const id = stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount, resolveOpts);
+    if (id) return id;
+    if (
+      !reopened
+      && o.stagingUrl
+      && stagingForwardExpectsRows(o)
+      && !(rows || []).length
+    ) {
+      reopened = true;
+      await reopenStagingChat(bot, o.stagingUrl);
+    }
+    await sleep(POLL_MS * 5);
   }
-  if (typeof bot.scrollToBottom === 'function') await bot.scrollToBottom();
-  return bot.chatRows();
+  return stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount, resolveOpts);
 }
 
 export async function resolveStagingForwardId(
@@ -1361,18 +1594,14 @@ export async function resolveStagingForwardId(
   opts = null,
 ) {
   const o = opts && typeof opts === 'object' ? opts : {};
-  const { stagingFilled, uploaded } = o;
-  const resolveOpts = stagingFilled != null && uploaded != null ? { stagingFilled, uploaded } : null;
-  const pollMs = Number(o.pollMs) > 0 ? Number(o.pollMs) : STAGING_FORWARD_POLL_MS;
-  const deadline = Date.now() + pollMs;
-  let rows = [];
-  while (Date.now() <= deadline) {
-    rows = await stagingRowsForForward(bot);
-    const id = stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount, resolveOpts);
-    if (id) return id;
-    await sleep(POLL_MS * 5);
+  if (typeof bot.onStaging === 'function' && bot.dualTab) {
+    return bot.onStaging(() => resolveStagingForwardIdOnSession(bot, imageIndex, baseRowCount, baseBufferCount, o));
   }
-  return stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBufferCount, resolveOpts);
+  if (o.stagingUrl) {
+    await bot.openChat(o.stagingUrl);
+    await warmStagingChatView(bot);
+  }
+  return resolveStagingForwardIdOnSession(bot, imageIndex, baseRowCount, baseBufferCount, o);
 }
 
 // Rows that appeared after a staging send (join buffer may omit .yamb-message-row_own).
@@ -2273,80 +2502,93 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   async function startStagingPack() {
     if (!useStaging || stagingPackStarted) return;
     stagingPackStarted = true;
-    await bot.openChat(stagingUrl);
-    try {
-      const removed = await bot.clearChatResidue();
-      console.log(dir, 'staging-pack-start', 'cleared', removed);
-    } catch (e) {
-      console.log(dir, 'staging-pack-start', 'cleanup-skip', e && e.message ? e.message : e);
-    }
-    stagingBaseRowCount = null;
-    stagingBaseBufferCount = null;
-    await ensureStagingBase();
-    console.log(dir, 'staging-base', stagingBaseRowCount, 'buffer', stagingBaseBufferCount);
+    await bot.onStaging(async () => {
+      try {
+        const removed = await bot.clearChatResidue();
+        console.log(dir, 'staging-pack-start', 'cleared', removed);
+      } catch (e) {
+        console.log(dir, 'staging-pack-start', 'cleanup-skip', e && e.message ? e.message : e);
+      }
+      stagingBaseRowCount = null;
+      stagingBaseBufferCount = null;
+      await ensureStagingBase();
+      console.log(dir, 'staging-base', stagingBaseRowCount, 'buffer', stagingBaseBufferCount);
+    });
   }
 
   async function preloadStagingJoinChat() {
     if (!useStaging || stagingJoinPreloaded) return;
     stagingJoinPreloaded = true;
-    await bot.openChat(stagingUrl);
-    for (let i = 0; i < 4; i++) {
-      await bot.scrollToBottom();
-      await sleep(200);
-      await bot.chatRows();
-    }
+    await warmStagingChatView(bot);
   }
 
   async function ensureStagingBase() {
     if (stagingBaseRowCount != null) return;
-    await bot.openChat(stagingUrl);
     await bot.scrollToBottom();
     const rows = await bot.chatRows();
     stagingBaseRowCount = (rows || []).length;
     stagingBaseBufferCount = stagingBufferRows(rows).length;
   }
 
-  async function fillStagingWindow() {
+  async function fillStagingWindow(onBufferNote = async () => {}) {
     if (!useStaging) return;
     const need = stagingFillTo(tm.uploaded, stagingFilled, m.images.length, urls.stagingWindow);
     if (!need.length) return;
     await startStagingPack();
     await preloadStagingJoinChat();
-    await bot.openChat(stagingUrl);
-    await ensureStagingBase();
-    for (const idx of need) {
-      const item = m.images[idx];
-      const path = join(PACKS, dir, item.file);
-      console.log(dir, 'stage', item.file);
-      await bot.sendImageNoWait(path);
-      stagedIndices.add(idx);
-      stagingFilled = idx + 1;
-    }
-    await bot.openChat(botUrl);
+    await bot.onStaging(async () => {
+      await ensureStagingBase();
+      for (const idx of need) {
+        const item = m.images[idx];
+        const path = join(PACKS, dir, item.file);
+        console.log(dir, 'stage', item.file);
+        await onBufferNote(idx);
+        await bot.sendImageNoWait(path);
+        stagedIndices.add(idx);
+        stagingFilled = idx + 1;
+      }
+    });
   }
 
-  async function deliverImage(file, index, onWait) {
-    if (!useStaging) return bot.sendImage(file, { onWait });
-    await fillStagingWindow();
+  async function deliverImage(file, index, onWait, onSendNote = async () => {}) {
+    if (!useStaging) return bot.onBot(() => bot.sendImage(file, { onWait }));
+    await fillStagingWindow(async (idx) => note({
+      phase: adminPhaseForStagingStep('buffer'),
+      pack: m.title,
+      index: idx + 1,
+      total: m.images.length,
+      lastLine: lastText,
+    }));
     if (!stagedIndices.has(index)) {
-      await bot.openChat(stagingUrl);
-      await ensureStagingBase();
-      await bot.sendImageNoWait(file);
+      await bot.onStaging(async () => {
+        await ensureStagingBase();
+        await note({
+          phase: adminPhaseForStagingStep('buffer'),
+          pack: m.title,
+          index: index + 1,
+          total: m.images.length,
+          lastLine: lastText,
+        });
+        await bot.sendImageNoWait(file);
+      });
       stagedIndices.add(index);
       stagingFilled = Math.max(stagingFilled, index + 1);
     }
-    await bot.openChat(botUrl);
-    const thread = await bot.chatRows();
-    const baseline = (thread || []).filter((row) => row && !row.own).map(({ id, text, links }) => ({ id, text, links }));
-    const ownBeforeIds = ownIds(thread);
-    await bot.openChat(stagingUrl);
-    await ensureStagingBase();
+    const { baseline, ownBeforeIds } = await bot.onBot(async () => {
+      const thread = await bot.chatRows();
+      return {
+        baseline: (thread || []).filter((row) => row && !row.own).map(({ id, text, links }) => ({ id, text, links })),
+        ownBeforeIds: ownIds(thread),
+      };
+    });
+    await onSendNote(index);
     const ownId = await resolveStagingForwardId(bot, index, stagingBaseRowCount, stagingBaseBufferCount, {
       stagingFilled,
       uploaded: tm.uploaded,
+      stagingUrl,
     });
     if (!ownId) {
-      const snap = await bot.chatRows();
+      const snap = await stagingRowsForForward(bot);
       throw new Error(
         `staging forward: image ${index} not found (base rows ${stagingBaseRowCount}, `
         + `${(snap || []).length} rows, ${stagingImageRows(snap).length} with img, `
@@ -2355,7 +2597,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     }
     console.log(dir, 'forward', m.images[index].file, 'id', ownId);
     try {
-      await bot.forwardOwnToBot(ownId, botUrl);
+      await bot.onStaging(() => bot.forwardOwnToBot(ownId, botUrl));
     } catch (e) {
       if (!stagingForwardMenuBlocked(e)) throw e;
       const msg = e && e.message ? String(e.message) : String(e);
@@ -2367,18 +2609,21 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
         total: m.images.length,
         lastLine: 'пересылка недоступна — прямая отправка файла',
       });
-      await bot.openChat(botUrl);
-      return bot.sendImage(file, { onWait });
+      return bot.onBot(async () => {
+        if (!bot.dualTab) await bot.openChat(botUrl);
+        return bot.sendImage(file, { onWait });
+      });
     }
-    return bot.waitForReply(baseline, { until: 'sticker', ownBeforeIds, onWait });
+    return bot.onBot(() => bot.waitForReply(baseline, { until: 'sticker', ownBeforeIds, onWait }));
   }
 
   for (let i = tm.uploaded; i < m.images.length; i++) {
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
-    if (useStaging) await fillStagingWindow();
     console.log(dir, useStaging ? 'forward-send' : 'send', img.file);
-    await note({ phase: 'sending', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
+    if (!useStaging) {
+      await note({ phase: 'sending', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
+    }
     const onWait = (seconds, seenLine) => note({
       phase: 'waiting',
       pack: m.title,
@@ -2407,18 +2652,28 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
         lastLine: waitLastLine(30, reply.text || 'нет ответа, перезагрузка'),
       });
       if (useStaging && outboundStep === 'image') stagedIndices.delete(i);
-      await bot.openChat(botUrl);
-      await bot.recoverChat();
+      await bot.onBot(() => bot.recoverChat());
     };
     while (!accepted) {
       let reply;
       if (outboundStep === 'image') {
-        await bot.openChat(botUrl);
-        reply = await deliverImage(file, i, onWait);
+        reply = await deliverImage(
+          file,
+          i,
+          onWait,
+          async () => note({
+            phase: adminPhaseForStagingStep('send'),
+            pack: m.title,
+            index: i + 1,
+            total: m.images.length,
+            lastLine: lastText,
+          }),
+        );
       } else {
-        await bot.openChat(botUrl);
-        const text = emojiAnswerText || emojiAnswer('', img.emoji);
-        reply = await bot.say(text, { onWait, until: 'sticker' });
+        reply = await bot.onBot(async () => {
+          const text = emojiAnswerText || emojiAnswer('', img.emoji);
+          return bot.say(text, { onWait, until: 'sticker' });
+        });
       }
       const shown = String(reply.text || '').replace(/\s+/g, ' ').trim();
       console.log(dir, 'bot', outboundStep, reply.kind, shown.slice(0, 180));
@@ -2451,15 +2706,17 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       }
       let done = reply;
       if (outboundStep === 'emoji' && reply.kind === 'emoji') {
-        await bot.openChat(botUrl);
-        done = await bot.say('🙂', { onWait, until: 'sticker' });
+        done = await bot.onBot(async () => {
+          let step = await bot.say('🙂', { onWait, until: 'sticker' });
+          if (step.kind === 'emoji') {
+            const baseline = await bot.botRows();
+            step = await bot.waitForReply(baseline, { onWait, until: 'sticker' });
+          }
+          return step;
+        });
         if (done.kind === 'stall') {
           await recoverFromStall(done, 'зависание после эмодзи');
           continue;
-        }
-        if (done.kind === 'emoji') {
-          const baseline = await bot.botRows();
-          done = await bot.waitForReply(baseline, { onWait, until: 'sticker' });
         }
         if (done.kind === 'stall') {
           await recoverFromStall(done, 'зависание после эмодзи');
@@ -2508,9 +2765,8 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     return;
   }
   let readyText = lastText;
-  await bot.openChat(botUrl);
   if (finalizeDecision(readyText).action !== 'done') {
-    const seen = await bot.recentIncoming(1);
+    const seen = await bot.onBot(() => bot.recentIncoming(1));
     readyText = seen.text;
     const shown = String(readyText || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'last-reply', shown.slice(0, 400));
@@ -2560,12 +2816,9 @@ async function cleanupStagingChats(bot, packTitle, dirSlug) {
   const urls = loadTelemostUrls();
   if (!urls.stagingEnabled || !urls.stagingUrl) return;
   const stagingUrl = bot.stagingUrl || urls.stagingUrl;
-  const botUrl = bot.botUrl || urls.botUrl;
   try {
-    await bot.openChat(stagingUrl);
-    const stagingRemoved = await bot.clearChatResidue();
-    await bot.openChat(botUrl);
-    const botRemoved = await bot.clearChatResidue();
+    const stagingRemoved = await bot.onStaging(() => bot.clearChatResidue());
+    const botRemoved = await bot.onBot(() => bot.clearChatResidue());
     console.log(dirSlug, 'cleanup', 'staging', stagingRemoved, 'bot', botRemoved);
     log(packTitle, '', 'очистка чатов', `staging ${stagingRemoved}, bot ${botRemoved}`);
   } catch (e) {
@@ -2747,10 +3000,12 @@ async function main() {
   const skipped = dirs.filter((dir) => !dirsForRun([dir], { finalize, close }).length);
   if (skipped.length) console.log('skip', skipped.join(' '));
   dirs = dirsForRun(dirs, { finalize, close });
-  const c = await connect();
   const urls = loadTelemostUrls();
-  const bot = new Bot(c, urls);
-  if (urls.stagingEnabled) console.log('staging', urls.stagingUrl, 'window', urls.stagingWindow);
+  const sessions = await connect(urls);
+  const bot = new Bot(sessions, urls);
+  if (urls.stagingEnabled) {
+    console.log('staging', urls.stagingUrl, 'window', urls.stagingWindow, sessions.dualTab ? 'dual-tab' : 'single-tab');
+  }
   const dirRef = { dir: '', title: '' };
   const note = openAdminFeed(dirRef);
   if (peek) {
@@ -2760,7 +3015,7 @@ async function main() {
       log('restart', '', 'остановлено', e.message);
       process.exitCode = 1;
     }
-    c.close();
+    sessions.close();
     return;
   }
   if (drainOnly) {
@@ -2771,7 +3026,7 @@ async function main() {
       log('drain', '', 'остановлено', e.message);
       process.exitCode = 1;
     }
-    c.close();
+    sessions.close();
     return;
   }
   if (restart) {
@@ -2786,7 +3041,7 @@ async function main() {
       await note({ phase: 'error', pack: dirRef.title || 'перезапуск', error: e.message });
       process.exitCode = 1;
     }
-    c.close();
+    sessions.close();
     return;
   }
   for (const d of dirs) {
@@ -2810,7 +3065,7 @@ async function main() {
       process.exitCode = 1;
     }
   }
-  c.close();
+  sessions.close();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
