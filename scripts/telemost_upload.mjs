@@ -445,31 +445,119 @@ class Bot {
     return false;
   }
 
+  async dismissOverlay() {
+    await this.c.ev(`(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+      document.body && document.body.click();
+    })()`);
+    await sleep(80);
+  }
+
+  async waitForContextMenu(maxMs = 2500) {
+    const steps = Math.max(1, Math.ceil(maxMs / POLL_MS));
+    for (let i = 0; i < steps; i++) {
+      const open = await this.c.ev(`(() => {
+        const nodes = [...document.querySelectorAll('[role="menu"], [role="menuitem"], [class*="ContextMenu" i], [class*="MenuList" i], [class*="Popup" i] [role="button"]')];
+        return nodes.some((e) => {
+          const r = e.getBoundingClientRect();
+          return r.width > 4 && r.height > 4;
+        });
+      })()`);
+      if (open) return true;
+      await sleep(POLL_MS);
+    }
+    return false;
+  }
+
+  async clickAnyMenuLabel(labels) {
+    const lit = JSON.stringify((labels || STAGING_FORWARD_MENU_LABELS).map(String));
+    for (let i = 0; i < 40; i++) {
+      const ok = await this.c.ev(`(() => {
+        const labels = ${lit};
+        const match = (e) => {
+          if (!e || !e.getBoundingClientRect) return false;
+          const r = e.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) return false;
+          const aria = (e.getAttribute('aria-label') || '').trim();
+          const text = (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim();
+          for (const label of labels) {
+            const L = String(label);
+            if (aria === L || text === L) return true;
+            if (text.startsWith(L + ' ') || aria.startsWith(L)) return true;
+            if (L.length >= 4 && (text.includes(L) || aria.includes(L))) return true;
+          }
+          return false;
+        };
+        const popups = [...document.querySelectorAll('[role="menu"], [role="dialog"], [class*="Popup" i], [class*="popup" i]')]
+          .filter((e) => e.getBoundingClientRect().width > 4);
+        const scopes = popups.length ? popups : [document.body];
+        for (const scope of scopes) {
+          const nodes = [...scope.querySelectorAll('button, [role="menuitem"], [role="button"], [aria-label], a, li, span, div')];
+          const el = nodes.find(match);
+          if (el) {
+            el.click();
+            return true;
+          }
+        }
+        return false;
+      })()`);
+      if (ok) return true;
+      await sleep(POLL_MS);
+    }
+    return false;
+  }
+
   async openMessageMenu(ownId) {
     const id = JSON.stringify(String(ownId));
-    const opened = await this.c.ev(`(() => {
-      const want = ${id};
-      const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
-      if (!row) return false;
-      row.scrollIntoView({ block: 'center' });
-      const r = row.getBoundingClientRect();
-      const x = r.x + Math.min(r.width - 4, Math.max(4, r.width * 0.5));
-      const y = r.y + Math.min(r.height - 4, Math.max(4, r.height * 0.5));
-      const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2, buttons: 2 };
-      row.dispatchEvent(new MouseEvent('contextmenu', opts));
-      const btn = row.querySelector('[aria-label="Действия с сообщением"], [aria-label="Ещё"], button[aria-haspopup="menu"]');
-      if (btn) btn.click();
-      return true;
-    })()`);
-    if (!opened) throw new Error(`staging forward: message ${ownId} not found`);
-    await sleep(200);
+    let sawRow = false;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const useButton = attempt % 2 === 0;
+      const step = await this.c.ev(`(() => {
+        const want = ${id};
+        const row = [...document.querySelectorAll('article.message')].find((a) => a.dataset.tg2tmId === want);
+        if (!row) return { ok: false, reason: 'missing' };
+        row.scrollIntoView({ block: 'center' });
+        const r = row.getBoundingClientRect();
+        const x = r.x + Math.min(r.width - 4, Math.max(4, r.width * 0.5));
+        const y = r.y + Math.min(r.height - 4, Math.max(4, r.height * 0.5));
+        for (const type of ['mouseover', 'mouseenter', 'mousemove']) {
+          row.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+        }
+        const btnSel = '[aria-label="Действия с сообщением"], [aria-label="Ещё"], [aria-label="More actions"], [aria-label="Message actions"], button[aria-haspopup="menu"]';
+        const useButton = ${useButton ? 'true' : 'false'};
+        if (useButton) {
+          const btn = row.querySelector(btnSel);
+          if (btn) btn.click();
+          else return { ok: true, reason: 'no-btn' };
+        } else {
+          const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2, buttons: 2 };
+          row.dispatchEvent(new MouseEvent('contextmenu', opts));
+        }
+        return { ok: true, reason: useButton ? 'btn' : 'ctx' };
+      })()`);
+      if (!step || !step.ok) {
+        if (step && step.reason === 'missing') break;
+        continue;
+      }
+      sawRow = true;
+      if (await this.waitForContextMenu(1800)) return;
+      await sleep(120);
+    }
+    if (!sawRow) throw new Error(`staging forward: message ${ownId} not found`);
   }
 
   // Forward one staging bubble into the stickers bot chat (no disk upload there).
   async forwardOwnToBot(ownId, botUrl = this.botUrl) {
     await this.scrollToBottom();
-    await this.openMessageMenu(ownId);
-    if (!(await this.clickLabel('Переслать'))) {
+    let pickedForward = false;
+    for (let attempt = 0; attempt < 3 && !pickedForward; attempt++) {
+      if (attempt) await this.dismissOverlay();
+      await this.openMessageMenu(ownId);
+      await sleep(attempt === 0 ? 250 : 400);
+      pickedForward = await this.clickAnyMenuLabel(STAGING_FORWARD_MENU_LABELS);
+      if (!pickedForward) pickedForward = await this.clickLabel('Переслать');
+    }
+    if (!pickedForward) {
       throw new Error('staging forward: Переслать not found');
     }
     await sleep(300);
@@ -831,6 +919,21 @@ export function stagingForwardMessageId(rows, imageIndex, baseRowCount, baseBuff
 }
 
 export const STAGING_FORWARD_POLL_MS = 8000;
+
+export const STAGING_FORWARD_MENU_LABELS = Object.freeze(['Переслать', 'Forward']);
+
+// Match Telemost/Yamb context menu rows (exact label, prefix, or substring for RU/EN).
+export function menuLabelMatches(text, aria, labels = STAGING_FORWARD_MENU_LABELS) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  const a = String(aria || '').trim();
+  for (const label of labels) {
+    const L = String(label);
+    if (a === L || t === L) return true;
+    if (t.startsWith(`${L} `) || a.startsWith(L)) return true;
+    if (L.length >= 4 && (t.includes(L) || a.includes(L))) return true;
+  }
+  return false;
+}
 
 export async function stagingRowsForForward(bot) {
   if (typeof bot.surveyChat === 'function') {
