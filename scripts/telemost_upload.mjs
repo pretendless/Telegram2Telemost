@@ -1842,9 +1842,36 @@ export function isEmojiRequest(text) {
   return EMOJI_ONLY.test(core);
 }
 
+export function notAnImageReply(text) {
+  return /не картинк/i.test(String(text || ''));
+}
+
+export function notAnImageStop(text, runUrl) {
+  const shown = String(text || '').replace(/\s+/g, ' ').trim();
+  const url = String(runUrl || '').trim();
+  const msg = `bot rejected a non-image («Это не картинка»): ${shown}`;
+  return url ? `${msg} ${url}` : msg;
+}
+
+export function pictureNotAskedError(text, runUrl) {
+  const shown = String(text || '').replace(/\s+/g, ' ').trim();
+  if (notAnImageReply(shown)) return notAnImageStop(shown, runUrl);
+  const url = String(runUrl || '').trim();
+  const msg = `bot has not asked for a picture yet: ${shown}`;
+  return url ? `${msg} ${url}` : msg;
+}
+
+// Forward only a real buffer image, and only after the bot asked for one.
+export function canForwardBufferImage(botText, bubble) {
+  if (!bubble || bubble.hasImage !== true || bubble.id == null) return false;
+  if (notAnImageReply(botText)) return false;
+  return wantsPicture(botText);
+}
+
 export function imageReply(text) {
   const body = String(text || '');
   if (!body.trim()) return 'pending';
+  if (notAnImageReply(body)) return 'not-image';
   if (READY.test(body)) return 'ready';
   if (isEmojiRequest(body)) return 'emoji';
   if (IMAGE_FAIL.test(body)) return 'reject';
@@ -3276,6 +3303,9 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     const opened = await withRetry('newpack', () => bot.say('/newpack'));
     const openedText = String(opened.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'newpack-reply', openedText.slice(0, 400));
+    if (notAnImageReply(openedText)) {
+      throw new Error(notAnImageStop(openedText, actionsRunUrl()));
+    }
     const step = afterNewpack(opened.text);
     if (step === 'open') {
       throw new Error(`pack dialog already open; not sending /start or /done: ${openedText.slice(0, 200)}`);
@@ -3292,7 +3322,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     }
     if (!wantsPicture(picture.text)) {
       const shown = String(picture.text || '').replace(/\s+/g, ' ').trim();
-      throw new Error(`bot has not asked for a picture yet: ${shown.slice(0, 200)}`);
+      throw new Error(pictureNotAskedError(shown.slice(0, 200), actionsRunUrl()));
     }
     tm.created = true;
     tm.uploaded = 0;
@@ -3407,12 +3437,17 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       const rows = await bot.chatRows();
       return bufferBatchBubble(rows, stagingBaseImageCount, batchSize, indexInBatch);
     });
-    if (!bubble || bubble.id == null) {
+    if (!bubble || bubble.id == null || bubble.hasImage !== true) {
       const snap = await bot.onStaging(() => bot.chatRows());
       throw new Error(
         `staging forward: image ${index + 1} not in buffer (base ${stagingBaseImageCount}, `
-        + `msgCount=${bufferImageCount(snap)}, batch ${batchSize})`,
+        + `msgCount=${bufferImageCount(snap)}, batch ${batchSize}) ${actionsRunUrl()}`.trim(),
       );
+    }
+    const pictureAsk = await bot.onBot(async () => latestIncomingText(await bot.recentIncoming(2)));
+    if (notAnImageReply(pictureAsk)) throw new Error(notAnImageStop(pictureAsk, actionsRunUrl()));
+    if (!canForwardBufferImage(pictureAsk, bubble)) {
+      throw new Error(pictureNotAskedError(pictureAsk, actionsRunUrl()));
     }
     console.log(forwardSubmenuLogLine(index + 1, m.images.length, targetName));
     await bot.onStaging(() => bot.forwardOwnToBot(bubble.id, botUrl, targetName));
@@ -3479,6 +3514,9 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       }
       const shown = String(reply.text || '').replace(/\s+/g, ' ').trim();
       console.log(botReplyLogLine(i + 1, m.images.length, `${outboundStep} ${reply.kind} ${shown.slice(0, 180)}`));
+      if (reply.kind === 'not-image' || notAnImageReply(shown)) {
+        throw new Error(notAnImageStop(shown, actionsRunUrl()));
+      }
       if (reply.kind === 'stall' || afterSendReply(reply.kind) === 'recover') {
         await recoverFromStall(reply, outboundStep === 'image' ? 'зависание, перезагрузка' : 'зависание после эмодзи');
         continue;
