@@ -10,7 +10,7 @@ import {
   githubHeaders,
 } from "./dispatch.js";
 import { shouldStartPipeline } from "../worker/src/logic.js";
-import { QUEUE_REASON, nextQueuePackTitle, withPackTitle } from "./dispatch_reason.js";
+import { QUEUE_REASON, queuePipelineReason } from "./dispatch_reason.js";
 
 async function readRuns(fetchImpl, listUrl, headers) {
   const response = await fetchImpl(listUrl, { headers });
@@ -42,10 +42,9 @@ export async function startPipelineIfIdle(fetchImpl, env, queue, { dispatchReaso
     return { started: false, reason: page.runs.length ? "busy" : "empty" };
   }
   const chatId = String(env.TELEMOST_ADMIN_CHAT_ID || ADMIN_CHAT_ID);
-  const reason = withPackTitle(
-    dispatchReason || QUEUE_REASON.autostart,
-    nextQueuePackTitle(queue),
-  );
+  const reason = queuePipelineReason(dispatchReason || QUEUE_REASON.autostart, queue, {
+    preferQueued: true,
+  });
   const dispatched = await dispatchWorkflow(fetchImpl, {
     token,
     repo: env.GH_REPO || DEFAULT_REPO,

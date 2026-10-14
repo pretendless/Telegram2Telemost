@@ -413,7 +413,7 @@ function packProgressTerminal(pack) {
 // Reset stuck "uploading" rows when Actions is not running (admin /unstick).
 // Rows whose pack progress is already done/error are marked done/error in the queue
 // instead of being re-queued (avoids re-uploading the same request).
-export function unstickUploadingQueue(queue, { packForItem = null } = {}) {
+export function unstickUploadingQueue(queue, { packForItem = null, terminalOnly = false } = {}) {
   const stuck = (queue.items || []).filter((item) => item.status === "uploading");
   if (!stuck.length) return { queue, changed: false, reason: "none", released: [], finished: [] };
   let changed = false;
@@ -430,6 +430,7 @@ export function unstickUploadingQueue(queue, { packForItem = null } = {}) {
         return { ...item, status };
       }
     }
+    if (terminalOnly) return item;
     changed = true;
     released.push(item);
     return { ...item, status: "queued" };
@@ -474,9 +475,13 @@ export function skipReply({ reason, skipped, actionsRunning }) {
   return `Пропустил ${titles} (ошибка в очереди). Запускаю следующий пак, если очередь не пуста.`;
 }
 
-export function unstickReply({ reason, released, finished, actionsRunning }) {
+export function unstickReply({ reason, released, finished, actionsRunning, cleanedWhileRunning = false }) {
   if (actionsRunning) {
-    return "Сейчас идёт запуск Actions — строку «загружается» не трогаю.";
+    if (cleanedWhileRunning && (finished || []).length) {
+      const titles = finished.map((item) => `«${item.title}»`).join(", ");
+      return `Сейчас идёт Actions — строку «загружается» не снимаю. Закрыл в очереди как готовый: ${titles} (прогресс в KV уже был завершён). Когда run закончится, при необходимости снова /unstick или /skip.`;
+    }
+    return "Сейчас идёт запуск Actions — строку «загружается» не трогаю. Если run оборвётся, повторите /unstick (или /skip).";
   }
   if (reason === "none" || (!released.length && !(finished || []).length)) {
     return "Зависших строк «загружается» нет.";

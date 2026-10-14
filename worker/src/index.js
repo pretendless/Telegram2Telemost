@@ -328,11 +328,39 @@ async function writeQueue(kv, queue) {
   await kv.put(QUEUE_KEY, JSON.stringify(queue));
 }
 
+async function packProgressByUploadingId(kv, queue) {
+  const packByItemId = {};
+  for (const item of queue.items) {
+    if (item.status !== "uploading") continue;
+    packByItemId[item.id] = await readPackProgress(kv, item);
+  }
+  return packByItemId;
+}
+
+async function reconcileTerminalUploadingQueue(kv, queue) {
+  const packByItemId = await packProgressByUploadingId(kv, queue);
+  return unstickUploadingQueue(queue, {
+    packForItem: (item) => packByItemId[item.id] || null,
+    terminalOnly: true,
+  });
+}
+
 function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
-  const run = () =>
-    startPipelineIfIdle(deps.fetch || fetch, env, queue, { dispatchReason }).catch((err) => {
+  const run = async () => {
+    try {
+      let q = queue;
+      if (env.BOT_KV) {
+        const reconciled = await reconcileTerminalUploadingQueue(env.BOT_KV, q);
+        if (reconciled.changed) {
+          await writeQueue(env.BOT_KV, reconciled.queue);
+          q = reconciled.queue;
+        }
+      }
+      await startPipelineIfIdle(deps.fetch || fetch, env, q, { dispatchReason });
+    } catch (err) {
       console.error("pipeline start failed", err && err.message);
-    });
+    }
+  };
   if (deps.waitUntil) deps.waitUntil(run());
   else run();
 }
@@ -539,7 +567,20 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       const fetchImpl = deps.fetch || fetch;
       const actionsRunning = await telemostRunActive(fetchImpl, env);
       if (actionsRunning) {
-        out = unstickReply({ reason: "none", released: [], finished: [], actionsRunning: true });
+        const queue = await readQueue(env.BOT_KV);
+        const packByItemId = await packProgressByUploadingId(env.BOT_KV, queue);
+        const cleaned = unstickUploadingQueue(queue, {
+          packForItem: (item) => packByItemId[item.id] || null,
+          terminalOnly: true,
+        });
+        if (cleaned.changed) await writeQueue(env.BOT_KV, cleaned.queue);
+        out = unstickReply({
+          reason: cleaned.reason,
+          released: [],
+          finished: cleaned.finished,
+          actionsRunning: true,
+          cleanedWhileRunning: cleaned.changed,
+        });
       } else {
         const queue = await readQueue(env.BOT_KV);
         const kv = env.BOT_KV;
@@ -598,7 +639,15 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       send,
       fetch: deps.fetch,
       sleep: deps.sleep,
-      getQueue: async () => readQueue(env.BOT_KV),
+      getQueue: async () => {
+        let queue = await readQueue(env.BOT_KV);
+        const reconciled = await reconcileTerminalUploadingQueue(env.BOT_KV, queue);
+        if (reconciled.changed) {
+          await writeQueue(env.BOT_KV, reconciled.queue);
+          return reconciled.queue;
+        }
+        return queue;
+      },
     });
     return;
   } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
