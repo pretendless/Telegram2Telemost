@@ -3075,7 +3075,10 @@ function openAdminFeed(dirRef) {
       }
     },
     onDelivered: (event, delivery) => {
-      if (!delivery || delivery.action === 'skip' || !dirRef.dir) return;
+      // A repeated admin card is "skip", but the queue still needs this /progress.
+      // Run 38644156549 sent the link card, then skipped the second post, and
+      // claim kept returning the uploading row for hours.
+      if (!delivery || !dirRef.dir) return;
       const fields = progressFieldsForPack(dirRef);
       const fresh = event.phase === 'start' || event.phase === 'newpack';
       const index = fresh ? 0 : Number(event.index);

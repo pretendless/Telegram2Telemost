@@ -7,7 +7,9 @@ import {
   formatPackFetchError,
   nextDrainWait,
   drainClaimAction,
+  finishedClaimLoop,
   parseDrainIdleMs,
+  releaseBodyForFinishedClaim,
   shouldWaitForQueue,
   spawnFailureDetail,
 } from './queue_drain.mjs';
@@ -22,6 +24,22 @@ test('a finished request is not uploaded again when claim returns it', () => {
   assert.equal(drainClaimAction({ id: 'tom', title: 'Tom & Jerry' }, finished), 'skip-finished');
   assert.equal(drainClaimAction({ id: 'dya', title: 'Дьяволица' }, finished), 'upload');
   assert.equal(drainClaimAction(null, finished), 'idle');
+  assert.equal(finishedClaimLoop('skip-finished'), 'release-and-stop');
+  assert.equal(finishedClaimLoop('upload'), 'continue');
+});
+
+test('a still-claimed finished pack is released with its sticker URL', () => {
+  const saved = releaseBodyForFinishedClaim({
+    title: 'Шерсть Ебаная',
+    images: new Array(109),
+    telemost: { status: 'done', uploaded: 109, packUrl: 'https://messenger.360.yandex.ru/#/stickers/8506' },
+  }, { title: 'Шерсть Ебаная' });
+  assert.equal(saved.status, 'done');
+  assert.equal(saved.packUrl, 'https://messenger.360.yandex.ru/#/stickers/8506');
+  assert.equal(saved.uploaded, 109);
+  const missing = releaseBodyForFinishedClaim({ title: 'Шерсть Ебаная', telemost: { packUrl: null } }, { title: 'Шерсть Ебаная' });
+  assert.equal(missing.status, 'error');
+  assert.equal(missing.packUrl, null);
 });
 
 test('nextDrainWait uploads when claim returns a row', () => {

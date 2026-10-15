@@ -4,9 +4,10 @@
 // New high-priority rows wait until the active uploading row is released. Matches claimNext() in the Worker.
 
 import { spawnSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { actionsRunUrl, clearPackProgress } from './admin_status.mjs';
+import { actionsRunUrl, clearPackProgress, postProgress } from './admin_status.mjs';
 import { claimQueueItem, postDrainComplete, queueCredentialsReadable } from './queue_client.mjs';
 import { writeRequestPack } from './restart_prepare.mjs';
 import { POST_SAVE_STEP_MS, POST_SAVE_STEPS, isStepTimeout, withStepTimeout } from './step_timeout.mjs';
@@ -42,6 +43,83 @@ export function drainClaimAction(claimed, finishedIds) {
   if (!claimed || !claimed.id) return 'idle';
   if (finishedIds && finishedIds.has(String(claimed.id))) return 'skip-finished';
   return 'upload';
+}
+
+// Claim handed back a row this session already finished. Another sleep only
+// repeats that claim. Release it once and leave the loop.
+export function finishedClaimLoop(action) {
+  return action === 'skip-finished' ? 'release-and-stop' : 'continue';
+}
+
+export function releaseBodyForFinishedClaim(packMeta, item) {
+  const meta = packMeta && typeof packMeta === 'object' ? packMeta : {};
+  const tm = meta.telemost && typeof meta.telemost === 'object' ? meta.telemost : {};
+  const title = String((item && item.title) || meta.title || 'пак');
+  const images = Array.isArray(meta.images) ? meta.images.length : 0;
+  const uploaded = Number(tm.uploaded) || images || 0;
+  const total = images || uploaded;
+  const url = typeof tm.packUrl === 'string' ? tm.packUrl.trim() : '';
+  const real = /\/stickers\//.test(url) && !/addstickers/i.test(url);
+  if (real) {
+    return {
+      status: 'done',
+      title,
+      uploaded: total || uploaded,
+      total: total || uploaded,
+      packUrl: url,
+      phase: 'link',
+      error: null,
+    };
+  }
+  return {
+    status: 'error',
+    title,
+    uploaded,
+    total,
+    packUrl: null,
+    phase: 'error',
+    error: 'очередь снова вернула уже завершённый набор',
+  };
+}
+
+function requestSlug(id) {
+  return ('request-' + String(id || 'next').replace(/[^A-Za-z0-9_-]/g, '')).slice(0, 48);
+}
+
+function readPackMeta(slug) {
+  try {
+    return JSON.parse(readFileSync(join(ROOT, 'packs', slug, 'pack.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function releaseStillClaimed(ctx, item, fetchImpl, progressUrl, secret) {
+  const slug = (ctx.dirRef && ctx.dirRef.dir) || requestSlug(item && item.id);
+  const body = releaseBodyForFinishedClaim(readPackMeta(slug), item);
+  const runUrl = actionsRunUrl();
+  console.log('queue-drain release still-claimed', body.title, body.status, body.packUrl || body.error);
+  await withStepTimeout(POST_SAVE_STEPS.queueRelease, POST_SAVE_STEP_MS, (signal) => postProgress(
+    fetchImpl,
+    progressUrl,
+    secret,
+    {
+      slug,
+      title: body.title,
+      status: body.status,
+      uploaded: body.uploaded,
+      total: body.total,
+      packUrl: body.packUrl,
+      error: body.error,
+      runUrl,
+      phase: body.phase,
+      queueRequestId: item && item.id ? String(item.id) : null,
+      requesterChatId: item && item.chatId ? String(item.chatId) : null,
+      requester: item && item.chatId ? String(item.chatId) : null,
+      sessionDrain: true,
+    },
+    { signal },
+  ), { runUrl });
 }
 
 export function nextDrainWait({ claimed, queued, now, idleDeadline, idleMs, sawWork = false }) {
@@ -192,10 +270,16 @@ export async function drainRemainingQueue(ctx) {
     sawWork = true;
     idleDeadline = null;
     const item = claim.claimed;
-    if (drainClaimAction(item, finishedIds) === 'skip-finished') {
+    if (finishedClaimLoop(drainClaimAction(item, finishedIds)) === 'release-and-stop') {
       console.log('queue-drain skip finished', item.title);
-      await sleep(pollMs);
-      continue;
+      console.log('queue-drain stop: finished row still claimed', item.title);
+      try {
+        await releaseStillClaimed(ctx, item, fetchImpl, progressUrl, secret);
+      } catch (err) {
+        console.log('queue-drain release failed', err && err.message ? err.message : err);
+        if (isStepTimeout(err)) throw err;
+      }
+      break;
     }
     const target = {
       title: item.title,
