@@ -98,7 +98,7 @@ test("a trimmed name of 100 characters advances and 101 stays on the name", asyn
 
   const asked = await say(env, 7, ` ${okName} `);
   assert.equal(asked[0].reply, createLinksPrompt(okName));
-  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: okName });
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: okName, sets: [] });
   assert.equal(nameStepResult(okName).ok, true);
   assert.equal(nameStepResult(`\n${longName}\n`).reason, "long");
 });
@@ -109,8 +109,10 @@ test("a name asks for links and warns that the total must not exceed 150", async
   const asked = await say(env, 7, "  Лисёнок  ");
   assert.equal(asked[0].reply, createLinksPrompt("Лисёнок"));
   assert.match(asked[0].reply, /t\.me\/addstickers/);
+  assert.match(asked[0].reply, /стикер из набора/);
+  assert.match(asked[0].reply, /\/done/);
   assert.match(asked[0].reply, new RegExp(`не больше ${MAX_STICKERS}`));
-  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Лисёнок" });
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Лисёнок", sets: [] });
 });
 
 test("a missing set names that set and asks for links again", async () => {
@@ -124,10 +126,13 @@ test("a missing set names that set and asks for links again", async () => {
     },
   });
   assert.match(failed[0].reply, /Набор «gone» не найден/);
-  assert.match(failed[0].reply, /ещё раз/);
-  assert.match(failed[0].reply, /«Лис» сохранено/);
+  assert.match(failed[0].reply, /Добавлено 4, всего 4 из 150/);
   assert.equal(env.BOT_KV.store.get("queue"), undefined);
-  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Лис" });
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), {
+    step: "links",
+    title: "Лис",
+    sets: [{ name: "fox", count: 4 }],
+  });
 });
 
 test("more than 150 stickers reports the total and keeps the name", async () => {
@@ -140,11 +145,10 @@ test("more than 150 stickers reports the total and keeps the name", async () => 
     "https://t.me/addstickers/minty_vk\nhttps://t.me/addstickers/minty2_vk",
     { stickerCount: async () => 80 },
   );
-  assert.match(failed[0].reply, /Всего 160 стикеров/);
-  assert.match(failed[0].reply, /160 > 150/);
-  assert.match(failed[0].reply, /«Минто» сохранено/);
+  assert.match(failed[0].reply, /дали бы 160 стикеров, лимит 150/);
+  assert.match(failed[0].reply, /Всего 0 из 150/);
   assert.equal(env.BOT_KV.store.get("queue"), undefined);
-  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Минто" });
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Минто", sets: [] });
 });
 
 test("valid links enqueue the saved title and clear the dialog", async () => {
@@ -152,9 +156,12 @@ test("valid links enqueue the saved title and clear the dialog", async () => {
   env.BOT_KV.store.set("meta:seeded", "1");
   await say(env, 7, "/create");
   await say(env, 7, "Лисёнок");
-  const accepted = await say(env, 7, "не ссылка\nhttps://t.me/addstickers/fox_one\nhttps://t.me/addstickers/fox_two", {
+  const added = await say(env, 7, "не ссылка\nhttps://t.me/addstickers/fox_one\nhttps://t.me/addstickers/fox_two", {
     stickerCount: async (_env, name) => (name === "fox_one" ? 3 : 4),
   });
+  assert.match(added[0].reply, /Добавлено 7, всего 7 из 150/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /Запрос принят/);
   assert.match(accepted[0].reply, /«Лисёнок»/);
   assert.match(accepted[0].reply, /href="https:\/\/t\.me\/addstickers\/fox_one">#<\/a>/);
@@ -192,9 +199,10 @@ test("/create restarts at the name and drops a saved title", async () => {
   assert.equal(env.BOT_KV.store.get("queue"), undefined);
 
   await say(env, 7, "Другой");
-  const accepted = await say(env, 7, "https://t.me/addstickers/fox", {
+  await say(env, 7, "https://t.me/addstickers/fox", {
     stickerCount: async () => 5,
   });
+  const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /«Другой»/);
   assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].title, "Другой");
 });
@@ -207,15 +215,16 @@ test("another command keeps its reply and the half-finished create state", async
   const status = await say(env, 7, "/status");
   assert.match(status[0].reply, /Активных запросов нет/);
   assert.doesNotMatch(status[0].reply, /название/);
-  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Лис" });
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Лис", sets: [] });
 
   const restart = await say(env, 7, "/restart");
   assert.equal(restart[0].reply, "Эта команда только для администратора.");
-  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Лис" });
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Лис", sets: [] });
 
-  const accepted = await say(env, 7, "https://t.me/addstickers/fox", {
+  await say(env, 7, "https://t.me/addstickers/fox", {
     stickerCount: async () => 2,
   });
+  const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /«Лис»/);
   assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].title, "Лис");
 });
@@ -230,9 +239,10 @@ test("after a missing set the same name is queued when the links are valid", asy
       throw new Error("missing");
     },
   });
-  const accepted = await say(env, 7, "https://t.me/addstickers/fox", {
+  await say(env, 7, "https://t.me/addstickers/fox", {
     stickerCount: async () => 6,
   });
+  const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /«Лис»/);
   assert.match(accepted[0].reply, /Всего 6 стикеров/);
   assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].stickers, 6);
@@ -286,7 +296,12 @@ test("judgeCreateLinks and the name step are pure", () => {
   assert.deepEqual(decodeAwaitCreate(encodeAwaitCreate({ step: "links", title: "Кот" })), {
     step: "links",
     title: "Кот",
+    sets: [],
   });
+  assert.deepEqual(
+    decodeAwaitCreate(encodeAwaitCreate({ step: "links", title: "Кот", sets: [{ name: "a", count: 3 }, { name: "bad name", count: 1 }] })).sets,
+    [{ name: "a", count: 3 }],
+  );
 });
 
 const OLD_LINK = "https://t.me/addstickers/p8502935020_1791999310374124782_by_creastikersbot";
@@ -318,7 +333,8 @@ test("a new title with the same finished links enqueues", async () => {
   seedDone(env, "test", [OLD_LINK]);
   await say(env, 7, "/create");
   await say(env, 7, "test2");
-  const accepted = await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /Запрос принят/);
   assert.match(accepted[0].reply, /«test2»/);
   assert.doesNotMatch(accepted[0].reply, /уже переносился/);
@@ -332,7 +348,8 @@ test("the same title with different links enqueues", async () => {
   seedDone(env, "test", [OLD_LINK]);
   await say(env, 7, "/create");
   await say(env, 7, "test");
-  const accepted = await say(env, 7, "https://t.me/addstickers/konchanch", { stickerCount: async () => 33 });
+  await say(env, 7, "https://t.me/addstickers/konchanch", { stickerCount: async () => 33 });
+  const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /Запрос принят/);
   assert.match(accepted[0].reply, /«test»/);
   assert.match(accepted[0].reply, /Всего 33 стикеров/);
@@ -347,7 +364,8 @@ test("the same title and the same links restart the name prompt", async () => {
   seedDone(env, "test", [OLD_LINK]);
   await say(env, 7, "/create");
   await say(env, 7, "test");
-  const blocked = await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  const blocked = await say(env, 7, "/done");
   assert.match(blocked[0].reply, /этими же ссылками/);
   assert.match(blocked[0].reply, /«test»/);
   assert.match(blocked[0].reply, /p8502935020_1791999310374124782_by_creastikersbot/);
@@ -358,7 +376,8 @@ test("the same title and the same links restart the name prompt", async () => {
 
   const renamed = await say(env, 7, "test2");
   assert.equal(renamed[0].reply, createLinksPrompt("test2"));
-  const accepted = await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /«test2»/);
   assert.match(accepted[0].reply, /Запрос принят/);
 });
@@ -508,4 +527,167 @@ test("admin /status names a starting run and an upload instead of idle", () => {
   assert.doesNotMatch(uploading, /простаивает/);
 
   assert.equal(adminLiveStatusText({ queue: { items: [] }, job: { running: false } }), "простаивает");
+});
+
+function stickerUpdate(chatId, sticker) {
+  return new Request("https://tg2tmbot.example/telegram", {
+    method: "POST",
+    headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret", "content-type": "application/json" },
+    body: JSON.stringify({ message: { chat: { id: chatId }, sticker } }),
+  });
+}
+
+async function saySticker(env, chatId, sticker, deps = {}) {
+  const sent = [];
+  const res = await handle(stickerUpdate(chatId, sticker), env, {
+    sendMessage: async (_env, id, reply) => {
+      sent.push({ chatId: id, reply });
+      return { message_id: sent.length };
+    },
+    ...deps,
+  });
+  assert.equal(res.status, 200);
+  return sent;
+}
+
+const COUNTS = { cats: 33, dogs: 37, owls: 20, piidarasy: 109, huge_set: 160, one_set: 10, two_set: 10 };
+const countOf = { stickerCount: async (_env, name) => COUNTS[name] };
+
+function pending(env) {
+  return decodeAwaitCreate(env.BOT_KV.store.get("await:7"));
+}
+
+test("a sticker with set_name adds its set, reports the total, and waits for /done", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Pretendless");
+  const added = await saySticker(env, 7, { set_name: "cats", file_id: "abc" }, countOf);
+  assert.equal(added.length, 1);
+  assert.match(added[0].reply, /Добавлено 33, всего 33 из 150/);
+  assert.match(added[0].reply, /стикер или ссылку/);
+  assert.match(added[0].reply, /\/done/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  assert.deepEqual(pending(env).sets, [{ name: "cats", count: 33 }]);
+
+  const second = await saySticker(env, 7, { set_name: "dogs" }, countOf);
+  assert.match(second[0].reply, /Добавлено 37, всего 70 из 150/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+
+  const done = await say(env, 7, "/done");
+  assert.match(done[0].reply, /Запрос принят/);
+  assert.match(done[0].reply, /«Pretendless»/);
+  assert.match(done[0].reply, /Всего 70 стикеров/);
+  const item = JSON.parse(env.BOT_KV.store.get("queue")).items[0];
+  assert.deepEqual(item.links, ["https://t.me/addstickers/cats", "https://t.me/addstickers/dogs"]);
+  assert.equal(item.stickers, 70);
+  assert.equal(env.BOT_KV.store.get("await:7"), undefined);
+});
+
+test("link, then sticker, then links build one request in first-seen order", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Смесь");
+  const one = await say(env, 7, "https://t.me/addstickers/cats", countOf);
+  assert.match(one[0].reply, /Добавлено 33, всего 33 из 150/);
+  const two = await saySticker(env, 7, { set_name: "dogs" }, countOf);
+  assert.match(two[0].reply, /Добавлено 37, всего 70 из 150/);
+  const three = await say(env, 7, "https://t.me/addstickers/owls\nhttps://t.me/addstickers/one_set", countOf);
+  assert.match(three[0].reply, /Добавлено 30, всего 100 из 150/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  await say(env, 7, "/done");
+  const item = JSON.parse(env.BOT_KV.store.get("queue")).items[0];
+  assert.equal(item.title, "Смесь");
+  assert.deepEqual(item.links, [
+    "https://t.me/addstickers/cats",
+    "https://t.me/addstickers/dogs",
+    "https://t.me/addstickers/owls",
+    "https://t.me/addstickers/one_set",
+  ]);
+  assert.equal(item.stickers, 100);
+});
+
+test("the same set by link and by sticker is counted once", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Дубль");
+  await say(env, 7, "https://t.me/addstickers/cats", countOf);
+  const viaSticker = await saySticker(env, 7, { set_name: "cats" }, countOf);
+  assert.match(viaSticker[0].reply, /Набор «cats» уже в этом запросе/);
+  assert.match(viaSticker[0].reply, /Всего 33 из 150/);
+  await saySticker(env, 7, { set_name: "dogs" }, countOf);
+  const viaLink = await say(env, 7, "https://t.me/addstickers/dogs\nhttps://t.me/addstickers/owls", countOf);
+  assert.match(viaLink[0].reply, /Добавлено 20, всего 90 из 150/);
+  assert.match(viaLink[0].reply, /Набор «dogs» уже в этом запросе/);
+  assert.deepEqual(pending(env).sets.map((row) => row.name), ["cats", "dogs", "owls"]);
+});
+
+test("an addition over 150 is refused and the collected sets stay", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Большой");
+  await saySticker(env, 7, { set_name: "piidarasy" }, countOf);
+  const batch = await say(env, 7, "https://t.me/addstickers/dogs\nhttps://t.me/addstickers/owls", countOf);
+  assert.match(batch[0].reply, /Ничего из этого сообщения не добавлено/);
+  assert.match(batch[0].reply, /«dogs» \(37\), «owls» \(20\) вместе дали бы 166 стикеров, лимит 150/);
+  assert.match(batch[0].reply, /Всего 109 из 150/);
+  assert.deepEqual(pending(env).sets.map((row) => row.name), ["piidarasy"]);
+  const huge = await saySticker(env, 7, { set_name: "huge_set" }, countOf);
+  assert.match(huge[0].reply, /Набор «huge_set» \(160\) не добавлен: вышло бы 269 стикеров, лимит 150/);
+  assert.match(huge[0].reply, /Всего 109 из 150/);
+  const small = await say(env, 7, "https://t.me/addstickers/one_set", countOf);
+  assert.match(small[0].reply, /Добавлено 10, всего 119 из 150/);
+  await say(env, 7, "/done");
+  const item = JSON.parse(env.BOT_KV.store.get("queue")).items[0];
+  assert.equal(item.stickers, 119);
+  assert.deepEqual(item.links, ["https://t.me/addstickers/piidarasy", "https://t.me/addstickers/one_set"]);
+});
+
+test("a sticker without set_name is explained and changes nothing", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Шерсть");
+  await saySticker(env, 7, { set_name: "cats" }, countOf);
+  const rejected = await saySticker(env, 7, { file_id: "loose" }, {
+    stickerCount: async () => {
+      throw new Error("should not look up");
+    },
+  });
+  assert.match(rejected[0].reply, /не из набора/);
+  assert.match(rejected[0].reply, /Всего 33 из 150/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  assert.deepEqual(pending(env), { step: "links", title: "Шерсть", sets: [{ name: "cats", count: 33 }] });
+});
+
+test("/done with nothing collected asks for a sticker or links; /done outside /create explains", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  const idle = await say(env, 7, "/done");
+  assert.match(idle[0].reply, /\/create/);
+  await say(env, 7, "/create");
+  await say(env, 7, "Пусто");
+  const empty = await say(env, 7, "/done");
+  assert.match(empty[0].reply, /стикер из набора или ссылки/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  assert.deepEqual(pending(env), { step: "links", title: "Пусто", sets: [] });
+});
+
+test("/stop after collecting sets clears them and queues nothing", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Отмена");
+  await saySticker(env, 7, { set_name: "cats" }, countOf);
+  await say(env, 7, "https://t.me/addstickers/dogs", countOf);
+  const stopped = await say(env, 7, "/stop");
+  assert.equal(stopped[0].reply, STOP_CLEARED);
+  assert.equal(env.BOT_KV.store.get("await:7"), undefined);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  const after = await say(env, 7, "/done");
+  assert.doesNotMatch(after[0].reply, /Запрос принят/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
 });

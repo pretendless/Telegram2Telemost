@@ -416,7 +416,11 @@ async function acceptPackMessage(chatId, text, env, deps) {
   const links = lines.filter((line) => /addstickers/i.test(line));
   await handle(telegramRequest(chatId, "/create"), env, { sendMessage: async () => ({}) });
   await handle(packMessage(chatId, title), env, { sendMessage: async () => ({}) });
-  return handle(packMessage(chatId, links.join("\n")), env, deps);
+  await handle(packMessage(chatId, links.join("\n")), env, {
+    sendMessage: async () => ({}),
+    stickerCount: deps.stickerCount,
+  });
+  return handle(telegramRequest(chatId, "/done"), env, deps);
 }
 
 test("a priority chat is queued ahead of an older normal request, behind an active upload", () => {
@@ -910,22 +914,30 @@ test("a pack-shaped message without /create asks for /create first", async () =>
   assert.match(sent[0], /\/create/);
 });
 
-test("after /create a pack-shaped message counts stickers and enforces 150", async () => {
+test("a link message over 150 adds nothing and keeps the name", async () => {
   const sent = [];
   const env = envWith();
-  const text = "Минто\n\nhttps://t.me/addstickers/minty_vk\nhttps://t.me/addstickers/minty2_vk";
-  const res = await acceptPackMessage(7, text, env, {
-    sendMessage: async (_env, _chatId, reply) => sent.push(reply),
-    stickerCount: async (_env, name) => (name === "minty_vk" ? 80 : 80),
-  });
+  await handle(telegramRequest(7, "/create"), env, { sendMessage: async () => ({}) });
+  await handle(packMessage(7, "Минто"), env, { sendMessage: async () => ({}) });
+  const res = await handle(
+    packMessage(7, "https://t.me/addstickers/minty_vk\nhttps://t.me/addstickers/minty2_vk"),
+    env,
+    {
+      sendMessage: async (_env, _chatId, reply) => sent.push(reply),
+      stickerCount: async () => 80,
+    },
+  );
   assert.equal(res.status, 200);
   const reply = sent.join("\n");
-  assert.match(reply, /minty_vk — 80/);
-  assert.match(reply, /больше лимита 150/);
-  assert.match(reply, /160 > 150/);
-  assert.match(reply, /«Минто» сохранено/);
-  assert.match(env.BOT_KV.store.get("await:7"), /"step":"links"/);
-  assert.match(env.BOT_KV.store.get("await:7"), /Минто/);
+  assert.match(reply, /Ничего из этого сообщения не добавлено/);
+  assert.match(reply, /160/);
+  assert.match(reply, /лимит 150/);
+  assert.match(reply, /minty_vk/);
+  assert.match(reply, /minty2_vk/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  const pending = JSON.parse(env.BOT_KV.store.get("await:7"));
+  assert.equal(pending.title, "Минто");
+  assert.deepEqual(pending.sets, []);
 });
 
 function telegramRequest(chatId, text) {
@@ -2118,7 +2130,7 @@ test("/format, /example and /stop", async () => {
     env,
     { sendMessage: send },
   );
-  assert.match(sent[0].text, /два следующих сообщения/);
+  assert.match(sent[0].text, /стикеры или ссылки и \/done/);
   assert.match(sent[0].text, /только название пака, без ссылок/);
   assert.match(sent[0].text, /не больше 150/);
   await handle(

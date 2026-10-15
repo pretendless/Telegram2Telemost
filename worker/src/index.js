@@ -33,6 +33,7 @@ import {
   channelPack,
   claimNext,
   CREATE_PROMPT,
+  CREATE_DONE_EMPTY,
   STOP_CLEARED,
   STOP_IDLE,
   createLinksPrompt,
@@ -43,6 +44,10 @@ import {
   nameStepResult,
   NEED_CREATE,
   parseStickerSetNames,
+  stickerSetName,
+  STICKER_NOT_IN_PACK,
+  addedSetsReply,
+  collectSets,
   focusRequest,
   isPriorityChat,
   normalizeQueue,
@@ -689,12 +694,14 @@ async function acceptCountedRequest(env, chatId, { title, names, rows, total }, 
 
 async function answer(env, update, send, stickerCount, deps = {}) {
   const message = update && update.message;
-  if (!message || typeof message.text !== "string") return;
+  if (!message) return;
+  const text = typeof message.text === "string" ? message.text : "";
+  const sticker = message.sticker && typeof message.sticker === "object" ? message.sticker : null;
+  if (!text && !sticker) return;
   const chatId = message.chat && message.chat.id;
   if (!Number.isSafeInteger(chatId) && typeof chatId !== "number") return;
   await ensureSeed(env.BOT_KV);
-  const text = message.text;
-  const cmd = commandOf(text);
+  const cmd = text ? commandOf(text) : "";
   const known = staticReply(cmd);
   let out;
   let userCardAfterAccept = null;
@@ -706,6 +713,25 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   } else if (cmd === "/create") {
     await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
     out = CREATE_PROMPT;
+  } else if (cmd === "/done") {
+    const awaiting = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
+    if (!awaiting || awaiting.step !== "links") {
+      out = "Сейчас нечего ставить в очередь. /create — начать, затем стикеры или ссылки, и /done.";
+    } else if (!awaiting.sets.length) {
+      out = CREATE_DONE_EMPTY;
+    } else {
+      const names = awaiting.sets.map((row) => row.name);
+      const rows = awaiting.sets.map((row) => `• ${row.name} — ${row.count}`);
+      const total = awaiting.sets.reduce((sum, row) => sum + row.count, 0);
+      const accepted = await acceptCountedRequest(
+        env,
+        chatId,
+        { title: awaiting.title, names, rows, total },
+        deps,
+      );
+      out = accepted.out;
+      userCardAfterAccept = accepted.userCardAfterAccept;
+    }
   } else if (cmd === "/stop") {
     const pending = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
     if (pending) await env.BOT_KV.delete(awaitCreateKey(chatId));
@@ -826,28 +852,31 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         out = createLinksPrompt(named.title);
       }
     } else if (awaiting && awaiting.step === "links") {
-      const names = parseStickerSetNames(text);
-      const lookups = [];
-      for (const name of names) {
-        try {
-          const count = await stickerCount(env, name);
-          lookups.push({ name, count });
-        } catch {
-          lookups.push({ name, missing: true });
-        }
-      }
-      const verdict = judgeCreateLinks(awaiting.title, names, lookups);
-      if (!verdict.ok) {
-        out = verdict.text;
+      const fromSticker = sticker ? stickerSetName(sticker) : null;
+      if (sticker && !fromSticker) {
+        const total = (awaiting.sets || []).reduce((sum, row) => sum + row.count, 0);
+        out = `${STICKER_NOT_IN_PACK}\n\nВсего ${total} из ${MAX_STICKERS}. Название «${awaiting.title}» сохранено.`;
       } else {
-        const accepted = await acceptCountedRequest(
-          env,
-          chatId,
-          { title: awaiting.title, names, rows: verdict.rows, total: verdict.total },
-          deps,
-        );
-        out = accepted.out;
-        userCardAfterAccept = accepted.userCardAfterAccept;
+        const names = fromSticker ? [fromSticker] : parseStickerSetNames(text);
+        const lookups = [];
+        for (const name of names) {
+          try {
+            const count = await stickerCount(env, name);
+            lookups.push({ name, count });
+          } catch {
+            lookups.push({ name, missing: true });
+          }
+        }
+        if (!names.length) {
+          out = `${CREATE_DONE_EMPTY}\n\nНазвание «${awaiting.title}» сохранено.`;
+        } else {
+          const collected = collectSets(awaiting.sets, lookups);
+          await env.BOT_KV.put(
+            awaitCreateKey(chatId),
+            encodeAwaitCreate({ step: "links", title: awaiting.title, sets: collected.sets }),
+          );
+          out = addedSetsReply(collected);
+        }
       }
     } else if (!admin) {
       out = NEED_CREATE;

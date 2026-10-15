@@ -32,12 +32,12 @@ export const EXAMPLE =
   "https://t.me/addstickers/minty2_vk";
 
 export const FORMAT =
-  "Новый пак — команда /create и два следующих сообщения.\n" +
+  "Новый пак — команда /create, название, затем стикеры или ссылки и /done.\n" +
   "\n" +
   "1. /create.\n" +
   `2. Следующее сообщение — только название пака, без ссылок, не длиннее ${MAX_PACK_TITLE} символов.\n` +
-  "3. Затем ссылки t.me/addstickers/…, по одной в строке. Порядок ссылок = порядок стикеров.\n" +
-  `4. Всего не больше ${MAX_STICKERS} стикеров: это лимит Телемоста на пак.\n` +
+  "3. Затем стикер из набора или ссылки t.me/addstickers/… — сколько угодно сообщений, в любом порядке. Порядок наборов = порядок стикеров.\n" +
+  `4. /done ставит запрос в очередь. Всего не больше ${MAX_STICKERS} стикеров: это лимит Телемоста на пак.\n` +
   "\n" +
   "Пример (название и ссылки — разными сообщениями):\n" +
   "\n" +
@@ -48,7 +48,7 @@ export const START =
   "\n" +
   FORMAT +
   `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
-  "\n\nСначала /create — спрошу название, затем ссылки (см. /format). Проверю набор и передам в очередь." +
+  "\n\nСначала /create — спрошу название, затем стикеры или ссылки (см. /format). После /done передам в очередь." +
   "\n\nПишу только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылаю. /status — ваши запросы, /stop — прервать ввод.";
 
 export const DESCRIPTION =
@@ -71,10 +71,113 @@ export const CREATE_PROMPT =
 export function createLinksPrompt(title) {
   return (
     `Название: «${title}». Приняла.\n\n` +
-    "Пришлите ссылки на наборы стикеров t.me/addstickers/… — одну или несколько, по одной в строке. " +
-    "Порядок ссылок — порядок стикеров.\n\n" +
-    `Всего стикеров во всех наборах должно быть не больше ${MAX_STICKERS}.`
+    "Пришлите стикер из набора или ссылки t.me/addstickers/…. Один стикер добавляет весь его набор. " +
+    "Можно прислать несколько стикеров и ссылок в любом порядке — порядок наборов сохранится.\n\n" +
+    `Когда соберёте, отправьте /done — запрос встанет в очередь. Всего не больше ${MAX_STICKERS} стикеров.`
   );
+}
+
+export const STICKER_NOT_IN_PACK =
+  "Этот стикер не из набора — в нём нет set_name. Пришлите стикер из набора или ссылку t.me/addstickers/….";
+
+export const CREATE_DONE_EMPTY =
+  "Пока ничего не собрано. Пришлите стикер из набора или ссылки t.me/addstickers/….";
+
+export function addedSetsReply({ addedCount, total, duplicates, rejected, missing }) {
+  const lines = [];
+  if (addedCount > 0) {
+    lines.push(
+      `Добавлено ${addedCount}, всего ${total} из ${MAX_STICKERS}. Пришлите ещё стикер или ссылку — или /done, чтобы поставить в очередь.`,
+    );
+  }
+  if (duplicates.length) {
+    const listed = duplicates.map((name) => `«${name}»`).join(", ");
+    lines.push(
+      duplicates.length === 1
+        ? `Набор ${listed} уже в этом запросе.`
+        : `Наборы ${listed} уже в этом запросе.`,
+    );
+  }
+  if (missing.length) {
+    lines.push(
+      missing.length === 1
+        ? `Набор «${missing[0]}» не найден.`
+        : `Не найдены наборы: ${missing.map((name) => `«${name}»`).join(", ")}.`,
+    );
+  }
+  if (rejected.length) {
+    const listed = rejected.map((row) => `«${row.name}» (${row.count})`).join(", ");
+    const batch = rejected.reduce((sum, row) => sum + row.count, 0);
+    lines.push(
+      rejected.length === 1
+        ? `Набор ${listed} не добавлен: вышло бы ${total + batch} стикеров, лимит ${MAX_STICKERS}.`
+        : `Ничего из этого сообщения не добавлено: ${listed} вместе дали бы ${total + batch} стикеров, лимит ${MAX_STICKERS}.`,
+    );
+  }
+  if (!addedCount && (duplicates.length || missing.length || rejected.length)) {
+    const next = total > 0 ? "Пришлите другой стикер или ссылку — или /done." : "Пришлите другой стикер или ссылку.";
+    lines.push(`Всего ${total} из ${MAX_STICKERS}. ${next}`);
+  }
+  if (!lines.length) return CREATE_DONE_EMPTY;
+  return lines.join("\n\n");
+}
+
+// One message is atomic: every new set in it is added, in order, or none of them are.
+// Sets already collected stay. A name already in the request is not counted again.
+export function collectSets(existing, incoming) {
+  const sets = [];
+  for (const row of Array.isArray(existing) ? existing : []) {
+    const name = String((row && row.name) || "").trim();
+    const count = Math.floor(Number(row && row.count));
+    if (!/^[A-Za-z0-9_]+$/.test(name) || !Number.isFinite(count) || count < 0) continue;
+    if (sets.some((item) => item.name === name)) continue;
+    sets.push({ name, count });
+  }
+  let total = sets.reduce((sum, row) => sum + row.count, 0);
+  const duplicates = [];
+  const missing = [];
+  const fresh = [];
+  for (const row of Array.isArray(incoming) ? incoming : []) {
+    const name = String((row && row.name) || "").trim();
+    if (!name) continue;
+    if (row.missing || !Number.isFinite(Number(row.count)) || Number(row.count) < 0) {
+      missing.push(name);
+      continue;
+    }
+    const count = Math.floor(Number(row.count));
+    if (sets.some((item) => item.name === name) || fresh.some((item) => item.name === name)) {
+      duplicates.push(name);
+      continue;
+    }
+    fresh.push({ name, count });
+  }
+  const batch = fresh.reduce((sum, row) => sum + row.count, 0);
+  const rejected = total + batch > MAX_STICKERS ? fresh : [];
+  const added = rejected.length ? [] : fresh;
+  if (!rejected.length) {
+    for (const row of added) {
+      sets.push(row);
+      total += row.count;
+    }
+  }
+  return {
+    sets,
+    added,
+    addedCount: added.reduce((sum, row) => sum + row.count, 0),
+    duplicates,
+    rejected,
+    missing,
+    total,
+  };
+}
+
+// Bot API Sticker.set_name — the sticker set this sticker belongs to. Absent when it is not in a set.
+export function stickerSetName(sticker) {
+  if (!sticker || typeof sticker !== "object") return null;
+  if (typeof sticker.set_name !== "string") return null;
+  const name = sticker.set_name.trim();
+  if (!/^[A-Za-z0-9_]+$/.test(name)) return null;
+  return name;
 }
 
 export const NEED_CREATE =
@@ -394,12 +497,20 @@ export function renderPackCheck(title, rows, total) {
   return `Пак «${title}»\n\n${rows.join("\n")}\n\n${verdict}`;
 }
 
-// await:<chatId> is either {"step":"name"} or {"step":"links","title":"…"}.
+// await:<chatId> is either {"step":"name"} or {"step":"links","title":"…","sets":[{"name","count"}]}.
 // Legacy value "1" (one combined pack message) is the name step.
 export function encodeAwaitCreate(state) {
   if (!state || state.step !== "links") return JSON.stringify({ step: "name" });
   const title = String(state.title || "").replace(/\s+/g, " ").trim();
-  return JSON.stringify({ step: "links", title });
+  const sets = [];
+  for (const row of Array.isArray(state.sets) ? state.sets : []) {
+    const name = String((row && row.name) || "").trim();
+    const count = Math.floor(Number(row && row.count));
+    if (!/^[A-Za-z0-9_]+$/.test(name) || !Number.isFinite(count) || count < 0) continue;
+    if (sets.some((item) => item.name === name)) continue;
+    sets.push({ name, count });
+  }
+  return JSON.stringify({ step: "links", title, sets });
 }
 
 export function decodeAwaitCreate(raw) {
@@ -417,7 +528,15 @@ export function decodeAwaitCreate(raw) {
   if (parsed.step === "links") {
     const title = String(parsed.title || "").replace(/\s+/g, " ").trim();
     if (!title || title.length > MAX_PACK_TITLE) return { step: "name" };
-    return { step: "links", title };
+    const sets = [];
+    for (const row of Array.isArray(parsed.sets) ? parsed.sets : []) {
+      const name = String((row && row.name) || "").trim();
+      const count = Math.floor(Number(row && row.count));
+      if (!/^[A-Za-z0-9_]+$/.test(name) || !Number.isFinite(count) || count < 0) continue;
+      if (sets.some((item) => item.name === name)) continue;
+      sets.push({ name, count });
+    }
+    return { step: "links", title, sets };
   }
   return null;
 }
