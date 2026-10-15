@@ -15,6 +15,7 @@ import {
   progressFieldsForPack,
   telegramIo,
 } from './admin_status.mjs';
+import { channelPost } from '../worker/src/logic.js';
 import { drainRemainingQueue } from './queue_drain.mjs';
 import { postDrainComplete, postSessionEnded, queueCredentialsReadable } from './queue_client.mjs';
 import {
@@ -3128,13 +3129,22 @@ function queueDrainEnabled(argv) {
   return /^(1|true|yes)$/i.test(flag);
 }
 
-export async function postPackLink(fetchImpl, token, title, url) {
+export async function postPackLink(fetchImpl, token, title, url, extra = {}) {
   const response = await fetchImpl('https://api.telegram.org/bot' + token + '/sendMessage', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       chat_id: '@tg2tm',
-      text: `«${title}»\n\n${url}`,
+      text: channelPost({
+        title,
+        url,
+        total: extra.total,
+        uploaded: extra.uploaded,
+        links: extra.links,
+      }),
+      parse_mode: 'HTML',
+      // Hash-router Telemost URLs do not preview as a sticker image. The card
+      // would be a tall generic page and hide the two-line post.
       link_preview_options: { is_disabled: true },
     }),
   });
