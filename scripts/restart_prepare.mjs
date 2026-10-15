@@ -86,13 +86,25 @@ async function focusRequest(id) {
   if (!response.ok) throw new Error('queue focus http ' + response.status);
 }
 
-export function telemostForRequest(existing) {
+function seededCheckpoint(seed) {
+  const uploaded = Number(seed && seed.uploaded) || 0;
+  if (uploaded <= 0) return null;
+  return {
+    status: 'uploading',
+    uploaded,
+    packUrl: null,
+    error: null,
+    checkpoint: 'session-deadline',
+  };
+}
+
+export function telemostForRequest(existing, seed) {
   const prev = existing && existing.telemost;
   const blank = { status: 'pending', uploaded: 0, packUrl: null, error: null };
-  if (!prev || typeof prev !== 'object') return blank;
+  if (!prev || typeof prev !== 'object') return seededCheckpoint(seed) || blank;
   if (prev.status === 'done' && prev.packUrl) return prev;
   if ((Number(prev.uploaded) || 0) > 0 && prev.status !== 'error') return prev;
-  return blank;
+  return seededCheckpoint(seed) || blank;
 }
 
 export function writeRequestPack(target) {
@@ -115,7 +127,7 @@ export function writeRequestPack(target) {
     requesterChatId: target.chatId || '',
     stickerLinks: target.links,
     stickerSets: sets,
-    telemost: telemostForRequest(existing),
+    telemost: telemostForRequest(existing, { uploaded: target.uploaded }),
   }, null, 2) + '\n');
   return slug;
 }
@@ -154,12 +166,13 @@ async function main() {
   console.error('restart-seen', JSON.stringify(seen));
   const canReadQueue = queueReadable();
   const allowCatalog = /^(1|true|yes)$/i.test(String(process.env.TG2TM_CATALOG_RETRY || ''));
+  const requests = await storedRequests();
   const target = restartTarget({
     unfinished: Boolean(choice.unfinished),
     title,
     liveText: choice.liveText || '',
     catalogs: catalogs(),
-    requests: await storedRequests(),
+    requests,
     allowCatalog,
   });
   mkdirSync(join(ROOT, 'logs'), { recursive: true });
@@ -178,7 +191,8 @@ async function main() {
     // idle skips Run browser; the workflow posts an admin card for that case.
     process.exit(0);
   }
-  const dir = target.dir || writeRequestPack(target);
+  const row = requests.find((item) => item && String(item.id) === String(target.requestId || ''));
+  const dir = target.dir || writeRequestPack({ ...target, uploaded: row && row.uploaded });
   if (target.dir && target.requestId) patchRequestPack(dir, target);
   await focusRequest(target.requestId);
   const selected = { ...target, dir, action: target.action };

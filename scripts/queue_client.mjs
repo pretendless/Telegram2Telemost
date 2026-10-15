@@ -26,13 +26,14 @@ export async function fetchQueuePlan(fetchImpl, progressUrl, secret) {
   return data.items || [];
 }
 
-export async function claimQueueItem(fetchImpl, progressUrl, secret, body = {}) {
+export async function claimQueueItem(fetchImpl, progressUrl, secret, body = {}, opts = {}) {
   const { claim } = queueEndpoints(progressUrl);
   if (!claim || !secret) return { ok: false, claimed: null, queued: 0, active: false };
   const response = await fetchImpl(claim, {
     method: 'POST',
     headers: queueAuthHeaders(secret),
     body: JSON.stringify(body),
+    signal: opts && opts.signal,
   });
   if (!response.ok) throw new Error(`queue claim http ${response.status}`);
   const data = await response.json();
@@ -44,13 +45,27 @@ export async function claimQueueItem(fetchImpl, progressUrl, secret, body = {}) 
   };
 }
 
-export async function postDrainComplete(fetchImpl, progressUrl, secret) {
+export async function postSessionEnded(fetchImpl, progressUrl, secret, body = {}, opts = {}) {
+  const base = String(progressUrl || '').replace(/\/progress\/?$/, '');
+  if (!base || !secret) return { ok: false };
+  const response = await fetchImpl(`${base}/session-ended`, {
+    method: 'POST',
+    headers: queueAuthHeaders(secret),
+    body: JSON.stringify(body || {}),
+    signal: opts && opts.signal,
+  });
+  if (!response.ok) throw new Error(`session-ended http ${response.status}`);
+  return response.json().catch(() => ({ ok: true }));
+}
+
+export async function postDrainComplete(fetchImpl, progressUrl, secret, opts = {}) {
   const { drainComplete } = queueEndpoints(progressUrl);
   if (!drainComplete || !secret) return { ok: false };
   const response = await fetchImpl(drainComplete, {
     method: 'POST',
     headers: queueAuthHeaders(secret),
     body: '{}',
+    signal: opts && opts.signal,
   });
   if (!response.ok) throw new Error(`queue drain-complete http ${response.status}`);
   return response.json();

@@ -16,7 +16,21 @@ import {
   telegramIo,
 } from './admin_status.mjs';
 import { drainRemainingQueue } from './queue_drain.mjs';
-import { queueCredentialsReadable } from './queue_client.mjs';
+import { postDrainComplete, postSessionEnded, queueCredentialsReadable } from './queue_client.mjs';
+import {
+  POST_SAVE_STEP_MS,
+  POST_SAVE_STEPS,
+  isStepTimeout,
+  progressTimeoutStep,
+  timeoutPackDecision,
+  withStepTimeout,
+} from './step_timeout.mjs';
+import {
+  SessionDeadlineStop,
+  checkpointTelemost,
+  isSessionDeadline,
+  pastSessionSoftDeadline,
+} from './session_deadline.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKS = join(ROOT, 'packs');
@@ -3067,12 +3081,15 @@ function openAdminFeed(dirRef) {
       }
     },
     onDelivered: (event, delivery) => {
-      if (!delivery || delivery.action === 'skip' || !dirRef.dir) return;
+      // A repeated admin card is "skip", but the queue still needs this /progress.
+      // Run 38644156549 sent the link card, then skipped the second post, and
+      // claim kept returning the uploading row for hours.
+      if (!delivery || !dirRef.dir) return;
       const fields = progressFieldsForPack(dirRef);
       const fresh = event.phase === 'start' || event.phase === 'newpack';
       const index = fresh ? 0 : Number(event.index);
       const total = Number(event.total);
-      return postProgress(fetch, process.env.TG2TM_PROGRESS_URL || '', process.env.UPLOADER_SECRET || '', {
+      const body = {
         slug: dirRef.dir,
         title: event.pack,
         status: event.phase === 'error' || event.phase === 'failed' ? 'error' : event.phase === 'saved' || event.phase === 'link' ? 'done' : 'uploading',
@@ -3087,6 +3104,18 @@ function openAdminFeed(dirRef) {
         requesterChatId: fields.requesterChatId,
         queueRequestId: fields.queueRequestId,
         sessionDrain: Boolean(dirRef.sessionDrain),
+      };
+      const step = progressTimeoutStep(event.phase);
+      const send = (signal) => postProgress(
+        fetch,
+        process.env.TG2TM_PROGRESS_URL || '',
+        process.env.UPLOADER_SECRET || '',
+        body,
+        { signal },
+      );
+      if (!step) return send();
+      return withStepTimeout(step, POST_SAVE_STEP_MS, send, {
+        runUrl: event.runUrl || actionsRunUrl(),
       });
     },
   });
@@ -3140,6 +3169,8 @@ export function packAlreadyComplete(tm, imageCount) {
 export function restartShouldNewpack(tm, imageCount, chatAction) {
   if (chatAction === 'saved') return false;
   if (packAlreadyComplete(tm, imageCount)) return false;
+  // A deadline checkpoint must continue at the saved index, not open a new pack.
+  if (tm && tm.checkpoint === 'session-deadline' && (Number(tm.uploaded) || 0) > 0) return false;
   return true;
 }
 
@@ -3258,7 +3289,10 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   const m = p.meta;
   let tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
   if (dirRef) {
+    dirRef.dir = dir;
     dirRef.title = m.title;
+    dirRef.uploaded = Number(tm.uploaded) || 0;
+    dirRef.total = m.images.length;
     bindPackProgress(dirRef, m);
   }
   if (tm.status === 'done' && tm.packUrl) {
@@ -3281,7 +3315,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     console.log(bufferClearSkippedLine());
     await bot.onBot(() => bot.clearStickersHistory(bot.botUrl || earlyUrls.botUrl));
   }
-  if (restart) {
+  if (restart && restartShouldNewpack(tm, m.images.length, '')) {
     await closeOpenBotPackBeforeNew(bot, note, { label: m.title });
   }
   await note({ phase: 'start', pack: m.title, index: 0, total: m.images.length });
@@ -3565,6 +3599,21 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   }
 
   for (let i = tm.uploaded; i < m.images.length; i++) {
+    if (pastSessionSoftDeadline()) {
+      const saved = checkpointTelemost(tm, { uploaded: tm.uploaded, total: m.images.length });
+      Object.assign(tm, saved);
+      m.telemost = tm;
+      savePack(p);
+      console.log(dir, 'session-deadline checkpoint', tm.uploaded, '/', m.images.length);
+      await note({
+        phase: 'waiting',
+        pack: m.title,
+        index: tm.uploaded,
+        total: m.images.length,
+        lastLine: 'лимит сессии, продолжу в новом запуске',
+      });
+      throw new SessionDeadlineStop(tm.uploaded, m.images.length);
+    }
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
     if (!useStaging) console.log(dir, 'send', img.file);
@@ -3723,6 +3772,10 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   if (finalizeDecision(readyText).action !== 'done') {
     throw new Error(`not ready to save: ${String(readyText || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`);
   }
+  if (dirRef) {
+    dirRef.uploaded = m.images.length;
+    dirRef.total = m.images.length;
+  }
   const saved = await publishSavedPack(bot, p, dir, note);
   if (!saved) throw new Error('done did not save the pack');
 }
@@ -3784,9 +3837,20 @@ async function publishSavedPack(bot, p, dir, note = async () => {}) {
   let saved = { ok: false, reason: 'not-saved', url: '' };
   // Wait for «сохранён», not the first non-pending line (an older emoji ask
   // can ride along in the changed text and would stop the wait too early).
+  const runUrl = actionsRunUrl();
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const done = await bot.say('/done', { until: 'saved' });
-    const recovered = await resolveSavedPackUrl(bot, done.text, done.links, dir);
+    const done = await withStepTimeout(
+      POST_SAVE_STEPS.doneReply,
+      POST_SAVE_STEP_MS,
+      () => bot.say('/done', { until: 'saved' }),
+      { runUrl },
+    );
+    const recovered = await withStepTimeout(
+      POST_SAVE_STEPS.packUrl,
+      POST_SAVE_STEP_MS,
+      () => resolveSavedPackUrl(bot, done.text, done.links, dir),
+      { runUrl },
+    );
     doneText = String(recovered.text || '').replace(/\s+/g, ' ').trim();
     console.log(dir, 'done-reply', attempt, doneText.slice(0, 400));
     saved = packSavedReply(recovered.text, recovered.links);
@@ -3821,11 +3885,14 @@ async function publishSavedPack(bot, p, dir, note = async () => {}) {
 async function finalizePack(bot, dir, note = async () => {}, dirRef = null) {
   const p = loadPack(dir);
   const m = p.meta;
+  const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
   if (dirRef) {
+    dirRef.dir = dir;
     dirRef.title = m.title;
+    dirRef.uploaded = Number(tm.uploaded) || 0;
+    dirRef.total = m.images.length;
     bindPackProgress(dirRef, m);
   }
-  const tm = m.telemost = { status: 'pending', uploaded: 0, packUrl: null, error: null, ...m.telemost };
   if (tm.status === 'done' && tm.packUrl) {
     console.log(dir, 'draft-gone', tm.packUrl);
     return;
@@ -3928,6 +3995,129 @@ async function restartRun(bot, note, dirRef) {
   await uploadPack(bot, selected.dir, { close: true, restart: true, note, dirRef });
 }
 
+// A post-save timeout marks this request error and does not /newpack it again.
+// sessionDrain stays set so the error progress itself does not open a second
+// Actions run; drain-complete starts whatever is still queued.
+async function releaseQueueOnTimeout(dirRef, err) {
+  const decision = timeoutPackDecision(err);
+  if (!decision.stopPack || decision.retrySamePack) return;
+  if (!dirRef || !dirRef.dir) {
+    console.log('step-timeout queue release skipped: no slug');
+    return;
+  }
+  const fields = progressFieldsForPack(dirRef);
+  const runUrl = decision.runUrl || actionsRunUrl();
+  const uploaded = Number(dirRef.uploaded);
+  const total = Number(dirRef.total);
+  await withStepTimeout(POST_SAVE_STEPS.queueRelease, POST_SAVE_STEP_MS, (signal) => postProgress(
+    fetch,
+    process.env.TG2TM_PROGRESS_URL || '',
+    process.env.UPLOADER_SECRET || '',
+    {
+      slug: dirRef.dir,
+      title: dirRef.title || 'пак',
+      status: 'error',
+      uploaded: Number.isFinite(uploaded) ? uploaded : 0,
+      total: Number.isFinite(total) ? total : 0,
+      error: decision.error || (err && err.message) || 'step timeout',
+      runUrl,
+      phase: 'error',
+      requester: fields.requester,
+      requesterChatId: fields.requesterChatId,
+      queueRequestId: fields.queueRequestId,
+      sessionDrain: true,
+    },
+    { signal },
+  ), { runUrl });
+}
+
+async function stopTimedOutPack(note, dirRef, err) {
+  const runUrl = (err && err.runUrl) || actionsRunUrl();
+  try {
+    await releaseQueueOnTimeout(dirRef, err);
+  } catch (releaseErr) {
+    console.log('step-timeout queue release failed', releaseErr && releaseErr.message ? releaseErr.message : releaseErr);
+  }
+  try {
+    await withStepTimeout(POST_SAVE_STEPS.queueRelease, POST_SAVE_STEP_MS, () => note({
+      phase: 'error',
+      pack: (dirRef && dirRef.title) || 'перезапуск',
+      error: err && err.message ? err.message : String(err),
+      runUrl,
+    }), { runUrl });
+  } catch (noteErr) {
+    console.log('step-timeout admin error', noteErr && noteErr.message ? noteErr.message : noteErr);
+  }
+}
+
+async function startNextPackAfterTimeout() {
+  const runUrl = actionsRunUrl();
+  await withStepTimeout(POST_SAVE_STEPS.nextPack, POST_SAVE_STEP_MS, (signal) => postDrainComplete(
+    fetch,
+    process.env.TG2TM_PROGRESS_URL || '',
+    process.env.UPLOADER_SECRET || '',
+    { signal },
+  ), { runUrl });
+}
+
+async function handoffSessionDeadline(err) {
+  const uploaded = err && err.uploaded;
+  const total = err && err.total;
+  console.log('session-deadline', uploaded, '/', total);
+  try {
+    mkdirSync(join(ROOT, 'logs'), { recursive: true });
+    writeFileSync(join(ROOT, 'logs', 'session-deadline.json'), JSON.stringify({
+      at: new Date().toISOString(),
+      runId: process.env.GITHUB_RUN_ID || process.env.RUN_ID || '',
+      runUrl: actionsRunUrl(),
+      uploaded,
+      total,
+    }));
+  } catch (flagErr) {
+    console.log('session-deadline flag skipped', flagErr && flagErr.message ? flagErr.message : flagErr);
+  }
+  try {
+    const handed = await postSessionEnded(fetch, process.env.TG2TM_PROGRESS_URL || '', process.env.UPLOADER_SECRET || '', {
+      runId: process.env.GITHUB_RUN_ID || process.env.RUN_ID || '',
+      runUrl: actionsRunUrl(),
+      reason: 'deadline',
+    });
+    console.log('session-deadline handed off', JSON.stringify(handed));
+  } catch (handErr) {
+    console.log('session-deadline handoff failed', handErr && handErr.message ? handErr.message : handErr);
+  }
+  process.exitCode = 0;
+}
+
+async function failTimedOutRun(e, { note, dirRef, drainQueue, label }) {
+  if (isSessionDeadline(e)) {
+    await handoffSessionDeadline(e);
+    return true;
+  }
+  const message = e && e.message ? e.message : String(e);
+  log(label, '', 'остановлено', message);
+  if (!isStepTimeout(e)) {
+    try {
+      await note({ phase: 'error', pack: (dirRef && dirRef.title) || label, error: message });
+    } catch (noteErr) {
+      console.log('progress error note failed', noteErr && noteErr.message ? noteErr.message : noteErr);
+    }
+    process.exitCode = 1;
+    return false;
+  }
+  console.log('step-timeout stop', e.step);
+  if (e.step !== POST_SAVE_STEPS.nextPack) await stopTimedOutPack(note, dirRef, e);
+  if (drainQueue && e.step !== POST_SAVE_STEPS.nextPack) {
+    try {
+      await startNextPackAfterTimeout();
+    } catch (startErr) {
+      console.log('step-timeout next pack', startErr && startErr.message ? startErr.message : startErr);
+    }
+  }
+  process.exitCode = 1;
+  return true;
+}
+
 // Upload / finalize / close use the pack list from the queue or CLI, not a
 // hard-coded folder number.
 export function dirsForRun(dirs, { finalize = false, close = false } = {}) {
@@ -3994,13 +4184,13 @@ async function main() {
     sessions.close();
     return;
   }
+  let timedOut = false;
   if (drainOnly) {
     try {
       dirRef.sessionDrain = true;
       await drainRemainingQueue({ bot, note, dirRef, uploadPack });
     } catch (e) {
-      log('drain', '', 'остановлено', e.message);
-      process.exitCode = 1;
+      await failTimedOutRun(e, { note, dirRef, drainQueue: true, label: 'drain' });
     }
     sessions.close();
     return;
@@ -4013,9 +4203,7 @@ async function main() {
         await drainRemainingQueue({ bot, note, dirRef, uploadPack });
       }
     } catch (e) {
-      log('restart', '', 'остановлено', e.message);
-      await note({ phase: 'error', pack: dirRef.title || 'перезапуск', error: e.message });
-      process.exitCode = 1;
+      await failTimedOutRun(e, { note, dirRef, drainQueue, label: 'restart' });
     }
     sessions.close();
     return;
@@ -4027,19 +4215,16 @@ async function main() {
       if (finalize) await finalizePack(bot, d, note, dirRef);
       else await uploadPack(bot, d, { close, note, dirRef });
     } catch (e) {
-      log(d, '', 'остановлено', e.message);
-      await note({ phase: 'error', pack: dirRef.title || d, error: e.message });
-      process.exitCode = 1;
+      timedOut = await failTimedOutRun(e, { note, dirRef, drainQueue, label: d });
       break;
     }
   }
-  if (drainQueue) {
+  if (drainQueue && !timedOut) {
     try {
       dirRef.sessionDrain = true;
       await drainRemainingQueue({ bot, note, dirRef, uploadPack });
     } catch (e) {
-      log('drain', '', 'остановлено', e.message);
-      process.exitCode = 1;
+      await failTimedOutRun(e, { note, dirRef, drainQueue: true, label: 'drain' });
     }
   }
   sessions.close();
