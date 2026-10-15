@@ -1,15 +1,22 @@
 // Sets @tg2tmbot description, short description and command list.
-// Token: TG2TMBOT_TOKEN or TELEGRAM_BOT_TOKEN. Optional LOGIN_CHAT_IDS (comma-separated) for admin menu scope.
-import { adminChatIds } from "../scripts/admin_status.mjs";
+// Token: TG2TMBOT_TOKEN or TELEGRAM_BOT_TOKEN.
+// Admin menu: union of LOGIN_CHAT_IDS and worker/wrangler.toml (numeric chat ids only).
+import { readFileSync } from "node:fs";
+import { adminMenuChatIds } from "../scripts/admin_status.mjs";
 import {
   ABOUT,
   ADMIN_COMMANDS,
   BOT_NAME,
   DESCRIPTION,
-  INITIAL_SUBSCRIBER,
   USER_COMMANDS,
 } from "./src/logic.js";
 import { telegramFetch } from "./telegram_fetch.mjs";
+
+function loginChatIdsFromWrangler() {
+  const toml = readFileSync(new URL("./wrangler.toml", import.meta.url), "utf8");
+  const match = toml.match(/^LOGIN_CHAT_IDS\s*=\s*"([^"]*)"/m);
+  return match ? match[1] : "";
+}
 
 const token = process.env.TG2TMBOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
@@ -32,7 +39,7 @@ await call("setMyDescription", { description: DESCRIPTION });
 await call("setMyShortDescription", { short_description: ABOUT });
 await call("setMyCommands", { commands: USER_COMMANDS });
 
-const adminIds = adminChatIds(process.env.LOGIN_CHAT_IDS || String(INITIAL_SUBSCRIBER));
+const adminIds = adminMenuChatIds(process.env.LOGIN_CHAT_IDS, loginChatIdsFromWrangler());
 for (const chatId of adminIds) {
   await call("setMyCommands", {
     commands: ADMIN_COMMANDS,

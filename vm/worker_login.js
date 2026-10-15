@@ -50,7 +50,7 @@ export async function handleRestart(env, message, deps = {}) {
   const send = deps.send;
   if (!send) throw new Error("send");
   const chatId = message && message.chat && message.chat.id;
-  if (!isAdminChat(chatId, ADMIN_CHAT_ID)) {
+  if (!isAdminChat(chatId, (env && env.LOGIN_CHAT_IDS) || ADMIN_CHAT_ID)) {
     await send(env, chatId, "Эта команда только для администратора.");
     return true;
   }

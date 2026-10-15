@@ -63,6 +63,20 @@ export function adminChatIds(raw) {
   return ids.length ? ids : [ADMIN_CHAT_ID];
 }
 
+// Menu scopes and command checks: every numeric id from each source, in order.
+// An env list that still names only the original admin does not drop ids from wrangler.
+export function adminMenuChatIds(...sources) {
+  const joined = sources.map((value) => String(value ?? "").trim()).filter(Boolean).join(",");
+  const seen = new Set();
+  const unique = [];
+  for (const id of adminChatIds(joined)) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(id);
+  }
+  return unique;
+}
+
 export function isAdminChat(chatId, raw) {
   return adminChatIds(raw).includes(String(chatId));
 }

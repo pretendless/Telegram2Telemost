@@ -1004,7 +1004,7 @@ test("an allowlisted /login and /connect dispatch the Telemost workflow", async 
 test("/restart is only for the admin chat, cancels the running job, and dispatches one restart from main", async () => {
   const sent = [];
   const calls = [];
-  const env = { ...envWith(), LOGIN_CHAT_IDS: "111,8502935020", GH_DISPATCH_TOKEN: "dispatch-token" };
+  const env = { ...envWith(), LOGIN_CHAT_IDS: "8502935020,5513343655", GH_DISPATCH_TOKEN: "dispatch-token" };
   let lists = 0;
   const fetch = async (url, init) => {
     calls.push({ url, method: init && init.method, body: init && init.body ? JSON.parse(init.body) : null, authorization: init.headers.authorization });
@@ -2418,4 +2418,171 @@ test("/ghrun waitUntil defers GitHub dispatch", async () => {
 
 test("ADMIN menu lists ghrun", () => {
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "ghrun").description, "Запустить GitHub workflow");
+});
+
+test("both configured admins see every pack and admin commands; an unrelated chat does not", async () => {
+  const existingAdmin = 8502935020;
+  const addedAdmin = 5513343655;
+  const owner = 424242;
+  const other = 31337;
+  const stranger = 999001;
+  const run = "https://github.com/pretendless/tg2tm/actions/runs/38644156549";
+  const env = {
+    ...envWith(),
+    LOGIN_CHAT_IDS: `${existingAdmin},${addedAdmin}`,
+    GH_DISPATCH_TOKEN: "dispatch-token",
+  };
+  const wool = {
+    id: "req-wool",
+    chatId: String(owner),
+    title: "Шерсть Ебаная",
+    links: ["https://t.me/addstickers/piidarasy"],
+    priority: false,
+    createdAt: "2026-10-14T18:00:00.000Z",
+    status: "uploading",
+    stickers: 109,
+  };
+  const devil = {
+    id: "req-dev",
+    chatId: String(other),
+    title: "Дьяволица",
+    links: ["https://t.me/addstickers/dev"],
+    priority: false,
+    createdAt: "2026-10-14T18:01:00.000Z",
+    status: "queued",
+    stickers: 10,
+  };
+  const seedQueue = () => {
+    env.BOT_KV.store.set("meta:seeded", "1");
+    env.BOT_KV.store.set("queue", JSON.stringify({ priority: [], items: [wool, devil] }));
+    env.BOT_KV.store.set(
+      "meta:telemost-session",
+      JSON.stringify({ runId: "38644156549", url: run, at: "2026-10-14T18:05:00.000Z" }),
+    );
+  };
+  seedQueue();
+  const sent = [];
+  const calls = [];
+  const sendMessage = async (_env, chatId, text) => {
+    sent.push({ chatId: String(chatId), text });
+    return { message_id: sent.length };
+  };
+  const fetch = async (url, init) => {
+    const href = String(url);
+    calls.push({
+      url: href,
+      body: init && init.body ? JSON.parse(init.body) : null,
+    });
+    if (href.includes("/runs?")) return { status: 200, json: async () => ({ workflow_runs: [] }) };
+    return { status: 204, json: async () => ({}) };
+  };
+  const reply = async (chatId, text) => {
+    sent.length = 0;
+    calls.length = 0;
+    await handle(telegramRequest(chatId, text), env, { sendMessage, fetch });
+    return sent.map((row) => row.text);
+  };
+
+  const existingStatus = await reply(existingAdmin, "/status");
+  const addedStatus = await reply(addedAdmin, "/status");
+  assert.equal(addedStatus.join("\n"), existingStatus.join("\n"));
+  assert.match(existingStatus.join("\n"), /Шерсть Ебаная/);
+  assert.match(existingStatus.join("\n"), /github\.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+  const ownerStatus = await reply(owner, "/status");
+  assert.match(ownerStatus.join("\n"), /Шерсть Ебаная/);
+  assert.match(ownerStatus.join("\n"), /109/);
+  assert.doesNotMatch(ownerStatus.join("\n"), /Дьяволица/);
+  assert.doesNotMatch(ownerStatus.join("\n"), /github\.com/i);
+  assert.doesNotMatch(ownerStatus.join("\n"), /actions\/runs/);
+  const otherStatus = await reply(other, "/status");
+  assert.match(otherStatus.join("\n"), /Дьяволица/);
+  assert.doesNotMatch(otherStatus.join("\n"), /Шерсть Ебаная/);
+  assert.doesNotMatch(otherStatus.join("\n"), /github\.com/i);
+  const strangerStatus = await reply(stranger, "/status");
+  assert.match(strangerStatus.join("\n"), /Активных запросов нет/);
+  assert.doesNotMatch(strangerStatus.join("\n"), /Шерсть|Дьяволица|github\.com/i);
+
+  for (const admin of [existingAdmin, addedAdmin]) {
+    const overview = await reply(admin, "/queue");
+    assert.match(overview.join("\n"), /Шерсть Ебаная/);
+    assert.match(overview.join("\n"), /Дьяволица/);
+    assert.doesNotMatch(overview.join("\n"), /только для администратора/);
+  }
+  const strangerQueue = await reply(stranger, "/queue");
+  assert.equal(strangerQueue[0], "Эта команда только для администратора.");
+  assert.equal(calls.length, 0);
+
+  sent.length = 0;
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(wool),
+      title: wool.title,
+      status: "uploading",
+      uploaded: 2,
+      total: 109,
+      runUrl: run,
+      queueRequestId: wool.id,
+      requesterChatId: String(owner),
+      adminDelivered: false,
+    }),
+    env,
+    { sendMessage },
+  );
+  const adminCards = sent.filter((row) => row.chatId === String(existingAdmin) || row.chatId === String(addedAdmin));
+  assert.equal(adminCards.length, 2);
+  for (const card of adminCards) {
+    assert.match(card.text, /Шерсть Ебаная/);
+    assert.match(card.text, /github\.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+  }
+  const ownerCard = sent.find((row) => row.chatId === String(owner));
+  assert.ok(ownerCard);
+  assert.match(ownerCard.text, /Шерсть Ебаная/);
+  assert.doesNotMatch(ownerCard.text, /github\.com/i);
+  assert.doesNotMatch(ownerCard.text, /actions\/runs/);
+  assert.equal(sent.some((row) => row.chatId === String(other) || row.chatId === String(stranger)), false);
+
+  const refused = "Эта команда только для администратора.";
+  for (const command of ["/restart", "/skip", "/project статус очереди", "/ghrun check-bot.yml"]) {
+    const texts = await reply(stranger, command);
+    assert.equal(texts[0], refused);
+    assert.equal(calls.length, 0);
+    assert.doesNotMatch(texts.join("\n"), /github\.com/i);
+  }
+  const loginDenied = await reply(stranger, "/login");
+  assert.equal(loginDenied[0], "Эта команда только для владельца.");
+  assert.equal(calls.length, 0);
+
+  for (const admin of [existingAdmin, addedAdmin]) {
+    const login = await reply(admin, "/login");
+    assert.match(login.join("\n"), /QR-код Яндекса/);
+    const loginDispatch = calls.find((call) => call.body && call.body.inputs && call.body.inputs.mode === "login");
+    assert.equal(loginDispatch.body.inputs.chat_id, String(admin));
+
+    const project = await reply(admin, "/project статус очереди");
+    assert.match(project.join("\n"), /Запрос к проекту принят/);
+    assert.equal(
+      calls.some((call) => String(call.url).includes("/workflows/cursor-agent.yml/dispatches")),
+      true,
+    );
+
+    const ghrun = await reply(admin, "/ghrun check-bot.yml");
+    assert.match(ghrun.join("\n"), /check-bot\.yml/);
+    assert.equal(
+      calls.some((call) => String(call.url).includes("/workflows/check-bot.yml/dispatches")),
+      true,
+    );
+
+    const restart = await reply(admin, "/restart");
+    assert.match(restart.join("\n"), /отдельным сообщением/);
+    const restartDispatch = calls.find((call) => call.body && call.body.inputs && call.body.inputs.mode === "restart");
+    assert.equal(restartDispatch.body.inputs.chat_id, String(admin));
+
+    seedQueue();
+    const pipe = trackPipelineWait({ sendMessage, fetch });
+    sent.length = 0;
+    await handle(telegramRequest(admin, "/skip"), env, pipe);
+    await pipe.flushPipeline();
+    assert.match(sent[0].text, /Шерсть Ебаная/);
+    assert.doesNotMatch(sent.map((row) => row.text).join("\n"), /только для администратора/);
+  }
 });
