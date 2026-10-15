@@ -143,7 +143,7 @@ export function projectUsageText(error) {
 
 export function projectAckText(promptId) {
   return (
-    "Приняла. Запрос к проекту принят. Краткий ответ пришлю сюда, когда обработка завершится.\n\n" +
+    "Запрос к проекту принят. Краткий ответ пришлю сюда, когда обработка завершится.\n\n" +
     `id: ${promptId}`
   );
 }

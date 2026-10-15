@@ -32,37 +32,45 @@ export const EXAMPLE =
   "https://t.me/addstickers/minty2_vk";
 
 export const FORMAT =
-  "Новый пак — команда /create, название, затем стикеры или ссылки и /done.\n" +
+  "Новый набор — четыре шага.\n" +
   "\n" +
   "1. /create.\n" +
-  `2. Следующее сообщение — только название пака, без ссылок, не длиннее ${MAX_PACK_TITLE} символов.\n` +
-  "3. Затем стикер из набора или ссылки t.me/addstickers/… — сколько угодно сообщений, в любом порядке. Порядок наборов = порядок стикеров.\n" +
-  `4. /done ставит запрос в очередь. Всего не больше ${MAX_STICKERS} стикеров: это лимит Телемоста на пак.\n` +
+  `2. Следующее сообщение — только название, без ссылок и не длиннее ${MAX_PACK_TITLE} символов.\n` +
+  "3. Дальше стикер из набора или ссылки t.me/addstickers/…. Сообщений может быть несколько, порядок любой. Один стикер добавляет весь набор. Повтор того же набора не считается.\n" +
+  `4. /done ставит собранное в очередь. Сумма стикеров — не больше ${MAX_STICKERS}.\n` +
   "\n" +
-  "Пример (название и ссылки — разными сообщениями):\n" +
+  "Пример диалога:\n" +
   "\n" +
-  EXAMPLE;
+  "/create\n" +
+  "Минто\n" +
+  "https://t.me/addstickers/minty_vk\n" +
+  "/done";
 
 export const START =
   `${OPERATOR} на связи. ${BOT_NAME} (@tg2tmbot) переносит стикеры из Telegram в Телемост.\n` +
   "\n" +
-  FORMAT +
-  `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
-  "\n\nСначала /create — спрошу название, затем стикеры или ссылки (см. /format). После /done передам в очередь." +
+  "Новый набор: /create. Дальше спрошу название, затем приму стикеры или ссылки. В очередь — после /done. Пример и лимит — /format.\n" +
+  "\n" +
+  `Готовые наборы публикуются в канале ${CHANNEL}` +
   "\n\nПишу только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылаю. /status — ваши запросы, /stop — прервать ввод.";
 
+// BotFather long description. Different sentences from /start: no call sign.
 export const DESCRIPTION =
-  `${OPERATOR} на связи. ${BOT_NAME} переносит стикеры из Telegram в Телемост.\n` +
+  "Сбор набора для Телемоста.\n" +
   "\n" +
-  "Команда /create: сначала только название, затем ссылки t.me/addstickers/… по порядку, " +
-  `всего до ${MAX_STICKERS} стикеров.\n` +
+  `/create, затем название (до ${MAX_PACK_TITLE} символов). ` +
+  "Дальше стикеры из наборов и ссылки t.me/addstickers — в любом порядке, " +
+  `вместе не больше ${MAX_STICKERS} стикеров. /done отправляет набор в очередь.\n` +
   "\n" +
-  "Пример:\n" +
-  EXAMPLE +
-  "\n\n" +
-  `Проверю набор и передам в очередь. Готовые наборы: ${CHANNEL}`;
+  "Пример сообщений:\n" +
+  "/create\n" +
+  "Минто\n" +
+  "стикер или https://t.me/addstickers/minty_vk\n" +
+  "/done\n" +
+  "\n" +
+  `Канал с готовыми наборами: ${CHANNEL}`;
 
-export const ABOUT = `${OPERATOR} на связи: перенос стикеров из Telegram в Телемост.`;
+export const ABOUT = "Стикеры из Telegram в Телемост. Набор: /create, затем /done.";
 
 export const CREATE_PROMPT =
   "Соединяю. Как назвать пак в Телемосте?\n\n" +
@@ -313,10 +321,10 @@ export function stickerSetName(sticker) {
 }
 
 export const NEED_CREATE =
-  "Сначала /create — тогда соединяю. Спрошу название, затем ссылки t.me/addstickers/….\n\nПодробнее — /format.";
+  "Сначала /create. Спрошу название, затем стикер из набора или ссылки t.me/addstickers/…. /done ставит в очередь.\n\nПодробнее — /format.";
 
 export const STOP_CLEARED =
-  "Приняла. Ввод прерван, незаконченный /create сброшен.\n\n" +
+  "Ввод прерван, незаконченный /create сброшен.\n\n" +
   "Снова можно: /create, /status, /format, /start.";
 
 export const STOP_IDLE =
@@ -330,8 +338,8 @@ export function awaitCreateKey(chatId) {
 
 // Telegram menu (BotFather / setMyCommands). Admin-only rows — ADMIN_ONLY_COMMANDS.
 export const USER_COMMANDS = [
-  { command: "start", description: "На связи: как пользоваться" },
-  { command: "create", description: "Новый запрос — передам в очередь" },
+  { command: "start", description: "Как пользоваться" },
+  { command: "create", description: "Начать новый набор" },
   { command: "format", description: "Формат и пример пака" },
   { command: "status", description: "Ваши запросы в очереди" },
   { command: "stop", description: "Прервать ввод и вернуться к командам" },
@@ -601,7 +609,7 @@ export function commandOf(text) {
 
 export function staticReply(cmd) {
   if (cmd === "/start" || cmd === "/help") return { subscribe: true, text: START };
-  if (cmd === "/format" || cmd === "/example") return { text: `Приняла.\n\n${FORMAT}` };
+  if (cmd === "/format" || cmd === "/example") return { text: FORMAT };
   return null;
 }
 
@@ -696,8 +704,8 @@ export function nameStepResult(text) {
       ok: false,
       reason: "links",
       text:
-        "Не приняла: на этом шаге нужно только название пака, без ссылок.\n\n" +
-        "Пришлите название одним сообщением. Ссылки t.me/addstickers/… — следующим шагом.",
+        "На этом шаге нужно только название пака, без ссылок.\n\n" +
+        "Пришлите название одним сообщением. Стикер или ссылки — следующим шагом.",
     };
   }
   const title = raw.replace(/\s+/g, " ").trim();
@@ -707,7 +715,7 @@ export function nameStepResult(text) {
       ok: false,
       reason: "long",
       text:
-        `Не приняла. Название — ${title.length} ${ruChars(title.length)}, лимит ${MAX_PACK_TITLE}.\n\n` +
+        `Название — ${title.length} ${ruChars(title.length)}, лимит ${MAX_PACK_TITLE}.\n\n` +
         "Пришлите название ещё раз, без ссылок.",
     };
   }
@@ -733,7 +741,7 @@ export function parseStickerSetNames(text) {
 
 function linksAgain(title, problem) {
   return (
-    `Не приняла.\n\n${problem}\n\n` +
+    `${problem}\n\n` +
     `Пришлите ссылки t.me/addstickers/… ещё раз — одну или несколько. Название «${title}» сохранено.`
   );
 }
@@ -1282,8 +1290,8 @@ export function alreadyQueuedReply({ title, priority }) {
 
 export function acceptReply({ title, links, rows, total, priority, ahead }) {
   const head = priority
-    ? `Приняла. Запрос принят с приоритетом. «${htmlEscape(title)}» встанет в очередь сразу после набора, который уже загружается.`
-    : `Приняла. Запрос принят. Передаю в очередь «${htmlEscape(title)}».`;
+    ? `Передаю в очередь с приоритетом «${htmlEscape(title)}»: сразу после набора, который уже загружается.`
+    : `Передаю в очередь «${htmlEscape(title)}».`;
   const position =
     typeof ahead === "number"
       ? ahead === 0
