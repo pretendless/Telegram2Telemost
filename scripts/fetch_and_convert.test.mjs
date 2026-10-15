@@ -20,6 +20,28 @@ print(chosen)
   return result.stdout.trim();
 }
 
+test('video WEBM is not converted; TGS and static stickers are', () => {
+  const result = spawnSync('python3', ['-c', `
+import json, sys
+sys.path.insert(0, "scripts")
+from fetch_and_convert import sticker_kind, will_convert
+rows = [
+  {"is_video": True, "is_animated": False},
+  {"is_animated": True},
+  {"is_animated": False},
+  {},
+]
+print(json.dumps([[sticker_kind(row), will_convert(row)] for row in rows]))
+`], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    ['video', false],
+    ['animated', true],
+    ['static', true],
+    ['static', true],
+  ]);
+});
+
 test('sticker cache falls back when the image directory is not writable', () => {
   const root = mkdtempSync(join(tmpdir(), 'tg2tm-cache-'));
   const blocked = join(root, 'blocked');

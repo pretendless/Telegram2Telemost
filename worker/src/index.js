@@ -46,8 +46,13 @@ import {
   parseStickerSetNames,
   stickerSetName,
   STICKER_NOT_IN_PACK,
+  CREATE_HOLD_OPEN,
   addedSetsReply,
+  answerHold,
+  classifyStickers,
   collectSets,
+  holdQuestion,
+  normalizeStickerLookup,
   focusRequest,
   isPriorityChat,
   normalizeQueue,
@@ -156,7 +161,7 @@ function adminIo(env, deps) {
 
 async function defaultStickerCount(env, name) {
   const set = await telegram(env, "getStickerSet", { name });
-  return (set.stickers || []).length;
+  return classifyStickers(set.stickers || []);
 }
 
 async function ensureSeed(kv) {
@@ -717,6 +722,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     const awaiting = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
     if (!awaiting || awaiting.step !== "links") {
       out = "Сейчас нечего ставить в очередь. /create — начать, затем стикеры или ссылки, и /done.";
+    } else if (awaiting.hold) {
+      out = `${CREATE_HOLD_OPEN}\n\n${holdQuestion(awaiting.hold)}`;
     } else if (!awaiting.sets.length) {
       out = CREATE_DONE_EMPTY;
     } else {
@@ -852,6 +859,17 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         out = createLinksPrompt(named.title);
       }
     } else if (awaiting && awaiting.step === "links") {
+      const answer = text.trim().toLowerCase();
+      if (awaiting.hold && (answer === "да" || answer === "нет")) {
+        const collected = answerHold(awaiting.sets, awaiting.hold, answer === "да");
+        await env.BOT_KV.put(
+          awaitCreateKey(chatId),
+          encodeAwaitCreate({ step: "links", title: awaiting.title, sets: collected.sets }),
+        );
+        out = addedSetsReply(collected);
+      } else if (awaiting.hold) {
+        out = `${CREATE_HOLD_OPEN}\n\n${holdQuestion(awaiting.hold)}`;
+      } else {
       const fromSticker = sticker ? stickerSetName(sticker) : null;
       if (sticker && !fromSticker) {
         const total = (awaiting.sets || []).reduce((sum, row) => sum + row.count, 0);
@@ -861,8 +879,10 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         const lookups = [];
         for (const name of names) {
           try {
-            const count = await stickerCount(env, name);
-            lookups.push({ name, count });
+            const info = normalizeStickerLookup(await stickerCount(env, name));
+            lookups.push(info
+              ? { name, count: info.supported, supported: info.supported, unsupported: info.unsupported, animated: info.animated }
+              : { name, missing: true });
           } catch {
             lookups.push({ name, missing: true });
           }
@@ -873,10 +893,11 @@ async function answer(env, update, send, stickerCount, deps = {}) {
           const collected = collectSets(awaiting.sets, lookups);
           await env.BOT_KV.put(
             awaitCreateKey(chatId),
-            encodeAwaitCreate({ step: "links", title: awaiting.title, sets: collected.sets }),
+            encodeAwaitCreate({ step: "links", title: awaiting.title, sets: collected.sets, hold: collected.hold }),
           );
           out = addedSetsReply(collected);
         }
+      }
       }
     } else if (!admin) {
       out = NEED_CREATE;
@@ -887,17 +908,29 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       } else {
         const rows = [];
         let total = 0;
+        let blocked = false;
         for (const name of parsed.names) {
           try {
-            const count = await stickerCount(env, name);
-            total += count;
-            rows.push(`• ${name} — ${count}`);
+            const info = normalizeStickerLookup(await stickerCount(env, name));
+            if (!info) {
+              rows.push(`• ${name} — набор не найден`);
+              continue;
+            }
+            if (info.unsupported > 0) {
+              blocked = true;
+              rows.push(`• ${name} — ${info.unsupported} видео WEBM не переводятся в PNG, ${info.supported} можно оставить через /create`);
+              continue;
+            }
+            total += info.supported;
+            rows.push(`• ${name} — ${info.supported}`);
           } catch {
             rows.push(`• ${name} — набор не найден`);
           }
         }
         const missing = rows.some((row) => row.includes("не найден"));
-        if (missing || total > MAX_STICKERS || total === 0) {
+        if (blocked) {
+          out = `Пак «${parsed.title}»\n\n${rows.join("\n")}\n\nВидео WEBM в очередь не беру. Через /create можно ответить «да» и оставить остальные стикеры.`;
+        } else if (missing || total > MAX_STICKERS || total === 0) {
           out = renderPackCheck(parsed.title, rows, total);
         } else {
           const accepted = await acceptCountedRequest(

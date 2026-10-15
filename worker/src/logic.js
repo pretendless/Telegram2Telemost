@@ -83,11 +83,23 @@ export const STICKER_NOT_IN_PACK =
 export const CREATE_DONE_EMPTY =
   "Пока ничего не собрано. Пришлите стикер из набора или ссылки t.me/addstickers/….";
 
-export function addedSetsReply({ addedCount, total, duplicates, rejected, missing }) {
+export const CREATE_HOLD_OPEN =
+  "Сначала напишите «да» или «нет» про набор с видео. /done его не добавляет и в очередь ничего не ставит.";
+
+export function holdQuestion(hold) {
+  return (
+    `В наборе «${hold.name}» ${hold.unsupported} стикеров — видео WEBM, их не перевести в PNG. ` +
+    `Остальные ${hold.supported} можно оставить.\n` +
+    "Напишите «да», чтобы добавить только их, или «нет», чтобы набор не добавлять."
+  );
+}
+
+export function addedSetsReply({ addedCount, total, duplicates, rejected, missing, animatedAdded, unconvertible, deferred, hold, declined }) {
   const lines = [];
   if (addedCount > 0) {
+    const converted = animatedAdded > 0 ? ` ${addedCount} стикеров, в том числе анимация, переведу в PNG.` : "";
     lines.push(
-      `Добавлено ${addedCount}, всего ${total} из ${MAX_STICKERS}. Пришлите ещё стикер или ссылку — или /done, чтобы поставить в очередь.`,
+      `Добавлено ${addedCount}, всего ${total} из ${MAX_STICKERS}.${converted} Пришлите ещё стикер или ссылку — или /done, чтобы поставить в очередь.`,
     );
   }
   if (duplicates.length) {
@@ -114,7 +126,19 @@ export function addedSetsReply({ addedCount, total, duplicates, rejected, missin
         : `Ничего из этого сообщения не добавлено: ${listed} вместе дали бы ${total + batch} стикеров, лимит ${MAX_STICKERS}.`,
     );
   }
-  if (!addedCount && (duplicates.length || missing.length || rejected.length)) {
+  for (const row of unconvertible || []) {
+    lines.push(
+      `Набор «${row.name}» не добавлен: все ${row.total} стикеров — видео WEBM, в PNG их не перевести.`,
+    );
+  }
+  for (const row of deferred || []) {
+    lines.push(
+      `Набор «${row.name}» пока не добавлен: в нём есть видео WEBM. Пришлите его отдельным сообщением.`,
+    );
+  }
+  if (hold) lines.push(holdQuestion(hold));
+  if (declined) lines.push(`Набор «${declined}» не добавлен.`);
+  if (!addedCount && (duplicates.length || missing.length || rejected.length || declined || (unconvertible || []).length || (deferred || []).length)) {
     const next = total > 0 ? "Пришлите другой стикер или ссылку — или /done." : "Пришлите другой стикер или ссылку.";
     lines.push(`Всего ${total} из ${MAX_STICKERS}. ${next}`);
   }
@@ -122,8 +146,64 @@ export function addedSetsReply({ addedCount, total, duplicates, rejected, missin
   return lines.join("\n\n");
 }
 
-// One message is atomic: every new set in it is added, in order, or none of them are.
-// Sets already collected stay. A name already in the request is not counted again.
+// Telegram Bot API Sticker. is_animated is a TGS file: rlottie rasterizes one frame to PNG.
+// is_video is WEBM. frame_from_webm needs ffmpeg, which is not installed, so video is not converted.
+// Anything else is a static WEBP (or PNG), opened by Pillow and written as PNG.
+export function classifyStickers(stickers) {
+  let animated = 0;
+  let video = 0;
+  let staticCount = 0;
+  for (const sticker of Array.isArray(stickers) ? stickers : []) {
+    if (sticker && sticker.is_video) video += 1;
+    else if (sticker && sticker.is_animated) animated += 1;
+    else staticCount += 1;
+  }
+  return {
+    static: staticCount,
+    animated,
+    video,
+    supported: staticCount + animated,
+    unsupported: video,
+  };
+}
+
+// A bare count from older callers means every sticker is static and uploadable.
+export function normalizeStickerLookup(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const count = Math.max(0, Math.floor(value));
+    return { static: count, animated: 0, video: 0, supported: count, unsupported: 0 };
+  }
+  if (value && typeof value === "object" && Array.isArray(value.stickers)) return classifyStickers(value.stickers);
+  if (!value || typeof value !== "object" || !Number.isFinite(Number(value.supported))) return null;
+  const supported = Math.max(0, Math.floor(Number(value.supported)));
+  const unsupported = Math.max(0, Math.floor(Number(value.unsupported) || 0));
+  const animated = Math.max(0, Math.floor(Number(value.animated) || 0));
+  const video = Math.max(0, Math.floor(Number(value.video ?? unsupported)));
+  return {
+    static: Math.max(0, supported - Math.min(animated, supported)),
+    animated: Math.min(animated, supported),
+    video,
+    supported,
+    unsupported,
+  };
+}
+
+function intakeSet(row) {
+  const name = String((row && row.name) || "").trim();
+  if (!name) return null;
+  if (row.missing) return { name, missing: true };
+  const brokenOut = row.supported != null || row.unsupported != null || row.animated != null;
+  const supported = Math.floor(Number(brokenOut ? row.supported : row.count));
+  const unsupported = brokenOut ? Math.floor(Number(row.unsupported) || 0) : 0;
+  const animated = brokenOut ? Math.floor(Number(row.animated) || 0) : 0;
+  if (!Number.isFinite(supported) || supported < 0 || unsupported < 0) return { name, missing: true };
+  return { name, supported, unsupported, animated, count: supported };
+}
+
+// One message is atomic for sets that convert entirely: they are all added, in order, or none are.
+// A set with video WEBM and some convertible stickers is not added here. One such set becomes `hold`
+// (the user answers «да» or «нет»). Several in one message are deferred, not asked about together.
+// A set with nothing convertible is refused. The 150 limit counts only stickers that will be uploaded.
 export function collectSets(existing, incoming) {
   const sets = [];
   for (const row of Array.isArray(existing) ? existing : []) {
@@ -137,38 +217,90 @@ export function collectSets(existing, incoming) {
   const duplicates = [];
   const missing = [];
   const fresh = [];
-  for (const row of Array.isArray(incoming) ? incoming : []) {
-    const name = String((row && row.name) || "").trim();
-    if (!name) continue;
-    if (row.missing || !Number.isFinite(Number(row.count)) || Number(row.count) < 0) {
-      missing.push(name);
+  const partial = [];
+  const unconvertible = [];
+  const seen = () => [...sets, ...fresh, ...partial, ...unconvertible];
+  for (const raw of Array.isArray(incoming) ? incoming : []) {
+    const row = intakeSet(raw);
+    if (!row) continue;
+    if (row.missing) {
+      missing.push(row.name);
       continue;
     }
-    const count = Math.floor(Number(row.count));
-    if (sets.some((item) => item.name === name) || fresh.some((item) => item.name === name)) {
-      duplicates.push(name);
+    if (seen().some((item) => item.name === row.name)) {
+      duplicates.push(row.name);
       continue;
     }
-    fresh.push({ name, count });
+    if (row.supported === 0) {
+      unconvertible.push({ name: row.name, total: row.unsupported });
+      continue;
+    }
+    if (row.unsupported > 0) {
+      partial.push(row);
+      continue;
+    }
+    fresh.push(row);
   }
-  const batch = fresh.reduce((sum, row) => sum + row.count, 0);
+  const batch = fresh.reduce((sum, row) => sum + row.supported, 0);
   const rejected = total + batch > MAX_STICKERS ? fresh : [];
   const added = rejected.length ? [] : fresh;
   if (!rejected.length) {
     for (const row of added) {
-      sets.push(row);
-      total += row.count;
+      sets.push({ name: row.name, count: row.supported });
+      total += row.supported;
     }
   }
+  const deferred = rejected.length ? partial : partial.length === 1 ? [] : partial;
+  const hold = !rejected.length && partial.length === 1
+    ? {
+        name: partial[0].name,
+        supported: partial[0].supported,
+        unsupported: partial[0].unsupported,
+        animated: partial[0].animated,
+      }
+    : null;
   return {
     sets,
     added,
-    addedCount: added.reduce((sum, row) => sum + row.count, 0),
+    addedCount: added.reduce((sum, row) => sum + row.supported, 0),
+    animatedAdded: added.reduce((sum, row) => sum + row.animated, 0),
     duplicates,
     rejected,
     missing,
+    unconvertible,
+    deferred,
+    hold,
     total,
   };
+}
+
+// «да» adds only the convertible stickers. «нет» leaves the set out. The question does not stay open.
+export function answerHold(sets, hold, yes) {
+  if (!yes) {
+    const total = (sets || []).reduce((sum, row) => sum + row.count, 0);
+    return {
+      sets: sets || [],
+      added: [],
+      addedCount: 0,
+      animatedAdded: 0,
+      duplicates: [],
+      rejected: [],
+      missing: [],
+      unconvertible: [],
+      deferred: [],
+      hold: null,
+      declined: hold && hold.name,
+      total,
+    };
+  }
+  const collected = collectSets(sets, [{
+    name: hold.name,
+    supported: hold.supported,
+    unsupported: 0,
+    animated: hold.animated,
+    count: hold.supported,
+  }]);
+  return { ...collected, declined: null, hold: null };
 }
 
 // Bot API Sticker.set_name — the sticker set this sticker belongs to. Absent when it is not in a set.
@@ -510,7 +642,20 @@ export function encodeAwaitCreate(state) {
     if (sets.some((item) => item.name === name)) continue;
     sets.push({ name, count });
   }
-  return JSON.stringify({ step: "links", title, sets });
+  const stored = { step: "links", title, sets };
+  const hold = cleanHold(state.hold);
+  if (hold) stored.hold = hold;
+  return JSON.stringify(stored);
+}
+
+function cleanHold(hold) {
+  if (!hold || typeof hold !== "object") return null;
+  const name = String(hold.name || "").trim();
+  const supported = Math.floor(Number(hold.supported));
+  const unsupported = Math.floor(Number(hold.unsupported));
+  const animated = Math.floor(Number(hold.animated) || 0);
+  if (!/^[A-Za-z0-9_]+$/.test(name) || !(supported > 0) || !(unsupported > 0)) return null;
+  return { name, supported, unsupported, animated };
 }
 
 export function decodeAwaitCreate(raw) {
@@ -536,7 +681,10 @@ export function decodeAwaitCreate(raw) {
       if (sets.some((item) => item.name === name)) continue;
       sets.push({ name, count });
     }
-    return { step: "links", title, sets };
+    const decoded = { step: "links", title, sets };
+    const hold = cleanHold(parsed.hold);
+    if (hold) decoded.hold = hold;
+    return decoded;
   }
   return null;
 }
