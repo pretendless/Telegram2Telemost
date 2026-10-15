@@ -1,8 +1,10 @@
 # tg2tm
 
+[@tg2tmbot](https://t.me/tg2tmbot) turns Telegram sticker packs into Telemost sticker packs. A person sends a pack name, then one or more `t.me/addstickers/…` links. A Cloudflare Worker keeps the queue and, when no browser job is running, starts a GitHub Actions workflow. That workflow opens a saved browser session and uploads images, one at a time, into the Telemost bot «Стикеры». Finished packs are announced in [t.me/tg2tm](https://t.me/tg2tm).
+
 ## Что это
 
-Бот [@tg2tmbot](https://t.me/tg2tmbot) принимает запрос на перенос набора стикеров из Telegram в Телемост. Человек присылает название и ссылки на наборы. Очередь хранит Cloudflare Worker. Загрузку выполняет отдельная сессия браузера в GitHub Actions: job открывает сохранённый вход Яндекса и собирает пак в боте «Стикеры».
+Бот принимает запрос на перенос набора стикеров из Telegram в Телемост. Человек присылает название и ссылки на наборы. Очередь хранит Cloudflare Worker. Загрузку выполняет отдельная сессия браузера в GitHub Actions: job открывает сохранённый вход Яндекса и собирает пак в боте «Стикеры».
 
 Workflow поднимает браузер. Воркер принимает сообщения Telegram, хранит очередь и публикует готовый пак.
 
