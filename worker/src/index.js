@@ -30,6 +30,7 @@ import {
   acceptReply,
   aheadCount,
   awaitCreateKey,
+  channelPack,
   claimNext,
   CREATE_PROMPT,
   STOP_CLEARED,
@@ -58,6 +59,7 @@ import {
   renderPackCheck,
   shouldSchedulePipelineAfterProgress,
   staticReply,
+  telegramParseMode,
   terminalProgress,
   userRequestEvent,
   queueHasQueuedWork,
@@ -113,9 +115,8 @@ async function telegram(env, method, params) {
 
 function outgoingText(text) {
   const value = String(text ?? "");
-  if (/<a href="https?:\/\/t\.me\/addstickers\//.test(value)) {
-    return { text: value, parse_mode: "HTML" };
-  }
+  const parseMode = telegramParseMode(value);
+  if (parseMode) return { text: value, parse_mode: parseMode };
   return { text: value };
 }
 
@@ -268,7 +269,12 @@ async function applyProgress(env, pack, deps) {
   // Older rows kept the notification cursor in state:<slug>. Read that once, then fold it into the pack.
   let notice = prev && prev.notice ? prev.notice : null;
   if (prev && !prev.notice) notice = parseStored(await kv.get(`state:${pack.slug}`));
-  const steps = notificationSteps(notice, pack);
+  let steps = notificationSteps(notice, pack);
+  // Only the public post needs the queue row. Uploading ticks stay on the pack key.
+  if (steps.some((step) => step.kind === "channel")) {
+    const queue = await readQueue(kv);
+    steps = notificationSteps(notice, channelPack(pack, queue));
+  }
   const waitingForUrl = pack.status === "done" && !pack.url;
   const terminal = terminalProgress(pack);
   if (terminal) await finishQueueItem(env, pack, prev, deps);

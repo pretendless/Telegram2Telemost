@@ -152,8 +152,72 @@ export function realPackUrl(url) {
   return trimmed;
 }
 
+// Russian count: 1 стикер, 2 стикера, 5 стикеров, 11 стикеров, 21 стикер.
+export function stickerCountLabel(count) {
+  const n = Math.floor(Number(count));
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  let word = "стикеров";
+  if (abs < 11 || abs > 14) {
+    if (last === 1) word = "стикер";
+    else if (last >= 2 && last <= 4) word = "стикера";
+  }
+  return `${n} ${word}`;
+}
+
+function channelStickerCount(pack) {
+  const total = Number(pack && pack.total);
+  const uploaded = Number(pack && pack.uploaded);
+  if (Number.isFinite(total) && total > 0) return total;
+  if (Number.isFinite(uploaded) && uploaded > 0) return uploaded;
+  return 0;
+}
+
+// Public channel post. Title is escaped HTML. One # per original t.me/addstickers
+// link, in the order they were collected. No sources line when those links are missing.
 export function channelPost(pack) {
-  return `«${pack.title}»\n\n${pack.url}`;
+  const rawTitle = String((pack && pack.title) || "").replace(/\s+/g, " ").trim();
+  const title = htmlEscape(rawTitle || "пак");
+  const count = stickerCountLabel(channelStickerCount(pack));
+  const countBit = count ? ` · ${count}` : "";
+  const url = htmlEscape((pack && pack.url) || "");
+  const sources = stickerSourceUrls(pack && pack.links);
+  const sourceBit = sources.length
+    ? ` · источники: ${sources.map((href) => `<a href="${htmlEscape(href)}">#</a>`).join(" ")}`
+    : "";
+  return `📞 <b>${title}</b>${countBit}\n<a href="${url}">Открыть в Телемосте</a>${sourceBit}`;
+}
+
+// Queue row wins over the progress title: that title is what the user typed.
+// Source hashes come from the row's links. A catalog pack with no row keeps
+// the progress title and omits sources.
+export function queueItemForChannel(queue, pack) {
+  if (!pack || !queue) return null;
+  const bySlug = queueItemBySlug(queue, pack.slug);
+  if (bySlug) return bySlug;
+  if (pack.queueRequestId) return queueItemByRequestId(queue, pack.queueRequestId);
+  return null;
+}
+
+export function channelPack(pack, queue) {
+  const item = queueItemForChannel(queue, pack);
+  const queuedTitle = item && String(item.title || "").replace(/\s+/g, " ").trim();
+  const queuedLinks = item ? stickerSourceUrls(item.links) : [];
+  const fallbackLinks = stickerSourceUrls(pack && pack.links);
+  return {
+    ...pack,
+    title: queuedTitle || (pack && pack.title) || "",
+    links: queuedLinks.length ? queuedLinks : fallbackLinks,
+  };
+}
+
+// HTML only for messages this bot built with anchors. Plain chat text stays plain.
+export function telegramParseMode(text) {
+  const value = String(text ?? "");
+  if (/<a href="https?:\/\/t\.me\/addstickers\//.test(value)) return "HTML";
+  if (/<a href="https?:\/\/[^"]+">Открыть в Телемосте<\/a>/.test(value)) return "HTML";
+  return undefined;
 }
 
 export function doneNotice(title, total, url, followUp) {
