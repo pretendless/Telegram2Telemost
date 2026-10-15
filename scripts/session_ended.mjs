@@ -2,13 +2,16 @@
 // A hard cancel never got that far: tell the Worker once so it can resume.
 import { existsSync } from 'fs';
 import { postSessionEnded } from './queue_client.mjs';
+import { sessionAgeMs, shouldHandoffSession } from './session_deadline.mjs';
 
 const job = String(process.env.JOB_STATUS || '').trim();
 const marked = existsSync('logs/session-deadline.json');
-const cancelled = job === 'cancelled';
+const startedAt = process.env.SESSION_STARTED_AT;
+const now = Date.now();
 
-if (!marked && !cancelled) {
-  console.log('session-ended skipped', job || 'no-status');
+if (!shouldHandoffSession({ jobStatus: job, startedAt, now, marked })) {
+  const age = sessionAgeMs(startedAt, now);
+  console.log('session-ended skipped', job || 'no-status', 'ageMs', age == null ? 'unknown' : age);
   process.exit(0);
 }
 

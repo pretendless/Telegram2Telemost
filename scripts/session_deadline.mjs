@@ -9,14 +9,21 @@ export function parseSessionStartedAt(raw) {
   return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
 }
 
+export function sessionAgeMs(startedAt, now) {
+  const start = parseSessionStartedAt(startedAt);
+  const at = Number(now);
+  if (!start || !Number.isFinite(at)) return null;
+  return at - start;
+}
+
 export function sessionWindow({
   startedAt,
   now = Date.now(),
   hardMs = SESSION_HARD_MS,
   marginMs = SESSION_SOFT_MARGIN_MS,
 } = {}) {
-  const start = Number(startedAt);
-  if (!Number.isFinite(start) || start <= 0) return null;
+  const start = parseSessionStartedAt(startedAt);
+  if (!start) return null;
   const hard = Number(hardMs);
   const margin = Number(marginMs);
   const hardAt = start + (Number.isFinite(hard) && hard > 0 ? hard : SESSION_HARD_MS);
@@ -46,6 +53,15 @@ export function currentSessionWindow(env = process.env, now = Date.now()) {
 export function pastSessionSoftDeadline(env = process.env, now = Date.now()) {
   const window = currentSessionWindow(env, now);
   return Boolean(window && window.pastSoft);
+}
+
+// The limit notice is only for a job that has actually reached 5h45.
+// A cancel during image build, a missing clock, or epoch is not that.
+export function shouldHandoffSession({ jobStatus, startedAt, now, marked = false } = {}) {
+  const env = { SESSION_STARTED_AT: startedAt };
+  if (!pastSessionSoftDeadline(env, now)) return false;
+  if (marked) return true;
+  return String(jobStatus || '').trim() === 'cancelled';
 }
 
 // Stop taking another pack once the soft deadline has passed.
