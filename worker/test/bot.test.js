@@ -30,6 +30,8 @@ import {
   realPackUrl,
   shouldSchedulePipelineAfterProgress,
   shouldStartPipeline,
+  skipAllowedWhileActions,
+  SKIP_START_GRACE_MS,
   sortQueuedItems,
   terminalProgress,
   unstickUploadingQueue,
@@ -745,7 +747,7 @@ test("an accepted priority request is one KV write and /status does not list", a
   await handle(packMessage(111, "/status"), env, {
     sendMessage: async (_env, _chatId, reply) => sent.push(reply),
   });
-  assert.match(sent[0], /«Лисёнок» с приоритетом: в очереди, перед ним 0/);
+  assert.match(sent[0], /«Лисёнок»[\s\S]*с приоритетом: в очереди, перед ним 0/);
   assert.equal(env.BOT_KV.ops.list, 0);
   assert.equal(env.BOT_KV.ops.put, 0);
 
@@ -858,6 +860,10 @@ test("/start subscribes and replies with the format and the channel example", as
   assert.equal(USER_COMMANDS.find((item) => item.command === "create").description, "Новый запрос на перенос");
   assert.equal(USER_COMMANDS.find((item) => item.command === "start").description, "Как пользоваться");
   assert.equal(USER_COMMANDS.find((item) => item.command === "format").description, "Формат и пример пака");
+  assert.equal(
+    USER_COMMANDS.find((item) => item.command === "stop").description,
+    "Прервать ввод и вернуться к командам",
+  );
   assert.equal(USER_COMMANDS.some((item) => item.command === "example"), false);
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "queue").description, "Очередь и прогресс");
   assert.equal(ADMIN_COMMANDS.length, USER_COMMANDS.length + ADMIN_ONLY_COMMANDS.length);
@@ -957,19 +963,24 @@ test("an allowlisted /login and /connect dispatch the Telemost workflow", async 
     account: "default",
     chat_id: "8502935020",
     packs: "",
-    dispatch_reason: "админ: /login или /connect",
+    dispatch_reason: "админ: /login",
   });
   assert.deepEqual(calls[1].body.inputs, {
     mode: "login",
     account: "work",
     chat_id: "8502935020",
     packs: "",
-    dispatch_reason: "админ: /login или /connect",
+    dispatch_reason: "админ: /login",
   });
   assert.match(sent[0].text, /QR-код Яндекса/);
   assert.match(sent[1].text, /«work»/);
+  await handle(telegramRequest(INITIAL_SUBSCRIBER, "/login work"), env, { sendMessage, fetch });
+  assert.equal(calls[2].body.inputs.account, "work");
+  assert.equal(calls[2].body.inputs.mode, "login");
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "login").description, "Войти в Яндекс");
-  assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "connect").description, "Войти в аккаунт с меткой");
+  assert.equal(ADMIN_ONLY_COMMANDS.some((item) => item.command === "connect"), false);
+  assert.equal(ADMIN_ONLY_COMMANDS.some((item) => item.command === "unstick"), false);
+  assert.equal(ADMIN_ONLY_COMMANDS.some((item) => item.command === "upload"), false);
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "restart").description, "Перезапустить загрузку");
 });
 
@@ -1062,10 +1073,10 @@ test("/queue lists priority queued rows before normal ones", () => {
   const text = adminQueueOverviewText(queue, null);
   const block = text.split("В очереди:")[1].split("Недавно:")[0];
   assert.ok(block.indexOf("ВолнаСветa") < block.indexOf("Дьяволица"));
-  assert.ok(block.indexOf("Дьяволица") < block.indexOf("Tom & Jerry"));
+  assert.ok(block.indexOf("Дьяволица") < block.indexOf("Tom &amp; Jerry"));
 });
 
-test("/unstick refuses while Actions runs and releases uploading when idle", async () => {
+test("/unstick and /upload reply once that they are gone and do not dispatch", async () => {
   const env = envWith();
   env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
   env.GH_DISPATCH_TOKEN = "dispatch-token";
@@ -1084,64 +1095,26 @@ test("/unstick refuses while Actions runs and releases uploading when idle", asy
           status: "uploading",
           stickers: 3,
         },
-        {
-          id: "req-next",
-          chatId: "2",
-          title: "Следующий",
-          links: ["https://t.me/addstickers/next"],
-          priority: false,
-          createdAt: "2026-10-13T12:01:00.000Z",
-          status: "queued",
-          stickers: 4,
-        },
       ],
     }),
   );
   const sent = [];
-  const fetchBusy = async (url) => {
-    if (String(url).includes("/runs?")) {
-      return { status: 200, json: async () => ({ workflow_runs: [{ id: 1, status: "in_progress" }] }) };
-    }
+  let fetched = 0;
+  const fetch = async () => {
+    fetched += 1;
     return { status: 204, json: async () => ({}) };
   };
-  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, {
-    sendMessage: async (_env, _chatId, text) => sent.push(text),
-    fetch: fetchBusy,
-  });
-  assert.match(sent[0], /Actions/);
-  assert.match(sent[0], /не трогаю/);
-  let stored = JSON.parse(env.BOT_KV.store.get("queue"));
-  assert.equal(stored.items[0].status, "uploading");
-
-  sent.length = 0;
-  const calls = [];
-  const fetchIdle = async (url, init) => {
-    calls.push({
-      url: String(url),
-      body: init && init.body ? JSON.parse(init.body) : null,
+  for (const text of ["/unstick", "/upload work 03 04", "/unstick@tg2tmbot"]) {
+    const res = await handle(telegramRequest(111, text), env, {
+      sendMessage: async (_env, _chatId, reply) => sent.push(reply),
+      fetch,
     });
-    if (String(url).includes("/runs?")) {
-      return { status: 200, json: async () => ({ workflow_runs: [] }) };
-    }
-    return { status: 204, json: async () => ({}) };
-  };
-  const pipe = trackPipelineWait({
-    sendMessage: async (_env, _chatId, text) => sent.push(text),
-    fetch: fetchIdle,
-  });
-  await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, pipe);
-  await pipe.flushPipeline();
-  assert.match(sent[0], /Застрял/);
-  assert.match(sent[0], /блокировку «загружается»/);
-  assert.match(sent[0], /ждёт в очереди/);
-  assert.doesNotMatch(sent[0], /снова в очереди/);
-  assert.match(sent[0], /Запускаю pipeline/);
-  stored = JSON.parse(env.BOT_KV.store.get("queue"));
-  assert.equal(stored.items.find((item) => item.id === "req-stuck").status, "queued");
-  assert.equal(unstickUploadingQueue(stored).changed, false);
-  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
-  assert.ok(dispatch);
-  assert.match(dispatch.body.inputs.dispatch_reason, /unstick|Следующий|Застрял/i);
+    assert.equal(res.status, 200);
+  }
+  assert.equal(fetched, 0);
+  assert.equal(sent.length, 3);
+  for (const reply of sent) assert.equal(reply, "Эта команда больше не доступна.");
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].status, "uploading");
 });
 
 test("terminal progress releases queue row matched by slug when status is queued", async () => {
@@ -1436,15 +1409,17 @@ test("/unstick autostart dispatch names next queued pack after terminal uploadin
     }
     return { status: 204, json: async () => ({}) };
   };
-  const pipe = trackPipelineWait({ sendMessage: async () => {}, fetch: fetchIdle });
+  const sent = [];
+  const pipe = trackPipelineWait({
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+    fetch: fetchIdle,
+  });
   await handle(packMessage(INITIAL_SUBSCRIBER, "/unstick"), env, pipe);
   await pipe.flushPipeline();
+  assert.equal(sent[0], "Эта команда больше не доступна.");
   const stored = JSON.parse(env.BOT_KV.store.get("queue"));
-  assert.equal(stored.items.find((item) => item.id === "req-snoopy").status, "done");
-  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
-  assert.ok(dispatch);
-  assert.match(dispatch.body.inputs.dispatch_reason, /ВолнаСветa/);
-  assert.doesNotMatch(dispatch.body.inputs.dispatch_reason, /Снупи/);
+  assert.equal(stored.items.find((item) => item.id === "req-snoopy").status, "uploading");
+  assert.equal(calls.some((call) => call.url.endsWith("/dispatches")), false);
 });
 
 test("admin /queue reads queue and one pack key for uploading progress", async () => {
@@ -1479,7 +1454,7 @@ test("admin /queue reads queue and one pack key for uploading progress", async (
   assert.match(sent[0], /Запад/);
   assert.match(sent[0], /стикер 3 из 10/);
   assert.match(sent[0], /Восток/);
-  assert.match(sent[0], /Подсказка:/);
+  assert.doesNotMatch(sent[0], /\/unstick/);
   assert.equal(env.BOT_KV.ops.list, 0);
 });
 
@@ -1766,26 +1741,45 @@ test("login does not dispatch when the GitHub token is missing", async () => {
   assert.match(sent[0].text, /GH_DISPATCH_TOKEN/);
 });
 
-test("enqueue rejects a done title from another chat", () => {
+test("a finished request blocks only the same title and the same link set", () => {
   let queue = enqueueRequest(emptyQueue(), {
     chatId: 1,
-    title: "Маф, Изис и Агнес",
-    links: ["https://t.me/addstickers/a"],
+    title: "test",
+    links: ["https://t.me/addstickers/oldset"],
     priority: false,
     createdAt: "1",
-    stickers: 1,
+    stickers: 4,
   }).queue;
   queue = { ...queue, items: queue.items.map((item) => ({ ...item, status: "done" })) };
-  const again = enqueueRequest(queue, {
+  const otherLinks = enqueueRequest(queue, {
     chatId: 2,
-    title: "Маф, Изис и Агнес",
-    links: ["https://t.me/addstickers/b"],
+    title: "test",
+    links: ["https://t.me/addstickers/konchanch"],
     priority: false,
     createdAt: "2",
-    stickers: 1,
+    stickers: 33,
   });
-  assert.equal(again.created, false);
-  assert.equal(again.duplicate, "done");
+  assert.equal(otherLinks.created, true);
+  const otherTitle = enqueueRequest(queue, {
+    chatId: 2,
+    title: "test2",
+    links: ["https://t.me/addstickers/oldset"],
+    priority: false,
+    createdAt: "3",
+    stickers: 4,
+  });
+  assert.equal(otherTitle.created, true);
+  assert.equal(otherTitle.item.title, "test2");
+  const same = enqueueRequest(queue, {
+    chatId: 2,
+    title: "test",
+    links: ["t.me/addstickers/oldset"],
+    priority: false,
+    createdAt: "4",
+    stickers: 4,
+  });
+  assert.equal(same.created, false);
+  assert.equal(same.duplicate, "done");
 });
 
 test("admin chat accepts a pack without /create", async () => {
@@ -1846,7 +1840,9 @@ test("admin /status matches /queue when catalog pack KV is orphan", async () => 
   await handle(packMessage(INITIAL_SUBSCRIBER, "/status"), env, {
     sendMessage: async (_env, _chatId, text) => sent.push(text),
   });
-  assert.equal(sent[0], "простаивает");
+  assert.match(sent[0], /в очереди \| «Maf»/);
+  assert.doesNotMatch(sent[0], /^простаивает$/);
+  assert.doesNotMatch(sent[0], /Сэт, Рэдж и Летти/);
   sent.length = 0;
   await handle(packMessage(INITIAL_SUBSCRIBER, "/queue"), env, {
     sendMessage: async (_env, _chatId, text) => sent.push(text),
@@ -1913,6 +1909,111 @@ test("admin /skip dispatches with afterSkip reason", async () => {
   assert.equal(stored.items.find((row) => row.id === "req-wave").status, "error");
 });
 
+test("/skip releases a hung upload even while Actions still looks active", async () => {
+  const now = Date.parse("2026-10-14T22:00:00.000Z");
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = String(INITIAL_SUBSCRIBER);
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  env.BOT_KV.store.set("meta:seeded", "1");
+  env.BOT_KV.store.set(
+    "meta:telemost-session",
+    JSON.stringify({
+      runId: "38644156549",
+      url: "https://github.com/pretendless/tg2tm/actions/runs/38644156549",
+      at: new Date(now - 3 * 60 * 60 * 1000).toISOString(),
+    }),
+  );
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-wool",
+          chatId: "8502935020",
+          title: "Шерсть Ебаная",
+          links: ["https://t.me/addstickers/piidarasy"],
+          priority: false,
+          createdAt: "2026-10-14T18:00:00.000Z",
+          status: "uploading",
+          stickers: 109,
+        },
+        {
+          id: "req-tst",
+          chatId: "8502935020",
+          title: "tst",
+          links: ["https://t.me/addstickers/tst"],
+          priority: false,
+          createdAt: "2026-10-14T19:00:00.000Z",
+          status: "queued",
+          stickers: 4,
+        },
+      ],
+    }),
+  );
+  const calls = [];
+  const sent = [];
+  const fetchHung = async (url, init) => {
+    calls.push({ url: String(url), method: init && init.method, body: init && init.body ? JSON.parse(init.body) : null });
+    if (String(url).includes("/runs?")) {
+      return {
+        status: 200,
+        json: async () => ({
+          workflow_runs: [{ id: 38644156549, status: "in_progress", html_url: "https://github.com/pretendless/tg2tm/actions/runs/38644156549" }],
+        }),
+      };
+    }
+    return { status: 204, json: async () => ({}) };
+  };
+  const pipe = trackPipelineWait({
+    sendMessage: async (_env, _chatId, text) => sent.push(text),
+    fetch: fetchHung,
+    now: () => now,
+  });
+  await handle(packMessage(INITIAL_SUBSCRIBER, "/skip"), env, pipe);
+  await pipe.flushPipeline();
+  assert.match(sent[0], /Шерсть Ебаная/);
+  assert.match(sent[0], /зависла/);
+  assert.doesNotMatch(sent[0], /не выполняю/);
+  const stored = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(stored.items.find((row) => row.id === "req-wool").status, "error");
+  assert.match(stored.items.find((row) => row.id === "req-wool").error, /зависла/);
+  assert.equal(stored.items.find((row) => row.id === "req-tst").status, "queued");
+  const dispatch = calls.find((call) => call.url.endsWith("/dispatches"));
+  assert.ok(dispatch);
+  assert.match(dispatch.body.inputs.dispatch_reason, /tst/);
+  assert.equal(calls.some((call) => String(call.url).endsWith("/cancel")), false);
+  assert.equal(env.BOT_KV.store.get("meta:telemost-session"), undefined);
+
+  const fresh = skipAllowedWhileActions({
+    item: { status: "uploading", title: "Шерсть Ебаная", stickers: 109 },
+    pack: null,
+    session: { at: new Date(now - 3000).toISOString() },
+    now,
+  });
+  assert.equal(fresh.allow, false);
+  assert.equal(fresh.reason, "starting");
+  assert.ok(SKIP_START_GRACE_MS >= 3000);
+
+  const live = skipAllowedWhileActions({
+    item: { status: "uploading", stickers: 109 },
+    pack: { status: "uploading", uploaded: 8, total: 109, progressAt: new Date(now - 5000).toISOString() },
+    session: { at: new Date(now - 60 * 60 * 1000).toISOString() },
+    now,
+  });
+  assert.equal(live.allow, false);
+  assert.equal(live.reason, "progress");
+
+  const done = skipAllowedWhileActions({
+    item: { status: "uploading", stickers: 109 },
+    pack: { status: "done", uploaded: 109, total: 109, url: PACK_URL, progressAt: new Date(now - 60 * 60 * 1000).toISOString() },
+    session: { at: new Date(now - 60 * 60 * 1000).toISOString() },
+    now,
+  });
+  assert.equal(done.allow, true);
+  assert.equal(done.reason, "finished");
+});
+
 test("/format, /example and /stop", async () => {
   const sent = [];
   const env = envWith();
@@ -1948,8 +2049,9 @@ test("/format, /example and /stop", async () => {
     env,
     { sendMessage: send },
   );
-  assert.equal(await env.BOT_KV.get(`sub:${INITIAL_SUBSCRIBER}`), null);
-  assert.match(sent[2].text, /Уведомления выключены/);
+  assert.match(sent[2].text, /нечего прерывать/);
+  assert.match(sent[2].text, /\/create/);
+  assert.equal(await env.BOT_KV.get(`sub:${INITIAL_SUBSCRIBER}`), "1");
 });
 
 test("/project is admin-only and dispatches cursor-agent workflow", async () => {

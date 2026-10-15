@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { handle } from "../src/index.js";
+import { adminLiveStatusText } from "../../scripts/admin_status.mjs";
 import {
   CREATE_PROMPT,
   MAX_PACK_TITLE,
   MAX_STICKERS,
+  STOP_CLEARED,
+  STOP_IDLE,
   createLinksPrompt,
   decodeAwaitCreate,
   encodeAwaitCreate,
   judgeCreateLinks,
   nameStepResult,
   parseStickerSetNames,
+  requestSourceLine,
+  userRequestEvent,
 } from "../src/logic.js";
 
 function memoryKv() {
@@ -152,8 +157,10 @@ test("valid links enqueue the saved title and clear the dialog", async () => {
   });
   assert.match(accepted[0].reply, /Запрос принят/);
   assert.match(accepted[0].reply, /«Лисёнок»/);
-  assert.match(accepted[0].reply, /fox_one — 3/);
-  assert.match(accepted[0].reply, /fox_two — 4/);
+  assert.match(accepted[0].reply, /href="https:\/\/t\.me\/addstickers\/fox_one">#<\/a>/);
+  assert.match(accepted[0].reply, /href="https:\/\/t\.me\/addstickers\/fox_two">#<\/a>/);
+  assert.ok(accepted[0].reply.indexOf("fox_one") < accepted[0].reply.indexOf("fox_two"));
+  assert.doesNotMatch(accepted[0].reply, /fox_one —/);
   assert.match(accepted[0].reply, /Всего 7 стикеров/);
   assert.equal(env.BOT_KV.store.get("await:7"), undefined);
   const queue = JSON.parse(env.BOT_KV.store.get("queue"));
@@ -280,4 +287,225 @@ test("judgeCreateLinks and the name step are pure", () => {
     step: "links",
     title: "Кот",
   });
+});
+
+const OLD_LINK = "https://t.me/addstickers/p8502935020_1791999310374124782_by_creastikersbot";
+
+function seedDone(env, title, links) {
+  env.BOT_KV.store.set("meta:seeded", "1");
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "done-test",
+          chatId: "1",
+          title,
+          links,
+          priority: false,
+          createdAt: "2026-10-14T00:00:00.000Z",
+          status: "done",
+          stickers: 4,
+        },
+      ],
+    }),
+  );
+}
+
+test("a new title with the same finished links enqueues", async () => {
+  const env = envWith();
+  seedDone(env, "test", [OLD_LINK]);
+  await say(env, 7, "/create");
+  await say(env, 7, "test2");
+  const accepted = await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  assert.match(accepted[0].reply, /Запрос принят/);
+  assert.match(accepted[0].reply, /«test2»/);
+  assert.doesNotMatch(accepted[0].reply, /уже переносился/);
+  const queue = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(queue.items.filter((item) => item.status === "queued").length, 1);
+  assert.equal(queue.items.find((item) => item.status === "queued").title, "test2");
+});
+
+test("the same title with different links enqueues", async () => {
+  const env = envWith();
+  seedDone(env, "test", [OLD_LINK]);
+  await say(env, 7, "/create");
+  await say(env, 7, "test");
+  const accepted = await say(env, 7, "https://t.me/addstickers/konchanch", { stickerCount: async () => 33 });
+  assert.match(accepted[0].reply, /Запрос принят/);
+  assert.match(accepted[0].reply, /«test»/);
+  assert.match(accepted[0].reply, /Всего 33 стикеров/);
+  assert.doesNotMatch(accepted[0].reply, /уже переносился/);
+  const queued = JSON.parse(env.BOT_KV.store.get("queue")).items.find((item) => item.status === "queued");
+  assert.equal(queued.title, "test");
+  assert.deepEqual(queued.links, ["https://t.me/addstickers/konchanch"]);
+});
+
+test("the same title and the same links restart the name prompt", async () => {
+  const env = envWith();
+  seedDone(env, "test", [OLD_LINK]);
+  await say(env, 7, "/create");
+  await say(env, 7, "test");
+  const blocked = await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  assert.match(blocked[0].reply, /этими же ссылками/);
+  assert.match(blocked[0].reply, /«test»/);
+  assert.match(blocked[0].reply, /p8502935020_1791999310374124782_by_creastikersbot/);
+  assert.doesNotMatch(blocked[0].reply, /«test2»/);
+  assert.ok(blocked[0].reply.endsWith(CREATE_PROMPT));
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "name" });
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items.length, 1);
+
+  const renamed = await say(env, 7, "test2");
+  assert.equal(renamed[0].reply, createLinksPrompt("test2"));
+  const accepted = await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
+  assert.match(accepted[0].reply, /«test2»/);
+  assert.match(accepted[0].reply, /Запрос принят/);
+});
+
+test("/stop clears the name step, the links step, and answers when idle", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "queued-1",
+          chatId: "7",
+          title: "Шерсть",
+          links: ["https://t.me/addstickers/piidarasy"],
+          priority: false,
+          createdAt: "2026-10-14T01:00:00.000Z",
+          status: "queued",
+          stickers: 109,
+        },
+      ],
+    }),
+  );
+
+  await say(env, 7, "/create");
+  const fromName = await say(env, 7, "/stop");
+  assert.equal(fromName[0].reply, STOP_CLEARED);
+  assert.equal(env.BOT_KV.store.get("await:7"), undefined);
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].status, "queued");
+
+  await say(env, 7, "/create");
+  await say(env, 7, "test");
+  const fromLinks = await say(env, 7, "/stop");
+  assert.equal(fromLinks[0].reply, STOP_CLEARED);
+  assert.match(fromLinks[0].reply, /\/create/);
+  assert.match(fromLinks[0].reply, /\/status/);
+  assert.equal(env.BOT_KV.store.get("await:7"), undefined);
+
+  const idle = await say(env, 9, "/stop");
+  assert.equal(idle[0].reply, STOP_IDLE);
+  assert.match(idle[0].reply, /нечего прерывать/);
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].title, "Шерсть");
+});
+
+test("queue rows keep the user title and one hash per source link", () => {
+  const one = requestSourceLine({
+    title: "Шерсть Ебаная",
+    links: ["https://t.me/addstickers/piidarasy"],
+    stickers: 109,
+  });
+  assert.match(one, /«Шерсть Ебаная»/);
+  assert.match(one, /<a href="https:\/\/t\.me\/addstickers\/piidarasy">#<\/a> — 109/);
+  assert.doesNotMatch(one, /piidarasy —/);
+
+  const many = requestSourceLine(
+    {
+      title: "Моё название",
+      links: ["https://t.me/addstickers/one", "t.me/addstickers/two"],
+      stickers: 142,
+    },
+    { index: 1 },
+  );
+  assert.match(many, /^1\. «Моё название» /);
+  assert.ok(many.indexOf("addstickers/one") < many.indexOf("addstickers/two"));
+  assert.match(many, /— 142$/);
+
+  const escaped = requestSourceLine({
+    title: `A <B> & "C"`,
+    links: ["https://t.me/addstickers/ok"],
+    stickers: 1,
+  });
+  assert.match(escaped, /«A &lt;B&gt; &amp; &quot;C&quot;»/);
+  assert.doesNotMatch(escaped, /<B>/);
+
+  const missing = requestSourceLine({ title: "Без ссылок", links: ["not-a-url"], stickers: 3 });
+  assert.equal(missing.includes("#"), false);
+  assert.equal(missing, "«Без ссылок» — 3");
+
+  const event = userRequestEvent({
+    item: { title: "Шерсть Ебаная", status: "uploading", stickers: 109, id: "1" },
+    pack: { title: "piidarasy", status: "uploading", uploaded: 8, total: 109 },
+    queue: { items: [] },
+  });
+  assert.equal(event.pack, "Шерсть Ебаная");
+});
+
+test("admin /queue and user /status show the typed title and source hashes", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = "8502935020";
+  env.BOT_KV.store.set("meta:seeded", "1");
+  env.BOT_KV.store.set(
+    "queue",
+    JSON.stringify({
+      priority: [],
+      items: [
+        {
+          id: "req-wool",
+          chatId: "7",
+          title: "Шерсть Ебаная",
+          links: ["https://t.me/addstickers/piidarasy"],
+          priority: false,
+          createdAt: "2026-10-14T00:00:00.000Z",
+          status: "queued",
+          stickers: 109,
+        },
+      ],
+    }),
+  );
+  const queued = await say(env, 8502935020, "/queue");
+  assert.match(queued[0].reply, /«Шерсть Ебаная»/);
+  assert.match(queued[0].reply, /href="https:\/\/t\.me\/addstickers\/piidarasy">#<\/a>/);
+  assert.doesNotMatch(queued[0].reply, /piidarasy —/);
+  const status = await say(env, 7, "/status");
+  assert.match(status[0].reply, /«Шерсть Ебаная»/);
+  assert.match(status[0].reply, /addstickers\/piidarasy">#<\/a>/);
+  assert.doesNotMatch(status[0].reply, /piidarasy —/);
+});
+
+test("admin /status names a starting run and an upload instead of idle", () => {
+  const queued = {
+    items: [
+      {
+        status: "queued",
+        title: "Шерсть Ебаная",
+        stickers: 109,
+        createdAt: "2026-10-14T00:57:00.000Z",
+      },
+    ],
+  };
+  const session = {
+    url: "https://github.com/pretendless/tg2tm/actions/runs/38644156549",
+    at: "2026-10-14T00:57:30.000Z",
+  };
+  const starting = adminLiveStatusText({ queue: queued, job: { running: false }, session });
+  assert.match(starting, /запуск Actions, пак «Шерсть Ебаная», стикеры ещё не пошли/);
+  assert.match(starting, /38644156549/);
+  assert.doesNotMatch(starting, /^простаивает$/);
+
+  const uploading = adminLiveStatusText({
+    queue: { items: [{ status: "uploading", title: "Шерсть Ебаная", stickers: 109 }] },
+    job: { running: true, pack: "Шерсть Ебаная", index: 8, total: 109 },
+    session,
+  });
+  assert.match(uploading, /идёт \| «Шерсть Ебаная» \| стикер 8 из 109/);
+  assert.doesNotMatch(uploading, /простаивает/);
+
+  assert.equal(adminLiveStatusText({ queue: { items: [] }, job: { running: false } }), "простаивает");
 });

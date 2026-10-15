@@ -31,14 +31,14 @@ export async function telemostRunActive(fetchImpl, env) {
   return page.status === 200 && page.runs.length > 0;
 }
 
-export async function startPipelineIfIdle(fetchImpl, env, queue, { dispatchReason } = {}) {
+export async function startPipelineIfIdle(fetchImpl, env, queue, { dispatchReason, force = false } = {}) {
   if (!shouldStartPipeline(queue, false)) return { started: false, reason: "empty" };
   const token = env && env.GH_DISPATCH_TOKEN;
   if (!token) return { started: false, reason: "no-token" };
   const listUrl = workflowRunsUrl(env.GH_REPO || DEFAULT_REPO, env.TELEMOST_WORKFLOW || DEFAULT_WORKFLOW);
   const page = await readRuns(fetchImpl, listUrl, githubHeaders(token));
   if (page.status !== 200) return { started: false, reason: "list", status: page.status };
-  if (!shouldStartPipeline(queue, page.runs.length > 0)) {
+  if (!force && !shouldStartPipeline(queue, page.runs.length > 0)) {
     return { started: false, reason: page.runs.length ? "busy" : "empty" };
   }
   const chatId = String(env.TELEMOST_ADMIN_CHAT_ID || ADMIN_CHAT_ID);

@@ -30,14 +30,12 @@ function yandexCookies() {
   ];
 }
 
-test("commands parse login, connect and upload", () => {
+test("commands parse login and the connect alias, not upload", () => {
   assert.deepEqual(parseVmCommand("/login"), { mode: "login", account: "default", packs: "" });
   assert.deepEqual(parseVmCommand("/login@tg2tmbot work"), { mode: "login", account: "work", packs: "" });
   assert.deepEqual(parseVmCommand("/connect work"), { mode: "login", account: "work", packs: "" });
-  assert.equal(parseVmCommand("/connect").error, "label");
-  assert.deepEqual(parseVmCommand("/upload work 03 04"), { mode: "upload", account: "work", packs: "03 04" });
-  assert.equal(parseVmCommand("/upload work").error, "upload");
-  assert.equal(parseVmCommand("/upload work ../01").error, "packs");
+  assert.deepEqual(parseVmCommand("/connect"), { mode: "login", account: "default", packs: "" });
+  assert.equal(parseVmCommand("/upload work 03 04"), null);
   assert.equal(parseVmCommand("hello"), null);
 });
 
@@ -98,8 +96,9 @@ test("only an allowlisted chat can start the browser", async () => {
   assert.match(sent[0].text, /владельца/);
   sent.length = 0;
   assert.equal(await handleVmCommand(env, { text: "/connect", chat: { id: 42 } }, deps), true);
-  assert.equal(fetched, 0);
-  assert.match(sent[0].text, /connect work/);
+  assert.equal(fetched, 1);
+  assert.match(sent.at(-1).text, /«default»/);
+  fetched = 0;
   assert.equal(await handleVmCommand({ ...env, GH_DISPATCH_TOKEN: "" }, { text: "/login work", chat: { id: 42 } }, deps), true);
   assert.equal(fetched, 0);
   assert.equal(await handleVmCommand(env, { text: "/login work", chat: { id: 42 } }, deps), true);

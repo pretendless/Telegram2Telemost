@@ -2,7 +2,7 @@
 import {
   ADMIN_CHAT_ID,
   adminChatIds,
-  adminJobText,
+  adminLiveStatusText,
   deliverAdminStatus,
   eventFromProgress,
   isAdminChat,
@@ -10,7 +10,7 @@ import {
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
 import { startPipelineIfIdle, telemostRunActive } from "../../vm/queue_runner.js";
 import { QUEUE_REASON, queuePipelineReason } from "../../vm/dispatch_reason.js";
-import { defaultSessionReason, notifySessionStartOnce } from "../../vm/session_notify.js";
+import { LIVE_SESSION_KEY, defaultSessionReason, notifySessionStartOnce, readLiveSession } from "../../vm/session_notify.js";
 import {
   CHANNEL_CHAT,
   INITIAL_SUBSCRIBER,
@@ -31,6 +31,8 @@ import {
   awaitCreateKey,
   claimNext,
   CREATE_PROMPT,
+  STOP_CLEARED,
+  STOP_IDLE,
   createLinksPrompt,
   decodeAwaitCreate,
   encodeAwaitCreate,
@@ -46,8 +48,8 @@ import {
   queueItemSlug,
   matchedProgressRequester,
   queueStatusText,
-  unstickReply,
-  unstickUploadingQueue,
+  RETIRED_COMMAND,
+  skipAllowedWhileActions,
   skipReply,
   skipUploadingQueue,
   releaseRequest,
@@ -107,12 +109,23 @@ async function telegram(env, method, params) {
   return body.result;
 }
 
+function outgoingText(text) {
+  const value = String(text ?? "");
+  if (/<a href="https?:\/\/t\.me\/addstickers\//.test(value)) {
+    return { text: value, parse_mode: "HTML" };
+  }
+  return { text: value };
+}
+
 async function defaultSend(env, chatId, text) {
-  return telegram(env, "sendMessage", {
+  const body = outgoingText(text);
+  const payload = {
     chat_id: chatId,
-    text,
+    text: body.text,
     link_preview_options: { is_disabled: true },
-  });
+  };
+  if (body.parse_mode) payload.parse_mode = body.parse_mode;
+  return telegram(env, "sendMessage", payload);
 }
 
 function adminIo(env, deps) {
@@ -268,7 +281,10 @@ async function applyProgress(env, pack, deps) {
   let notified = 0;
   let posted = false;
   const writePack = (cursor) =>
-    kv.put(packKey, JSON.stringify({ ...pack, notice: cursor, admin, userCard, adminByChat }));
+    kv.put(
+      packKey,
+      JSON.stringify({ ...pack, progressAt: new Date().toISOString(), notice: cursor, admin, userCard, adminByChat }),
+    );
   if (needsToken) {
     await writePack(notice);
     return { ok: false, status: 503, error: "no bot token", notified: 0, posted: false, waitingForUrl };
@@ -332,7 +348,7 @@ function schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps) {
   }
 }
 
-function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
+function schedulePipeline(env, queue, deps, { dispatchReason, force = false } = {}) {
   const run = async () => {
     try {
       let q = queue;
@@ -343,7 +359,7 @@ function schedulePipeline(env, queue, deps, { dispatchReason } = {}) {
           q = reconciled.queue;
         }
       }
-      await startPipelineIfIdle(deps.fetch || fetch, env, q, { dispatchReason });
+      await startPipelineIfIdle(deps.fetch || fetch, env, q, { dispatchReason, force });
     } catch (err) {
       console.error("pipeline start failed", err && err.message);
     }
@@ -595,7 +611,15 @@ async function acceptCountedRequest(env, chatId, { title, names, rows, total }, 
   if (stored.created) await writeQueue(env.BOT_KV, stored.queue);
   const queueAfter = stored.created ? stored.queue : queue;
   let out;
-  if (stored.duplicate) {
+  if (stored.duplicate === "done") {
+    out = `${duplicateRequestReply({
+      title,
+      duplicate: stored.duplicate,
+      priority,
+      links: stickerLinks(names),
+    })}\n\n${CREATE_PROMPT}`;
+    await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
+  } else if (stored.duplicate) {
     out = duplicateRequestReply({
       title,
       duplicate: stored.duplicate,
@@ -604,7 +628,7 @@ async function acceptCountedRequest(env, chatId, { title, names, rows, total }, 
   } else {
     const item = stored.item;
     const ahead = item ? aheadCount(stored.created ? stored.queue : queue, item) : 0;
-    out = acceptReply({ title, rows, total, priority, ahead });
+    out = acceptReply({ title, links: stickerLinks(names), rows, total, priority, ahead });
   }
   let userCardAfterAccept = null;
   if (stored.created && stored.item) {
@@ -628,15 +652,18 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   const known = staticReply(cmd);
   let out;
   let userCardAfterAccept = null;
-  // Commands other than /create leave await:<chatId> as it is (name or links).
-  // /create rewrites that key and starts again at the name.
+  // /create restarts at the name. /stop clears a half-finished dialog and does not touch the queue.
+  // Other commands leave await:<chatId> as it is.
   if (known) {
     if (known.subscribe === true) await env.BOT_KV.put(`sub:${chatId}`, "1");
-    if (known.subscribe === false) await env.BOT_KV.delete(`sub:${chatId}`);
     out = known.text;
   } else if (cmd === "/create") {
     await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
     out = CREATE_PROMPT;
+  } else if (cmd === "/stop") {
+    const pending = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
+    if (pending) await env.BOT_KV.delete(awaitCreateKey(chatId));
+    out = pending ? STOP_CLEARED : STOP_IDLE;
   } else if (cmd === "/queue") {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";
@@ -645,64 +672,43 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps);
       out = adminQueueOverviewText(queue, activePack);
     }
-  } else if (cmd === "/unstick") {
-    if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
-      out = "Эта команда только для администратора.";
-    } else {
-      const fetchImpl = deps.fetch || fetch;
-      const actionsRunning = await telemostRunActive(fetchImpl, env);
-      if (actionsRunning) {
-        const queue = await readQueue(env.BOT_KV);
-        const packByItemId = await packProgressByUploadingId(env.BOT_KV, queue);
-        const cleaned = unstickUploadingQueue(queue, {
-          packForItem: (item) => packByItemId[item.id] || null,
-          terminalOnly: true,
-        });
-        if (cleaned.changed) await writeQueue(env.BOT_KV, cleaned.queue);
-        out = unstickReply({
-          reason: cleaned.reason,
-          released: [],
-          finished: cleaned.finished,
-          actionsRunning: true,
-          cleanedWhileRunning: cleaned.changed,
-        });
-      } else {
-        const queue = await readQueue(env.BOT_KV);
-        const kv = env.BOT_KV;
-        const packByItemId = {};
-        for (const item of queue.items) {
-          if (item.status !== "uploading") continue;
-          packByItemId[item.id] = await readPackProgress(kv, item);
-        }
-        const unstuck = unstickUploadingQueue(queue, {
-          packForItem: (item) => packByItemId[item.id] || null,
-        });
-        if (unstuck.changed) {
-          await writeQueue(env.BOT_KV, unstuck.queue);
-          schedulePipeline(env, unstuck.queue, deps, { dispatchReason: QUEUE_REASON.afterUnstick });
-        }
-        out = unstickReply({
-          reason: unstuck.reason,
-          released: unstuck.released,
-          finished: unstuck.finished,
-          actionsRunning: false,
-        });
-      }
-    }
+  } else if (cmd === "/unstick" || cmd === "/upload") {
+    out = RETIRED_COMMAND;
   } else if (cmd === "/skip") {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";
     } else {
       const fetchImpl = deps.fetch || fetch;
+      const queue = await readQueue(env.BOT_KV);
+      const uploading = queue.items.find((item) => item.status === "uploading");
+      const pack = uploading ? await readPackProgress(env.BOT_KV, uploading) : null;
+      const session = readLiveSession(await env.BOT_KV.get(LIVE_SESSION_KEY));
       const actionsRunning = await telemostRunActive(fetchImpl, env);
-      if (actionsRunning) {
-        out = skipReply({ reason: "none", skipped: [], actionsRunning: true });
+      const now = typeof deps.now === "function" ? deps.now() : Date.now();
+      const decision =
+        uploading && actionsRunning
+          ? skipAllowedWhileActions({ item: uploading, pack, session, now })
+          : { allow: true, reason: uploading ? "idle" : "none" };
+      if (uploading && actionsRunning && !decision.allow) {
+        out =
+          decision.reason === "progress"
+            ? "Сейчас идёт загрузка стикеров — /skip не выполняю."
+            : skipReply({ reason: "none", skipped: [], actionsRunning: true });
       } else {
-        const queue = await readQueue(env.BOT_KV);
-        const skipped = skipUploadingQueue(queue);
+        const why =
+          decision.reason === "finished"
+            ? "пак уже был готов, строка зависла"
+            : decision.reason === "hung"
+              ? "загрузка зависла, стикеры не идут"
+              : "пропущено";
+        const skipped = skipUploadingQueue(queue, why);
         if (skipped.changed) {
           await writeQueue(env.BOT_KV, skipped.queue);
-          schedulePipeline(env, skipped.queue, deps, { dispatchReason: QUEUE_REASON.afterSkip });
+          if (actionsRunning) await env.BOT_KV.delete(LIVE_SESSION_KEY);
+          schedulePipeline(env, skipped.queue, deps, {
+            dispatchReason: QUEUE_REASON.afterSkip,
+            force: Boolean(actionsRunning),
+          });
         }
         out = skipReply({
           reason: skipped.reason,
@@ -715,7 +721,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     if (isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       const { queue, job, reconcile } = await loadAdminQueueState(env.BOT_KV);
       schedulePipelineAfterTerminalReconcile(env, queue, reconcile, deps);
-      out = adminJobText(job);
+      const session = readLiveSession(await env.BOT_KV.get(LIVE_SESSION_KEY));
+      out = adminLiveStatusText({ queue, job, session });
     } else {
       const queue = await readQueue(env.BOT_KV);
       out =
@@ -738,7 +745,7 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       },
     });
     return;
-  } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
+  } else if (cmd === "/login" || cmd === "/connect") {
     await handleVmCommand(env, message, { send, fetch: deps.fetch });
     return;
   } else if (cmd === "/project") {

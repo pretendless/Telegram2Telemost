@@ -2,7 +2,7 @@
 // Import from worker/src/index.js:
 //   import { handleVmCommand } from "../../vm/worker_login.js";
 // In answer(), before the unknown-command return:
-//   } else if (cmd === "/login" || cmd === "/connect" || cmd === "/upload") {
+//   } else if (cmd === "/login" || cmd === "/connect") {
 //     await handleVmCommand(env, message, { send });
 //     return;
 //   } else if (cmd) {
@@ -21,19 +21,13 @@ import {
   parseVmCommand,
   restartWorkflow,
 } from "./dispatch.js";
-import { adminRestartReason, adminUploadReason } from "./dispatch_reason.js";
+import { adminRestartReason } from "./dispatch_reason.js";
 
-export function usageText(error) {
-  if (error === "upload" || error === "packs") {
-    return "Формат: /upload <метка> <номера паков>. Пример: /upload work 03 04";
-  }
-  return "Метка аккаунта: латиница, цифры и дефис, до 32 символов. Пример: /connect work";
+export function usageText() {
+  return "Метка аккаунта: латиница, цифры и дефис, до 32 символов. Пример: /login work";
 }
 
 export function startedText(parsed) {
-  if (parsed.mode === "upload") {
-    return `Запускаю загрузку (${parsed.packs}) аккаунтом «${parsed.account}». Нужна уже сохранённая сессия. Ссылка на Actions придёт отдельным сообщением.`;
-  }
   return `Запускаю браузер для аккаунта «${parsed.account}». QR-код Яндекса придёт в этот чат. Если кода не будет, пришлю ссылку на экран. Ссылка на Actions — отдельным сообщением.`;
 }
 
@@ -43,7 +37,7 @@ export function githubFailText(status) {
 
 export function restartReply({ ok, url, reason, status }) {
   if (ok && url) {
-    return "Останавливаю текущую загрузку и запускаю одну новую с main. Если в Телемосте открыт набор, он будет закрыт через /done и начат заново со своего первого стикера. Если диалог пуст — следующий запрос из очереди (не зависшая строка «загружается»; при необходимости сначала /unstick). Ссылка на Actions — отдельным сообщением.";
+    return "Останавливаю текущую загрузку и запускаю одну новую с main. Если в Телемосте открыт набор, он будет закрыт через /done и начат заново со своего первого стикера. Если диалог пуст — следующий запрос из очереди. Ссылка на Actions — отдельным сообщением.";
   }
   if (ok) return "Запуск принят. Ссылка на Actions придёт отдельным сообщением. Второй запуск не создаю.";
   if (reason === "still-running") {
@@ -118,9 +112,7 @@ export async function handleVmCommand(env, message, deps = {}) {
   const fetchImpl = deps.fetch || fetch;
   let result;
   try {
-    const dispatchReason = parsed.mode === "upload"
-      ? adminUploadReason(parsed.packs)
-      : "админ: /login или /connect";
+    const dispatchReason = "админ: /login";
     result = await dispatchWorkflow(fetchImpl, {
       token: env.GH_DISPATCH_TOKEN,
       repo: env.GH_REPO || DEFAULT_REPO,
