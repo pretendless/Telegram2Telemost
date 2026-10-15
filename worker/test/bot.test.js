@@ -7,11 +7,17 @@ import {
   ADMIN_COMMANDS,
   ADMIN_ONLY_COMMANDS,
   USER_COMMANDS,
-  EXAMPLE,
   INITIAL_SUBSCRIBER,
   ABOUT,
+  CREATE_PROMPT,
   DESCRIPTION,
+  FORMAT,
+  NEED_CREATE,
   START,
+  STOP_CLEARED,
+  STOP_IDLE,
+  acceptReply,
+  createLinksPrompt,
   doneNotice,
   normalizeProgress,
   planNotifications,
@@ -735,7 +741,7 @@ test("an accepted priority request is one KV write and /status does not list", a
   });
   assert.equal(res.status, 200);
   assert.equal(sent[0].chatId, 111);
-  assert.match(sent[0].reply, /Запрос принят с приоритетом/);
+  assert.match(sent[0].reply, /Передаю в очередь с приоритетом/);
   assert.match(sent[0].reply, /«Лисёнок»/);
   assert.match(sent[0].reply, /Всего 20 стикеров/);
   assert.doesNotMatch(sent[0].reply, /8502935020|владел/);
@@ -867,14 +873,28 @@ test("/start subscribes and replies with the format and the channel example", as
   assert.match(sent[0].text, new RegExp(BOT_NAME));
   assert.match(sent[0].text, new RegExp(CHANNEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(sent[0].text, /из канала/);
-  assert.ok(sent[0].text.includes(EXAMPLE));
-  assert.equal(USER_COMMANDS.find((item) => item.command === "create").description, "Новый запрос — передам в очередь");
-  assert.equal(USER_COMMANDS.find((item) => item.command === "start").description, "На связи: как пользоваться");
-  assert.match(sent[0].text, /TG2TM на связи/);
-  assert.match(ABOUT, /^TG2TM на связи/);
+  assert.equal((sent[0].text.match(/TG2TM на связи/g) || []).length, 1);
+  assert.doesNotMatch(sent[0].text, /addstickers/);
+  assert.equal(USER_COMMANDS.find((item) => item.command === "create").description, "Начать новый набор");
+  assert.equal(USER_COMMANDS.find((item) => item.command === "start").description, "Как пользоваться");
+  assert.doesNotMatch(ABOUT, /на связи/);
   assert.ok(ABOUT.length <= 120, ABOUT);
-  assert.match(DESCRIPTION, /TG2TM на связи/);
+  assert.doesNotMatch(DESCRIPTION, /на связи|TG2TM/);
+  assert.match(DESCRIPTION, /\/create[\s\S]*стикер[\s\S]*\/done/);
+  assert.match(DESCRIPTION, /150/);
   assert.ok(DESCRIPTION.length <= 512, String(DESCRIPTION.length));
+  assert.equal(DESCRIPTION.includes(START), false);
+  assert.equal(START.includes(DESCRIPTION), false);
+  for (const text of [ABOUT, DESCRIPTION, FORMAT, CREATE_PROMPT, createLinksPrompt("Минто"), STOP_CLEARED, STOP_IDLE, NEED_CREATE]) {
+    assert.equal((String(text).match(/TG2TM на связи/g) || []).length, 0);
+  }
+  assert.match(CREATE_PROMPT, /Соединяю/);
+  assert.equal((createLinksPrompt("Минто").match(/Приняла/g) || []).length, 1);
+  assert.equal((acceptReply({ title: "Минто", links: [], rows: [], total: 1, ahead: 0 }).match(/Передаю в очередь/g) || []).length, 1);
+  assert.doesNotMatch(acceptReply({ title: "Минто", links: [], rows: [], total: 1, ahead: 0 }), /Приняла/);
+  assert.match(STOP_IDLE, /Линия свободна/);
+  assert.doesNotMatch(STOP_CLEARED, /Приняла|Линия свободна/);
+  assert.doesNotMatch(NEED_CREATE, /Соединяю/);
   assert.equal(
     formatUserRequestCard({ phase: "uploading", pack: "Минто", index: 3, total: 12 }),
     "«Минто»: стикер 3 из 12.",
@@ -1894,7 +1914,7 @@ test("admin chat accepts a pack without /create", async () => {
     sendMessage: async (_env, _chatId, reply) => sent.push(reply),
     stickerCount: async () => 3,
   });
-  assert.match(sent[0], /Запрос принят/);
+  assert.match(sent[0], /Передаю в очередь/);
   assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items.length, 1);
 });
 
@@ -2130,9 +2150,11 @@ test("/format, /example and /stop", async () => {
     env,
     { sendMessage: send },
   );
-  assert.match(sent[0].text, /стикеры или ссылки и \/done/);
-  assert.match(sent[0].text, /только название пака, без ссылок/);
+  assert.match(sent[0].text, /стикер из набора или ссылки/);
+  assert.match(sent[0].text, /только название, без ссылок/);
   assert.match(sent[0].text, /не больше 150/);
+  assert.match(sent[0].text, /\/done/);
+  assert.doesNotMatch(sent[0].text, /TG2TM на связи/);
   await handle(
     new Request("https://tg2tmbot.example/telegram", {
       method: "POST",

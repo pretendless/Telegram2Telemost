@@ -28,7 +28,7 @@ export function usageText() {
 }
 
 export function startedText(parsed) {
-  return `Соединяю. Запускаю браузер для аккаунта «${parsed.account}». QR-код Яндекса придёт в этот чат. Если кода не будет, пришлю ссылку на экран. Ссылка на Actions — отдельным сообщением.`;
+  return `Запускаю браузер для аккаунта «${parsed.account}». QR-код Яндекса придёт в этот чат. Если кода не будет, пришлю ссылку на экран. Ссылка на Actions — отдельным сообщением.`;
 }
 
 export function githubFailText(status) {

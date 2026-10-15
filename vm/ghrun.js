@@ -150,7 +150,7 @@ export function ghrunStartingText(workflow) {
 }
 
 export function ghrunAckText(workflow) {
-  return `Приняла. Запуск workflow «${workflow}» принят. Ссылка на run пришлю отдельным сообщением.`;
+  return `Запуск workflow «${workflow}» принят. Ссылка на run пришлю отдельным сообщением.`;
 }
 
 export function ghrunDispatchedText({ workflow, runUrl }) {
