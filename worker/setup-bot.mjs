@@ -1,4 +1,5 @@
 // Sets @tg2tmbot description, short description and command list.
+// Display name is set manually in BotFather, not by this script.
 // Token: TG2TMBOT_TOKEN or TELEGRAM_BOT_TOKEN.
 // Admin menu: union of LOGIN_CHAT_IDS and worker/wrangler.toml (numeric chat ids only).
 import { readFileSync } from "node:fs";
@@ -6,7 +7,6 @@ import { adminMenuChatIds } from "../scripts/admin_status.mjs";
 import {
   ABOUT,
   ADMIN_COMMANDS,
-  BOT_NAME,
   DESCRIPTION,
   USER_COMMANDS,
 } from "./src/logic.js";
@@ -34,7 +34,6 @@ async function call(method, params) {
   if (!body.ok) throw new Error(body.description || method);
 }
 
-await call("setMyName", { name: BOT_NAME });
 await call("setMyDescription", { description: DESCRIPTION });
 await call("setMyShortDescription", { short_description: ABOUT });
 await call("setMyCommands", { commands: USER_COMMANDS });

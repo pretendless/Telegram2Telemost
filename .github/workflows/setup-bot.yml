@@ -1,4 +1,5 @@
-# Refresh @tg2tmbot name, descriptions and command menu from GitHub (direct Telegram access).
+# Refresh @tg2tmbot description, about text and command menu from GitHub (direct Telegram access).
+# The visible bot name is set manually in BotFather, not by this workflow.
 name: Setup bot
 
 on:
