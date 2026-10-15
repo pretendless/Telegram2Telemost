@@ -8,7 +8,8 @@ import {
   isAdminChat,
 } from "../../scripts/admin_status.mjs";
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
-import { startPipelineIfIdle, telemostRunActive } from "../../vm/queue_runner.js";
+import { startPipelineIfIdle, startReplacementSession, telemostRunActive } from "../../vm/queue_runner.js";
+import { finalizeSessionOnce } from "../../vm/session_end.js";
 import { QUEUE_REASON, queuePipelineReason } from "../../vm/dispatch_reason.js";
 import { LIVE_SESSION_KEY, defaultSessionReason, notifySessionStartOnce, readLiveSession } from "../../vm/session_notify.js";
 import {
@@ -429,6 +430,40 @@ async function handleProjectReply(request, env, deps) {
   return json({ ok: result.ok, error: result.error, chatId: result.chatId }, result.status);
 }
 
+async function handleSessionEnded(request, env, deps) {
+  const secret = env.UPLOADER_SECRET || "";
+  if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
+  const raw = await request.text();
+  if (raw.length > 4096) return new Response("too big", { status: 413 });
+  let body;
+  try {
+    body = JSON.parse(raw || "{}");
+  } catch {
+    return json({ ok: false, error: "bad json" }, 400);
+  }
+  const runId = String(body.runId || body.run_id || "").trim();
+  const runUrl = String(body.runUrl || body.url || "").trim();
+  const queue = await readQueue(env.BOT_KV);
+  const send = deps.sendMessage || defaultSend;
+  const adminId = adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)[0];
+  const result = await finalizeSessionOnce(env.BOT_KV, {
+    runId,
+    runUrl,
+    queue,
+    notify: (text) => send(env, adminId, text),
+    dispatch: () => startReplacementSession(deps.fetch || fetch, env, queue, {
+      exceptRunId: runId,
+      dispatchReason: queuePipelineReason(QUEUE_REASON.afterDrainSession, queue, { preferQueued: true }),
+    }),
+  });
+  return json({
+    ok: Boolean(result.ok),
+    duplicate: Boolean(result.duplicate),
+    decision: result.decision,
+    dispatched: Boolean(result.dispatched),
+  });
+}
+
 async function handleDrainComplete(request, env, deps) {
   const secret = env.UPLOADER_SECRET || "";
   if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
@@ -520,9 +555,11 @@ async function handlePlan(request, env) {
   if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
   const queue = await readQueue(env.BOT_KV);
   const active = queue.items.filter((item) => item.status === "queued" || item.status === "uploading");
-  return json({
-    ok: true,
-    items: active.map((item) => ({
+  const items = [];
+  for (const item of active) {
+    const pack = await readPackProgress(env.BOT_KV, item);
+    const uploaded = pack && Number.isFinite(Number(pack.uploaded)) ? Number(pack.uploaded) : 0;
+    items.push({
       id: item.id,
       chatId: item.chatId,
       title: item.title,
@@ -531,8 +568,10 @@ async function handlePlan(request, env) {
       createdAt: item.createdAt,
       status: item.status,
       stickers: item.stickers,
-    })),
-  });
+      uploaded,
+    });
+  }
+  return json({ ok: true, items });
 }
 
 async function handleSessionStarted(request, env, deps) {
@@ -889,6 +928,9 @@ export async function handle(request, env, deps = {}) {
   if (request.method === "GET" && url.pathname === "/queue/plan") return handlePlan(request, env);
   if (request.method === "POST" && url.pathname === "/queue/drain-complete") {
     return handleDrainComplete(request, env, deps);
+  }
+  if (request.method === "POST" && url.pathname === "/session-ended") {
+    return handleSessionEnded(request, env, deps);
   }
   if (request.method === "GET" && url.pathname === "/project/prompt") {
     return handleProjectPromptGet(request, env);

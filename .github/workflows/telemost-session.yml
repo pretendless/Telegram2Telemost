@@ -52,6 +52,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Remember when this run started
+        run: echo "SESSION_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Notify admin of new session
         env:
           UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
@@ -154,6 +157,7 @@ jobs:
             --user "$(id -u):$(id -g)" \
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
             -e GITHUB_ACTIONS -e GITHUB_RUN_ID -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e RUN_URL \
+            -e SESSION_STARTED_AT \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
             -e TELEMOST_BOT_URL -e TELEMOST_STAGING_URL \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
@@ -211,6 +215,7 @@ jobs:
             --user "$(id -u):$(id -g)" \
             -e MODE -e ACCOUNT -e PACKS -e ENABLE_TUNNEL -e PROXY_HOST \
             -e GITHUB_ACTIONS -e GITHUB_RUN_ID -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e RUN_URL \
+            -e SESSION_STARTED_AT \
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
             -e TELEMOST_BOT_URL -e TELEMOST_STAGING_URL \
             -e UPLOADER_SECRET -e TG2TM_PROGRESS_URL \
@@ -250,6 +255,16 @@ jobs:
         uses: ./.github/actions/record-chosen-pack
         with:
           packs: ${{ steps.in.outputs.packs }}
+
+      - name: Hand off at the GitHub limit
+        if: always() && steps.in.outputs.mode != 'login'
+        env:
+          JOB_STATUS: ${{ job.status }}
+          UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
+          TG2TM_PROGRESS_URL: https://tg2tmbot.prtndz.workers.dev/progress
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/session_ended.mjs
 
       - name: Tell admin the run failed
         if: failure()

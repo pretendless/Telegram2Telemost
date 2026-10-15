@@ -94,6 +94,11 @@ test('a finished telemost block is kept when the same request is claimed again',
   assert.equal(telemostForRequest(partial).uploaded, 14);
   assert.equal(telemostForRequest(null).status, 'pending');
   assert.equal(telemostForRequest({ telemost: { status: 'error', uploaded: 3 } }).status, 'pending');
+  const resumed = telemostForRequest(null, { uploaded: 40 });
+  assert.equal(resumed.status, 'uploading');
+  assert.equal(resumed.uploaded, 40);
+  assert.equal(resumed.checkpoint, 'session-deadline');
+  assert.equal(resumed.packUrl, null);
 });
 
 test('patchRequestPack adds queue requester metadata to an existing catalog pack', () => {

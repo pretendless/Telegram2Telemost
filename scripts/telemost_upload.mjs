@@ -16,7 +16,7 @@ import {
   telegramIo,
 } from './admin_status.mjs';
 import { drainRemainingQueue } from './queue_drain.mjs';
-import { postDrainComplete, queueCredentialsReadable } from './queue_client.mjs';
+import { postDrainComplete, postSessionEnded, queueCredentialsReadable } from './queue_client.mjs';
 import {
   POST_SAVE_STEP_MS,
   POST_SAVE_STEPS,
@@ -25,6 +25,12 @@ import {
   timeoutPackDecision,
   withStepTimeout,
 } from './step_timeout.mjs';
+import {
+  SessionDeadlineStop,
+  checkpointTelemost,
+  isSessionDeadline,
+  pastSessionSoftDeadline,
+} from './session_deadline.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKS = join(ROOT, 'packs');
@@ -3163,6 +3169,8 @@ export function packAlreadyComplete(tm, imageCount) {
 export function restartShouldNewpack(tm, imageCount, chatAction) {
   if (chatAction === 'saved') return false;
   if (packAlreadyComplete(tm, imageCount)) return false;
+  // A deadline checkpoint must continue at the saved index, not open a new pack.
+  if (tm && tm.checkpoint === 'session-deadline' && (Number(tm.uploaded) || 0) > 0) return false;
   return true;
 }
 
@@ -3307,7 +3315,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     console.log(bufferClearSkippedLine());
     await bot.onBot(() => bot.clearStickersHistory(bot.botUrl || earlyUrls.botUrl));
   }
-  if (restart) {
+  if (restart && restartShouldNewpack(tm, m.images.length, '')) {
     await closeOpenBotPackBeforeNew(bot, note, { label: m.title });
   }
   await note({ phase: 'start', pack: m.title, index: 0, total: m.images.length });
@@ -3591,6 +3599,21 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
   }
 
   for (let i = tm.uploaded; i < m.images.length; i++) {
+    if (pastSessionSoftDeadline()) {
+      const saved = checkpointTelemost(tm, { uploaded: tm.uploaded, total: m.images.length });
+      Object.assign(tm, saved);
+      m.telemost = tm;
+      savePack(p);
+      console.log(dir, 'session-deadline checkpoint', tm.uploaded, '/', m.images.length);
+      await note({
+        phase: 'waiting',
+        pack: m.title,
+        index: tm.uploaded,
+        total: m.images.length,
+        lastLine: 'лимит сессии, продолжу в новом запуске',
+      });
+      throw new SessionDeadlineStop(tm.uploaded, m.images.length);
+    }
     const img = m.images[i];
     const file = join(PACKS, dir, img.file);
     if (!useStaging) console.log(dir, 'send', img.file);
@@ -4037,7 +4060,40 @@ async function startNextPackAfterTimeout() {
   ), { runUrl });
 }
 
+async function handoffSessionDeadline(err) {
+  const uploaded = err && err.uploaded;
+  const total = err && err.total;
+  console.log('session-deadline', uploaded, '/', total);
+  try {
+    mkdirSync(join(ROOT, 'logs'), { recursive: true });
+    writeFileSync(join(ROOT, 'logs', 'session-deadline.json'), JSON.stringify({
+      at: new Date().toISOString(),
+      runId: process.env.GITHUB_RUN_ID || process.env.RUN_ID || '',
+      runUrl: actionsRunUrl(),
+      uploaded,
+      total,
+    }));
+  } catch (flagErr) {
+    console.log('session-deadline flag skipped', flagErr && flagErr.message ? flagErr.message : flagErr);
+  }
+  try {
+    const handed = await postSessionEnded(fetch, process.env.TG2TM_PROGRESS_URL || '', process.env.UPLOADER_SECRET || '', {
+      runId: process.env.GITHUB_RUN_ID || process.env.RUN_ID || '',
+      runUrl: actionsRunUrl(),
+      reason: 'deadline',
+    });
+    console.log('session-deadline handed off', JSON.stringify(handed));
+  } catch (handErr) {
+    console.log('session-deadline handoff failed', handErr && handErr.message ? handErr.message : handErr);
+  }
+  process.exitCode = 0;
+}
+
 async function failTimedOutRun(e, { note, dirRef, drainQueue, label }) {
+  if (isSessionDeadline(e)) {
+    await handoffSessionDeadline(e);
+    return true;
+  }
   const message = e && e.message ? e.message : String(e);
   log(label, '', 'остановлено', message);
   if (!isStepTimeout(e)) {

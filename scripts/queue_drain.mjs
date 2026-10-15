@@ -4,11 +4,12 @@
 // New high-priority rows wait until the active uploading row is released. Matches claimNext() in the Worker.
 
 import { spawnSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { actionsRunUrl, clearPackProgress, postProgress } from './admin_status.mjs';
-import { claimQueueItem, postDrainComplete, queueCredentialsReadable } from './queue_client.mjs';
+import { claimQueueItem, postDrainComplete, postSessionEnded, queueCredentialsReadable } from './queue_client.mjs';
+import { claimBeforeDeadline, currentSessionWindow, isSessionDeadline } from './session_deadline.mjs';
 import { writeRequestPack } from './restart_prepare.mjs';
 import { POST_SAVE_STEP_MS, POST_SAVE_STEPS, isStepTimeout, withStepTimeout } from './step_timeout.mjs';
 
@@ -232,7 +233,14 @@ export async function drainRemainingQueue(ctx) {
   let sawWork = false;
   const finishedIds = new Set();
 
+  let deadlineStop = false;
   for (;;) {
+    const window = currentSessionWindow();
+    if (claimBeforeDeadline(window) === 'stop') {
+      console.log('session-deadline stop claiming', new Date(window.softAt).toISOString());
+      deadlineStop = true;
+      break;
+    }
     clearPackProgress(ctx.dirRef);
     let claim;
     try {
@@ -307,6 +315,11 @@ export async function drainRemainingQueue(ctx) {
       finishedIds.add(String(item.id));
       packs++;
     } catch (err) {
+      if (isSessionDeadline(err)) {
+        console.log('session-deadline checkpoint', item.title, err.uploaded, '/', err.total);
+        deadlineStop = true;
+        break;
+      }
       if (isStepTimeout(err)) throw err;
       const message = err && err.message ? err.message : String(err);
       console.log('queue-drain pack error', item.title, message);
@@ -325,6 +338,28 @@ export async function drainRemainingQueue(ctx) {
     }
   }
 
+  if (deadlineStop) {
+    try {
+      mkdirSync(join(ROOT, 'logs'), { recursive: true });
+      writeFileSync(join(ROOT, 'logs', 'session-deadline.json'), JSON.stringify({
+        at: new Date().toISOString(),
+        runId: process.env.GITHUB_RUN_ID || process.env.RUN_ID || '',
+        runUrl: actionsRunUrl(),
+      }));
+    } catch (err) {
+      console.log('session-deadline flag skipped', err && err.message ? err.message : err);
+    }
+    try {
+      const handed = await postSessionEnded(fetchImpl, progressUrl, secret, {
+        runId: process.env.GITHUB_RUN_ID || process.env.RUN_ID || '',
+        runUrl: actionsRunUrl(),
+        reason: 'deadline',
+      });
+      console.log('session-deadline handed off', JSON.stringify(handed));
+    } catch (err) {
+      console.log('session-deadline handoff failed', err && err.message ? err.message : err);
+    }
+  }
   try {
     await withStepTimeout(
       POST_SAVE_STEPS.nextPack,
