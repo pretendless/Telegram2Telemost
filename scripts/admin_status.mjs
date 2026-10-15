@@ -141,14 +141,17 @@ export function adminDelivery(prev, next) {
   return { action: 'edit' };
 }
 
+const LINE_FREE = 'линия свободна';
+const LINE_BUSY = 'линия в процессе';
+
 export function adminJobText(job) {
-  if (!job || !job.running) return 'простаивает';
+  if (!job || !job.running) return LINE_FREE;
   const index = num(job.index);
   const total = num(job.total);
   const sticker = stickerMark(index, total);
-  if (job.pack && sticker) return `идёт | «${oneLine(job.pack)}» | ${sticker}`;
-  if (job.pack) return `идёт | «${oneLine(job.pack)}»`;
-  return 'идёт';
+  if (job.pack && sticker) return `${LINE_BUSY} | «${oneLine(job.pack)}» | ${sticker}`;
+  if (job.pack) return `${LINE_BUSY} | «${oneLine(job.pack)}»`;
+  return LINE_BUSY;
 }
 
 function sessionCoversItem(session, item) {
@@ -159,12 +162,18 @@ function sessionCoversItem(session, item) {
 
 function startingActionsText(title, session) {
   const name = oneLine(title) || '…';
-  const head = `запуск Actions, пак «${name}», стикеры ещё не пошли`;
+  const head = `${LINE_BUSY}: запуск Actions, пак «${name}», стикеры ещё не пошли`;
   const url = session && /^https?:\/\//i.test(String(session.url || '').trim()) ? String(session.url).trim() : '';
   return url ? `${head}\n${url}` : head;
 }
 
-// Admin /status: name the step. Bare «простаивает» only when nothing is queued or uploading.
+function sessionUrl(session) {
+  const url = session && String(session.url || '').trim();
+  return /^https?:\/\//i.test(url) ? url : '';
+}
+
+// Admin /status. «линия свободна» only with an empty queue and no live session.
+// A running upload, an Actions start, or any other live session is «линия в процессе».
 export function adminLiveStatusText({ queue, job, session } = {}) {
   if (job && job.running) {
     const index = num(job.index);
@@ -173,7 +182,10 @@ export function adminLiveStatusText({ queue, job, session } = {}) {
     return startingActionsText(job.pack, session);
   }
   const next = sortQueuedItems((queue && queue.items) || [])[0];
-  if (!next) return 'простаивает';
+  if (!next) {
+    const url = sessionUrl(session);
+    return url ? `${LINE_BUSY}\n${url}` : LINE_FREE;
+  }
   if (sessionCoversItem(session, next)) return startingActionsText(next.title, session);
   const stickers = Number(next.stickers);
   const count = Number.isFinite(stickers) && stickers > 0 ? `, ${stickers} стикеров` : '';

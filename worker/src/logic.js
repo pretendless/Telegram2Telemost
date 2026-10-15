@@ -46,13 +46,13 @@ export const FORMAT =
   "https://t.me/addstickers/minty_vk\n" +
   "/done";
 
-export const START =
+const START_BODY =
   `${OPERATOR} на связи. ${BOT_NAME} (@tg2tmbot) переносит стикеры из Telegram в Телемост.\n` +
   "\n" +
   "Новый набор: /create. Дальше спрошу название, затем приму стикеры или ссылки. В очередь — после /done. Пример и лимит — /format.\n" +
   "\n" +
   `Готовые наборы публикуются в канале ${CHANNEL}` +
-  "\n\nПишу только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылаю. /status — ваши запросы, /stop — прервать ввод.";
+  "\n\nПишу только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылаю.";
 
 // BotFather long description. Different sentences from /start: no call sign.
 export const DESCRIPTION =
@@ -323,12 +323,8 @@ export function stickerSetName(sticker) {
 export const NEED_CREATE =
   "Сначала /create. Спрошу название, затем стикер из набора или ссылки t.me/addstickers/…. /done ставит в очередь.\n\nПодробнее — /format.";
 
-export const STOP_CLEARED =
-  "Ввод прерван, незаконченный /create сброшен.\n\n" +
-  "Снова можно: /create, /status, /format, /start.";
-
-export const STOP_IDLE =
-  "Линия свободна: сейчас нечего прерывать. Команды: /create, /status, /format, /start.";
+const STOP_CLEARED_HEAD = "Ввод прерван, незаконченный /create сброшен.";
+const STOP_IDLE_HEAD = "Линия свободна: сейчас нечего прерывать.";
 
 export const AWAIT_CREATE_PREFIX = "await:";
 
@@ -357,6 +353,40 @@ export const ADMIN_ONLY_COMMANDS = [
 export const RETIRED_COMMAND = "Эта команда больше не доступна.";
 
 export const ADMIN_COMMANDS = USER_COMMANDS.concat(ADMIN_ONLY_COMMANDS);
+
+const COMMAND_LABELS = {
+  start: "как пользоваться",
+  create: "создать пак",
+  format: "формат и пример",
+  status: "ваши запросы",
+  stop: "прервать ввод",
+  queue: "очередь",
+  skip: "пропустить пак",
+  restart: "перезапустить загрузку",
+  project: "задача для агента",
+  ghrun: "запустить workflow",
+  login: "войти в Яндекс",
+};
+
+// One line per command this chat can actually run. No retired commands, no /connect.
+export function commandList(admin) {
+  return (admin ? ADMIN_COMMANDS : USER_COMMANDS)
+    .map((row) => `/${row.command} — ${COMMAND_LABELS[row.command]}`)
+    .join("\n");
+}
+
+export function startText(admin) {
+  return `${START_BODY}\n\n${commandList(admin)}`;
+}
+
+export function stopReply(cleared, admin) {
+  const head = cleared ? STOP_CLEARED_HEAD : STOP_IDLE_HEAD;
+  return `${head}\n\n${commandList(admin)}`;
+}
+
+export const START = startText(false);
+export const STOP_CLEARED = stopReply(true, false);
+export const STOP_IDLE = stopReply(false, false);
 
 const STATUS_RU = { pending: "ждёт", uploading: "загружается", done: "готов", error: "ошибка" };
 const STATUSES = new Set(Object.keys(STATUS_RU));
@@ -608,7 +638,6 @@ export function commandOf(text) {
 }
 
 export function staticReply(cmd) {
-  if (cmd === "/start" || cmd === "/help") return { subscribe: true, text: START };
   if (cmd === "/format" || cmd === "/example") return { text: FORMAT };
   return null;
 }

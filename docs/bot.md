@@ -24,7 +24,7 @@
 | --- | --- |
 | `/queue` | Очередь: кто ждёт (приоритет выше обычных, FIFO внутри группы), что загружается (N из M), недавние готовые/ошибки; «зависшие» uploading с уже завершённым прогрессом в KV закрываются как готовые |
 | `/skip` | Пометить текущую «загружается» как ошибку и перейти к следующему в очереди (если Actions не идут) |
-| `/status` | Шаг сессии: очередь, запуск Actions (и ссылка на run, если она уже есть) или «стикер N из M». Голое «простаивает» — только когда нет очереди и загрузки |
+| `/status` | «линия свободна», если нет очереди и нет сессии. «линия в процессе», если пак загружается, Actions запускается или сессия занята; дальше название, «стикер N из M» или очередь. Ссылка на run — только здесь, в админ-чате |
 | `/restart` | Прервать текущий Actions и один новый запуск с `main`; выбор пака — только **queued/uploading** из KV, не «призраки» из каталога `packs/07…` без активной строки очереди |
 | `/project` | Вопрос или задача для Cursor Cloud Agent: мгновенный ack в TG, затем фоновый dispatch `cursor-agent.yml`. Actions читает prompt из KV, запускает агента на `pretendless/tg2tm` (`main`) и шлёт краткий итог через `POST /project/reply`. Issue (`project-prompt.yml`) — только если у воркера `PROJECT_ALSO_CREATE_ISSUE=1`, сбой issue не отменяет агента. В GitHub нужны `CURSOR_API_KEY`, `UPLOADER_SECRET` и `TG2TM_PROGRESS_URL` (`https://tg2tmbot.prtndz.workers.dev/progress`). Проверка ключа: Actions → **Check Cursor API**, без curl на своём компьютере; после деплоя воркера то же самое — `/ghrun check-cursor-api.yml` |
 | `/ghrun` | Запуск произвольного workflow: `/ghrun <file.yml> [key=value …]`. Только админ; опционально `GH_WORKFLOW_ALLOWLIST` |

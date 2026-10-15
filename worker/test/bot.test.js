@@ -351,7 +351,7 @@ test("admin chat gets another user's upload, edits the sticker count, and /statu
   await handle(packMessage(8502935020, "/status"), env, {
     sendMessage: async (_env, _chatId, text) => idle.push(text),
   });
-  assert.equal(idle[0], "простаивает");
+  assert.equal(idle[0], "линия свободна");
 
   const mafItem = {
     id: "req-maf",
@@ -384,7 +384,7 @@ test("admin chat gets another user's upload, edits the sticker count, and /statu
   await handle(packMessage(8502935020, "/status"), env, {
     sendMessage: async (_env, _chatId, text) => idle.push(text),
   });
-  assert.match(idle[0], /идёт \| «Маф, Изис и Агнес» \| стикер 3 из 144/);
+  assert.match(idle[0], /линия в процессе \| «Маф, Изис и Агнес» \| стикер 3 из 144/);
 });
 
 test("progress that the uploader already told the admin does not send a second card", async () => {
@@ -909,6 +909,44 @@ test("/start subscribes and replies with the format and the channel example", as
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "queue").description, "Очередь и прогресс");
   assert.equal(ADMIN_COMMANDS.length, USER_COMMANDS.length + ADMIN_ONLY_COMMANDS.length);
   assert.equal(await env.BOT_KV.get("sub:4242"), "1");
+  assert.match(
+    sent[0].text,
+    /\/start — как пользоваться\n\/create — создать пак\n\/format — формат и пример\n\/status — ваши запросы\n\/stop — прервать ввод$/,
+  );
+  assert.doesNotMatch(sent[0].text, /\/queue|\/unstick|\/upload|\/connect/);
+});
+
+test("/start and /stop list that chat's commands, one per line", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = "8502935020";
+  const sent = [];
+  const sendMessage = async (_env, chatId, text) => {
+    sent.push({ chatId, text });
+  };
+  await handle(packMessage(7, "/start"), env, { sendMessage });
+  assert.match(sent[0].text, /TG2TM на связи/);
+  assert.equal((sent[0].text.match(/TG2TM на связи/g) || []).length, 1);
+  assert.match(sent[0].text, /\/create — создать пак\n\/format — формат и пример\n\/status — ваши запросы\n\/stop — прервать ввод$/);
+  assert.doesNotMatch(sent[0].text, /\/queue|\/skip|\/restart|\/login|\/unstick|\/upload|\/connect/);
+
+  sent.length = 0;
+  await handle(packMessage(8502935020, "/start"), env, { sendMessage });
+  assert.match(sent[0].text, /\/stop — прервать ввод\n\/queue — очередь\n\/skip — пропустить пак\n\/restart — перезапустить загрузку\n\/project — задача для агента\n\/ghrun — запустить workflow\n\/login — войти в Яндекс$/);
+  assert.doesNotMatch(sent[0].text, /\/unstick|\/upload|\/connect/);
+  assert.equal((sent[0].text.match(/TG2TM на связи/g) || []).length, 1);
+
+  sent.length = 0;
+  await handle(packMessage(7, "/stop"), env, { sendMessage });
+  assert.match(sent[0].text, /^Линия свободна: сейчас нечего прерывать\.\n\n\/start — как пользоваться\n\/create — создать пак/);
+  assert.doesNotMatch(sent[0].text, /TG2TM на связи|\/queue/);
+
+  sent.length = 0;
+  await handle(packMessage(8502935020, "/create"), env, { sendMessage });
+  sent.length = 0;
+  await handle(packMessage(8502935020, "/stop"), env, { sendMessage });
+  assert.match(sent[0].text, /^Ввод прерван, незаконченный \/create сброшен\.\n\n\/start — как пользоваться/);
+  assert.match(sent[0].text, /\/login — войти в Яндекс$/);
+  assert.doesNotMatch(sent[0].text, /TG2TM на связи|\/unstick|\/upload|\/connect/);
 });
 
 test("webhook without the secret token is rejected", async () => {
@@ -1370,7 +1408,7 @@ test("admin /status reconciles terminal pack KV and reports idle", async () => {
       replies.push(text);
     },
   });
-  assert.equal(replies[0], "простаивает");
+  assert.equal(replies[0], "линия свободна");
   const stored = JSON.parse(env.BOT_KV.store.get("queue"));
   assert.equal(stored.items[0].status, "done");
 });
@@ -1964,7 +2002,7 @@ test("admin /status matches /queue when catalog pack KV is orphan", async () => 
     sendMessage: async (_env, _chatId, text) => sent.push(text),
   });
   assert.match(sent[0], /в очереди \| «Maf»/);
-  assert.doesNotMatch(sent[0], /^простаивает$/);
+  assert.doesNotMatch(sent[0], /простаивает|линия свободна/);
   assert.doesNotMatch(sent[0], /Сэт, Рэдж и Летти/);
   sent.length = 0;
   await handle(packMessage(INITIAL_SUBSCRIBER, "/queue"), env, {

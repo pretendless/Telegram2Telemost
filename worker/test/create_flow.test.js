@@ -515,19 +515,25 @@ test("admin /status names a starting run and an upload instead of idle", () => {
     at: "2026-10-14T00:57:30.000Z",
   };
   const starting = adminLiveStatusText({ queue: queued, job: { running: false }, session });
-  assert.match(starting, /запуск Actions, пак «Шерсть Ебаная», стикеры ещё не пошли/);
+  assert.match(starting, /^линия в процессе: запуск Actions, пак «Шерсть Ебаная», стикеры ещё не пошли/);
   assert.match(starting, /38644156549/);
-  assert.doesNotMatch(starting, /^простаивает$/);
+  assert.doesNotMatch(starting, /простаивает|на связи/);
 
   const uploading = adminLiveStatusText({
     queue: { items: [{ status: "uploading", title: "Шерсть Ебаная", stickers: 109 }] },
     job: { running: true, pack: "Шерсть Ебаная", index: 8, total: 109 },
     session,
   });
-  assert.match(uploading, /идёт \| «Шерсть Ебаная» \| стикер 8 из 109/);
-  assert.doesNotMatch(uploading, /простаивает/);
+  assert.match(uploading, /^линия в процессе \| «Шерсть Ебаная» \| стикер 8 из 109/);
+  assert.doesNotMatch(uploading, /простаивает|на связи/);
 
-  assert.equal(adminLiveStatusText({ queue: { items: [] }, job: { running: false } }), "простаивает");
+  assert.equal(adminLiveStatusText({ queue: { items: [] }, job: { running: false } }), "линия свободна");
+  const busySession = adminLiveStatusText({
+    queue: { items: [] },
+    job: { running: false },
+    session,
+  });
+  assert.match(busySession, /^линия в процессе\nhttps:\/\/github.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
 });
 
 function stickerUpdate(chatId, sticker) {
