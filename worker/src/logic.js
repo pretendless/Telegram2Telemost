@@ -5,6 +5,8 @@
 export const MAX_STICKERS = 150;
 export const MAX_PACK_TITLE = 100;
 export const BOT_NAME = "Telegram2Telemost";
+// Call sign in user replies. The Telegram display name stays BOT_NAME.
+export const OPERATOR = "TG2TM";
 export const CHANNEL = "https://t.me/tg2tm";
 export const CHANNEL_CHAT = "@tg2tm";
 export const CHANNEL_TITLE = "Стикеры TG → Телемост";
@@ -42,15 +44,15 @@ export const FORMAT =
   EXAMPLE;
 
 export const START =
-  `${BOT_NAME} (@tg2tmbot) переносит стикеры из Telegram в Телемост.\n` +
+  `${OPERATOR} на связи. ${BOT_NAME} (@tg2tmbot) переносит стикеры из Telegram в Телемост.\n` +
   "\n" +
   FORMAT +
   `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
-  "\n\nСначала /create — бот спросит название, затем ссылки (см. /format). Бот проверит набор и поставит его в очередь." +
-  "\n\nБот пишет вам только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылает. /status — ваши запросы, /stop — прервать ввод.";
+  "\n\nСначала /create — спрошу название, затем ссылки (см. /format). Проверю набор и передам в очередь." +
+  "\n\nПишу только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылаю. /status — ваши запросы, /stop — прервать ввод.";
 
 export const DESCRIPTION =
-  `${BOT_NAME} переносит стикеры из Telegram в Телемост.\n` +
+  `${OPERATOR} на связи. ${BOT_NAME} переносит стикеры из Telegram в Телемост.\n` +
   "\n" +
   "Команда /create: сначала только название, затем ссылки t.me/addstickers/… по порядку, " +
   `всего до ${MAX_STICKERS} стикеров.\n` +
@@ -58,17 +60,17 @@ export const DESCRIPTION =
   "Пример:\n" +
   EXAMPLE +
   "\n\n" +
-  `Бот проверяет набор и сообщает о ходе загрузки. Готовые наборы: ${CHANNEL}`;
+  `Проверю набор и передам в очередь. Готовые наборы: ${CHANNEL}`;
 
-export const ABOUT = "Переносит стикеры из Telegram в Телемост.";
+export const ABOUT = `${OPERATOR} на связи: перенос стикеров из Telegram в Телемост.`;
 
 export const CREATE_PROMPT =
-  "Как назвать пак в Телемосте?\n\n" +
+  "Соединяю. Как назвать пак в Телемосте?\n\n" +
   `Пришлите только название, одним сообщением, без ссылок. Не длиннее ${MAX_PACK_TITLE} символов.`;
 
 export function createLinksPrompt(title) {
   return (
-    `Название: «${title}».\n\n` +
+    `Название: «${title}». Приняла.\n\n` +
     "Пришлите ссылки на наборы стикеров t.me/addstickers/… — одну или несколько, по одной в строке. " +
     "Порядок ссылок — порядок стикеров.\n\n" +
     `Всего стикеров во всех наборах должно быть не больше ${MAX_STICKERS}.`
@@ -76,14 +78,14 @@ export function createLinksPrompt(title) {
 }
 
 export const NEED_CREATE =
-  "Сначала отправьте /create. Бот спросит название, затем ссылки t.me/addstickers/….\n\nПодробнее — /format.";
+  "Сначала /create — тогда соединяю. Спрошу название, затем ссылки t.me/addstickers/….\n\nПодробнее — /format.";
 
 export const STOP_CLEARED =
-  "Ввод прерван. Незаконченный /create сброшен.\n\n" +
-  "Снова можно пользоваться командами: /create, /status, /format, /start.";
+  "Приняла. Ввод прерван, незаконченный /create сброшен.\n\n" +
+  "Снова можно: /create, /status, /format, /start.";
 
 export const STOP_IDLE =
-  "Сейчас нечего прерывать. Команды доступны: /create, /status, /format, /start.";
+  "Линия свободна: сейчас нечего прерывать. Команды: /create, /status, /format, /start.";
 
 export const AWAIT_CREATE_PREFIX = "await:";
 
@@ -93,8 +95,8 @@ export function awaitCreateKey(chatId) {
 
 // Telegram menu (BotFather / setMyCommands). Admin-only rows — ADMIN_ONLY_COMMANDS.
 export const USER_COMMANDS = [
-  { command: "start", description: "Как пользоваться" },
-  { command: "create", description: "Новый запрос на перенос" },
+  { command: "start", description: "На связи: как пользоваться" },
+  { command: "create", description: "Новый запрос — передам в очередь" },
   { command: "format", description: "Формат и пример пака" },
   { command: "status", description: "Ваши запросы в очереди" },
   { command: "stop", description: "Прервать ввод и вернуться к командам" },
@@ -223,7 +225,7 @@ export function telegramParseMode(text) {
 export function doneNotice(title, total, url, followUp) {
   const head = followUp
     ? `Ссылка на пак «${title}» в Телемосте:\n${url}`
-    : `Готово: пак «${title}» в Телемосте, ${total} стикеров.\n${url}`;
+    : `Готово: пак «${title}» принят в Телемост, ${total} стикеров.\n${url}`;
   return `${head}\n\nГотовые наборы: ${CHANNEL}`;
 }
 
@@ -364,7 +366,7 @@ export function commandOf(text) {
 
 export function staticReply(cmd) {
   if (cmd === "/start" || cmd === "/help") return { subscribe: true, text: START };
-  if (cmd === "/format" || cmd === "/example") return { text: FORMAT };
+  if (cmd === "/format" || cmd === "/example") return { text: `Приняла.\n\n${FORMAT}` };
   return null;
 }
 
@@ -427,7 +429,7 @@ export function nameStepResult(text) {
       ok: false,
       reason: "links",
       text:
-        "На этом шаге нужно только название пака, без ссылок.\n\n" +
+        "Не приняла: на этом шаге нужно только название пака, без ссылок.\n\n" +
         "Пришлите название одним сообщением. Ссылки t.me/addstickers/… — следующим шагом.",
     };
   }
@@ -438,7 +440,7 @@ export function nameStepResult(text) {
       ok: false,
       reason: "long",
       text:
-        `Название — ${title.length} ${ruChars(title.length)}, лимит ${MAX_PACK_TITLE}.\n\n` +
+        `Не приняла. Название — ${title.length} ${ruChars(title.length)}, лимит ${MAX_PACK_TITLE}.\n\n` +
         "Пришлите название ещё раз, без ссылок.",
     };
   }
@@ -464,7 +466,7 @@ export function parseStickerSetNames(text) {
 
 function linksAgain(title, problem) {
   return (
-    `${problem}\n\n` +
+    `Не приняла.\n\n${problem}\n\n` +
     `Пришлите ссылки t.me/addstickers/… ещё раз — одну или несколько. Название «${title}» сохранено.`
   );
 }
@@ -645,7 +647,7 @@ export function finishedDuplicateText(title, links) {
   return (
     `Уже переносился набор «${shown}» с этими же ссылками:\n` +
     `${listed}\n\n` +
-    `Совпадают и название, и ссылки.`
+    `Совпадают и название, и ссылки. Повторно не передаю.`
   );
 }
 
@@ -1006,19 +1008,19 @@ export function queueStatusText(queue, chatId) {
 
 export function alreadyQueuedReply({ title, priority }) {
   const head = priority
-    ? `Запрос «${title}» уже в очереди с приоритетом.`
-    : `Запрос «${title}» уже в очереди.`;
+    ? `Запрос «${title}» уже в очереди с приоритетом. Повторно не передаю.`
+    : `Запрос «${title}» уже в очереди. Повторно не передаю.`;
   return head;
 }
 
 export function acceptReply({ title, links, rows, total, priority, ahead }) {
   const head = priority
-    ? `Запрос принят с приоритетом. «${htmlEscape(title)}» встанет в очередь сразу после набора, который уже загружается.`
-    : `Запрос принят. «${htmlEscape(title)}» в очереди.`;
+    ? `Приняла. Запрос принят с приоритетом. «${htmlEscape(title)}» встанет в очередь сразу после набора, который уже загружается.`
+    : `Приняла. Запрос принят. Передаю в очередь «${htmlEscape(title)}».`;
   const position =
     typeof ahead === "number"
       ? ahead === 0
-        ? "\n\nСейчас перед вами никого — ждём свободный запуск Actions."
+        ? "\n\nСейчас перед вами никого."
         : `\n\nПеред вами в очереди: ${ahead}.`
       : "";
   const sources = Array.isArray(links) && links.length
@@ -1153,8 +1155,9 @@ export function formatUserRequestCard(event) {
   }
   if (event.phase === "done" && event.url) {
     const url = stripGithubPointers(event.url);
-    if (!url || /github\.com/i.test(event.url)) return `«${title}»: готово.`;
-    return `«${title}»: готово.\n${url}`;
+    const done = `Готово: «${title}».`;
+    if (!url || /github\.com/i.test(event.url)) return done;
+    return `${done}\n${url}`;
   }
   if (event.phase === "error") {
     const index = Number(event.index) || 0;

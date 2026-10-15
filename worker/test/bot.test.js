@@ -9,6 +9,8 @@ import {
   USER_COMMANDS,
   EXAMPLE,
   INITIAL_SUBSCRIBER,
+  ABOUT,
+  DESCRIPTION,
   START,
   doneNotice,
   normalizeProgress,
@@ -862,8 +864,18 @@ test("/start subscribes and replies with the format and the channel example", as
   assert.match(sent[0].text, new RegExp(CHANNEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(sent[0].text, /из канала/);
   assert.ok(sent[0].text.includes(EXAMPLE));
-  assert.equal(USER_COMMANDS.find((item) => item.command === "create").description, "Новый запрос на перенос");
-  assert.equal(USER_COMMANDS.find((item) => item.command === "start").description, "Как пользоваться");
+  assert.equal(USER_COMMANDS.find((item) => item.command === "create").description, "Новый запрос — передам в очередь");
+  assert.equal(USER_COMMANDS.find((item) => item.command === "start").description, "На связи: как пользоваться");
+  assert.match(sent[0].text, /TG2TM на связи/);
+  assert.match(ABOUT, /^TG2TM на связи/);
+  assert.ok(ABOUT.length <= 120, ABOUT);
+  assert.match(DESCRIPTION, /TG2TM на связи/);
+  assert.ok(DESCRIPTION.length <= 512, String(DESCRIPTION.length));
+  assert.equal(
+    formatUserRequestCard({ phase: "uploading", pack: "Минто", index: 3, total: 12 }),
+    "«Минто»: стикер 3 из 12.",
+  );
+  assert.equal(formatUserRequestCard({ phase: "done", pack: "Минто", url: PACK_URL }), `Готово: «Минто».\n${PACK_URL}`);
   assert.equal(USER_COMMANDS.find((item) => item.command === "format").description, "Формат и пример пака");
   assert.equal(
     USER_COMMANDS.find((item) => item.command === "stop").description,

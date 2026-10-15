@@ -21,7 +21,7 @@ export function linkText(origin, password) {
 
 export function resultText(kind, account) {
   if (kind === "ready") {
-    return `Вход выполнен, аккаунт «${account}». Сессия зашифрована и сохранена. Телемост открылся.`;
+    return `Соединение есть. Вход выполнен, аккаунт «${account}». Сессия зашифрована и сохранена. Телемост открылся.`;
   }
   if (kind === "connecting") {
     return `Вход выполнен, аккаунт «${account}». Сессия сохранена, но Телемост всё ещё пишет «Подключение…».`;

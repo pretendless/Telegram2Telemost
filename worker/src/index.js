@@ -773,7 +773,7 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       const queue = await readQueue(env.BOT_KV);
       out =
         queueStatusText(queue, chatId) ||
-        "Активных запросов нет. Новый перенос — /create, затем сообщение с паком (/format).";
+        "Линия свободна. Активных запросов нет. Новый перенос — /create, затем сообщение с паком (/format).";
     }
   } else if (cmd === "/restart") {
     await handleRestart(env, message, {
