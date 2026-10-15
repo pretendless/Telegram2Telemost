@@ -33,7 +33,7 @@ export function resultText(kind, account) {
     return `Нет сохранённой сессии для аккаунта «${account}». Сначала отправьте /login.`;
   }
   if (kind === "upload-ready") {
-    return `Сессия аккаунта «${account}» открыта, Телемост на связи. Начинаю загрузку.`;
+    return `Сессия аккаунта «${account}» открыта. Начинаю загрузку.`;
   }
   return `Браузер остановился, аккаунт «${account}».`;
 }

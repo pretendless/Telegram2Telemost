@@ -162,7 +162,7 @@ test("valid links enqueue the saved title and clear the dialog", async () => {
   assert.match(added[0].reply, /Добавлено 7, всего 7 из 150/);
   assert.equal(env.BOT_KV.store.get("queue"), undefined);
   const accepted = await say(env, 7, "/done");
-  assert.match(accepted[0].reply, /Запрос принят/);
+  assert.match(accepted[0].reply, /Передаю в очередь/);
   assert.match(accepted[0].reply, /«Лисёнок»/);
   assert.match(accepted[0].reply, /href="https:\/\/t\.me\/addstickers\/fox_one">#<\/a>/);
   assert.match(accepted[0].reply, /href="https:\/\/t\.me\/addstickers\/fox_two">#<\/a>/);
@@ -255,7 +255,7 @@ test("admin keeps the one-message pack, and /create still starts the dialog", as
   const direct = await say(env, admin, "Админ\n\nhttps://t.me/addstickers/admin_set", {
     stickerCount: async () => 3,
   });
-  assert.match(direct[0].reply, /Запрос принят/);
+  assert.match(direct[0].reply, /Передаю в очередь/);
   assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].title, "Админ");
 
   const prompted = await say(env, admin, "/create");
@@ -335,7 +335,7 @@ test("a new title with the same finished links enqueues", async () => {
   await say(env, 7, "test2");
   await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
   const accepted = await say(env, 7, "/done");
-  assert.match(accepted[0].reply, /Запрос принят/);
+  assert.match(accepted[0].reply, /Передаю в очередь/);
   assert.match(accepted[0].reply, /«test2»/);
   assert.doesNotMatch(accepted[0].reply, /уже переносился/);
   const queue = JSON.parse(env.BOT_KV.store.get("queue"));
@@ -350,7 +350,7 @@ test("the same title with different links enqueues", async () => {
   await say(env, 7, "test");
   await say(env, 7, "https://t.me/addstickers/konchanch", { stickerCount: async () => 33 });
   const accepted = await say(env, 7, "/done");
-  assert.match(accepted[0].reply, /Запрос принят/);
+  assert.match(accepted[0].reply, /Передаю в очередь/);
   assert.match(accepted[0].reply, /«test»/);
   assert.match(accepted[0].reply, /Всего 33 стикеров/);
   assert.doesNotMatch(accepted[0].reply, /уже переносился/);
@@ -379,7 +379,7 @@ test("the same title and the same links restart the name prompt", async () => {
   await say(env, 7, OLD_LINK, { stickerCount: async () => 4 });
   const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /«test2»/);
-  assert.match(accepted[0].reply, /Запрос принят/);
+  assert.match(accepted[0].reply, /Передаю в очередь/);
 });
 
 test("/stop clears the name step, the links step, and answers when idle", async () => {
@@ -575,7 +575,7 @@ test("a sticker with set_name adds its set, reports the total, and waits for /do
   assert.equal(env.BOT_KV.store.get("queue"), undefined);
 
   const done = await say(env, 7, "/done");
-  assert.match(done[0].reply, /Запрос принят/);
+  assert.match(done[0].reply, /Передаю в очередь/);
   assert.match(done[0].reply, /«Pretendless»/);
   assert.match(done[0].reply, /Всего 70 стикеров/);
   const item = JSON.parse(env.BOT_KV.store.get("queue")).items[0];
@@ -688,6 +688,6 @@ test("/stop after collecting sets clears them and queues nothing", async () => {
   assert.equal(env.BOT_KV.store.get("await:7"), undefined);
   assert.equal(env.BOT_KV.store.get("queue"), undefined);
   const after = await say(env, 7, "/done");
-  assert.doesNotMatch(after[0].reply, /Запрос принят/);
+  assert.doesNotMatch(after[0].reply, /Передаю в очередь/);
   assert.equal(env.BOT_KV.store.get("queue"), undefined);
 });
