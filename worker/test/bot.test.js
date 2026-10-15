@@ -883,6 +883,12 @@ test("/start subscribes and replies with the format and the channel example", as
   assert.match(DESCRIPTION, /\/create[\s\S]*стикер[\s\S]*\/done/);
   assert.match(DESCRIPTION, /150/);
   assert.ok(DESCRIPTION.length <= 512, String(DESCRIPTION.length));
+  for (const word of [/стикер/i, /Telegram/, /Телемост/, /перенос/i]) {
+    assert.match(ABOUT, word);
+    assert.match(DESCRIPTION, word);
+  }
+  assert.doesNotMatch(ABOUT, /TG2TM/);
+  assert.match(DESCRIPTION, /\/create\nМинто\nстикер или https:\/\/t\.me\/addstickers\/minty_vk\n\/done/);
   assert.equal(DESCRIPTION.includes(START), false);
   assert.equal(START.includes(DESCRIPTION), false);
   for (const text of [ABOUT, DESCRIPTION, FORMAT, CREATE_PROMPT, createLinksPrompt("Минто"), STOP_CLEARED, STOP_IDLE, NEED_CREATE]) {
