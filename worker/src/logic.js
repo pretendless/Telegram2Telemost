@@ -876,6 +876,21 @@ export function aheadCount(queue, item) {
   return ahead;
 }
 
+// Drop GitHub and Actions run links. Sticker counts and pack titles stay.
+export function stripGithubPointers(text) {
+  const raw = String(text ?? "");
+  const without = raw
+    .replace(/<a\b[^>]*href=["']https?:\/\/(?:www\.)?github\.com[^"']*["'][^>]*>[\s\S]*?<\/a>/gi, "")
+    .replace(/(?:https?:\/\/)?(?:www\.)?github\.com\/[^\s<>"')\]]+/gi, "")
+    .replace(/\bactions\/runs\/\d+\b/gi, "");
+  const lines = without.split("\n").flatMap((line) => {
+    const cleaned = line.replace(/\s+\|\s*$/g, "").replace(/\s+—\s*$/g, "").replace(/[ \t]{2,}/g, " ").trim();
+    if (!cleaned && line.trim()) return [];
+    return [line.trim() ? cleaned : ""];
+  });
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export function htmlEscape(text) {
   return String(text ?? "")
     .replace(/&/g, "&amp;")
@@ -1073,13 +1088,16 @@ export function formatUserRequestCard(event) {
     return `«${title}»: загрузка идёт (${index}).`;
   }
   if (event.phase === "done" && event.url) {
-    return `«${title}»: готово.\n${event.url}`;
+    const url = stripGithubPointers(event.url);
+    if (!url || /github\.com/i.test(event.url)) return `«${title}»: готово.`;
+    return `«${title}»: готово.\n${url}`;
   }
   if (event.phase === "error") {
     const index = Number(event.index) || 0;
     const total = Number(event.total) || 0;
     const where = total ? ` на ${index}/${total}` : "";
-    return `«${title}»: ошибка${where}: ${event.error || "загрузка остановлена"}.`;
+    const detail = stripGithubPointers(event.error || "") || "загрузка остановлена";
+    return `«${title}»: ошибка${where}: ${detail}.`;
   }
   return `«${title}»: ${event.phase || "статус"}.`;
 }

@@ -1561,6 +1561,80 @@ test("progress edits the queue requester card even when requester is the admin c
   assert.match(edited[0].text, /стикер 2 из 5/);
 });
 
+test("admin keeps the Actions run URL and the requester does not", async () => {
+  const RUN = "https://github.com/pretendless/tg2tm/actions/runs/38644156549";
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = "8502935020";
+  env.BOT_KV.store.set("meta:seeded", "1");
+  let queue = enqueueRequest(emptyQueue(), {
+    chatId: 424242,
+    title: "Шерсть Ебаная",
+    links: ["https://t.me/addstickers/piidarasy"],
+    priority: false,
+    createdAt: "2026-10-14T18:00:00.000Z",
+    stickers: 109,
+  }).queue;
+  queue.items[0].status = "uploading";
+  env.BOT_KV.store.set("queue", JSON.stringify(queue));
+  env.BOT_KV.store.set(
+    "meta:telemost-session",
+    JSON.stringify({
+      runId: "38644156549",
+      url: RUN,
+      at: "2026-10-14T18:05:00.000Z",
+    }),
+  );
+  const item = queue.items[0];
+  const sent = [];
+  await handle(packMessage(8502935020, "/status"), env, {
+    sendMessage: async (_env, chatId, text) => sent.push({ chatId: String(chatId), text }),
+  });
+  await handle(packMessage(424242, "/status"), env, {
+    sendMessage: async (_env, chatId, text) => sent.push({ chatId: String(chatId), text }),
+  });
+  const adminStatus = sent.find((row) => row.chatId === "8502935020");
+  const userStatus = sent.find((row) => row.chatId === "424242");
+  assert.match(adminStatus.text, /Шерсть Ебаная/);
+  assert.match(adminStatus.text, /github\.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+  assert.match(userStatus.text, /Шерсть Ебаная/);
+  assert.match(userStatus.text, /109/);
+  assert.doesNotMatch(userStatus.text, /github\.com/i);
+  assert.doesNotMatch(userStatus.text, /actions\/runs/);
+  sent.length = 0;
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(item),
+      title: "piidarasy",
+      status: "error",
+      uploaded: 109,
+      total: 109,
+      error: `таймаут шага «пост в канал»: ждал 60 с | ${RUN}`,
+      runUrl: RUN,
+      queueRequestId: item.id,
+      requesterChatId: "424242",
+      adminDelivered: false,
+    }),
+    env,
+    {
+      sendMessage: async (_env, chatId, text) => {
+        sent.push({ chatId: String(chatId), text });
+        return { message_id: sent.length };
+      },
+    },
+  );
+  const adminCard = sent.find((row) => row.chatId === "8502935020");
+  const userCard = sent.find((row) => row.chatId === "424242");
+  assert.ok(adminCard);
+  assert.ok(userCard);
+  assert.match(adminCard.text, /github\.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+  assert.match(userCard.text, /Шерсть Ебаная/);
+  assert.match(userCard.text, /109/);
+  assert.match(userCard.text, /таймаут шага/);
+  assert.doesNotMatch(userCard.text, /github\.com/i);
+  assert.doesNotMatch(userCard.text, /actions\/runs/);
+  assert.doesNotMatch(userCard.text, /38644156549/);
+});
+
 test("resolveRequesterChatId requires requesterChatId to match that queue row", () => {
   const item = { id: "req-1", chatId: "424242" };
   const slug = queueItemSlug(item);

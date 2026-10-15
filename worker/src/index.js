@@ -49,6 +49,7 @@ import {
   queueItemSlug,
   matchedProgressRequester,
   queueStatusText,
+  stripGithubPointers,
   RETIRED_COMMAND,
   skipAllowedWhileActions,
   skipReply,
@@ -876,7 +877,10 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       }
     }
   }
-  if (out) await send(env, chatId, out);
+  if (out) {
+    const viewerIsAdmin = isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
+    await send(env, chatId, viewerIsAdmin ? out : stripGithubPointers(out));
+  }
   if (userCardAfterAccept) {
     try {
       const cardText = formatUserRequestCard(
