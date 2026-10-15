@@ -34,8 +34,6 @@ import {
   claimNext,
   CREATE_PROMPT,
   CREATE_DONE_EMPTY,
-  STOP_CLEARED,
-  STOP_IDLE,
   createLinksPrompt,
   decodeAwaitCreate,
   encodeAwaitCreate,
@@ -68,7 +66,9 @@ import {
   releaseRequest,
   renderPackCheck,
   shouldSchedulePipelineAfterProgress,
+  startText,
   staticReply,
+  stopReply,
   telegramParseMode,
   terminalProgress,
   userRequestEvent,
@@ -708,12 +708,15 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   await ensureSeed(env.BOT_KV);
   const cmd = text ? commandOf(text) : "";
   const known = staticReply(cmd);
+  const adminChat = isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
   let out;
   let userCardAfterAccept = null;
   // /create restarts at the name. /stop clears a half-finished dialog and does not touch the queue.
   // Other commands leave await:<chatId> as it is.
-  if (known) {
-    if (known.subscribe === true) await env.BOT_KV.put(`sub:${chatId}`, "1");
+  if (cmd === "/start" || cmd === "/help") {
+    await env.BOT_KV.put(`sub:${chatId}`, "1");
+    out = startText(adminChat);
+  } else if (known) {
     out = known.text;
   } else if (cmd === "/create") {
     await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
@@ -742,7 +745,7 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   } else if (cmd === "/stop") {
     const pending = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
     if (pending) await env.BOT_KV.delete(awaitCreateKey(chatId));
-    out = pending ? STOP_CLEARED : STOP_IDLE;
+    out = stopReply(Boolean(pending), adminChat);
   } else if (cmd === "/queue") {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";

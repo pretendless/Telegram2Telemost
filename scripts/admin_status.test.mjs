@@ -151,7 +151,7 @@ test('an error card gains the Actions run URL once and the next identical error 
 });
 
 test('/status says the job is running or idle', () => {
-  assert.equal(adminJobText(currentAdminJob({ items: [] })), 'простаивает');
+  assert.equal(adminJobText(currentAdminJob({ items: [] })), 'линия свободна');
   assert.equal(
     adminJobText(
       currentAdminJob(
@@ -159,7 +159,7 @@ test('/status says the job is running or idle', () => {
         { title: pack, status: 'uploading', uploaded: 16, total: 144 },
       ),
     ),
-    'простаивает',
+    'линия свободна',
   );
   assert.equal(
     adminJobText(
@@ -168,7 +168,7 @@ test('/status says the job is running or idle', () => {
         { title: pack, status: 'uploading', uploaded: 16, total: 144 },
       ),
     ),
-    `идёт | «${pack}» | стикер 16 из 144`,
+    `линия в процессе | «${pack}» | стикер 16 из 144`,
   );
 });
 
