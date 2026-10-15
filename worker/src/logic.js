@@ -73,8 +73,21 @@ export function createLinksPrompt(title) {
     `Название: «${title}». Приняла.\n\n` +
     "Пришлите ссылки на наборы стикеров t.me/addstickers/… — одну или несколько, по одной в строке. " +
     "Порядок ссылок — порядок стикеров.\n\n" +
+    "Или пришлите один стикер из набора: один стикер — один набор. Несколько наборов — только ссылками.\n\n" +
     `Всего стикеров во всех наборах должно быть не больше ${MAX_STICKERS}.`
   );
+}
+
+export const STICKER_NOT_IN_PACK =
+  "Этот стикер не из набора. Пришлите ссылку t.me/addstickers/… или другой стикер из набора.";
+
+// Bot API Sticker.set_name — the sticker set this sticker belongs to. Absent when it is not in a set.
+export function stickerSetName(sticker) {
+  if (!sticker || typeof sticker !== "object") return null;
+  if (typeof sticker.set_name !== "string") return null;
+  const name = sticker.set_name.trim();
+  if (!/^[A-Za-z0-9_]+$/.test(name)) return null;
+  return name;
 }
 
 export const NEED_CREATE =

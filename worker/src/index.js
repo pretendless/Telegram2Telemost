@@ -43,6 +43,8 @@ import {
   nameStepResult,
   NEED_CREATE,
   parseStickerSetNames,
+  stickerSetName,
+  STICKER_NOT_IN_PACK,
   focusRequest,
   isPriorityChat,
   normalizeQueue,
@@ -689,12 +691,14 @@ async function acceptCountedRequest(env, chatId, { title, names, rows, total }, 
 
 async function answer(env, update, send, stickerCount, deps = {}) {
   const message = update && update.message;
-  if (!message || typeof message.text !== "string") return;
+  if (!message) return;
+  const text = typeof message.text === "string" ? message.text : "";
+  const sticker = message.sticker && typeof message.sticker === "object" ? message.sticker : null;
+  if (!text && !sticker) return;
   const chatId = message.chat && message.chat.id;
   if (!Number.isSafeInteger(chatId) && typeof chatId !== "number") return;
   await ensureSeed(env.BOT_KV);
-  const text = message.text;
-  const cmd = commandOf(text);
+  const cmd = text ? commandOf(text) : "";
   const known = staticReply(cmd);
   let out;
   let userCardAfterAccept = null;
@@ -826,7 +830,11 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         out = createLinksPrompt(named.title);
       }
     } else if (awaiting && awaiting.step === "links") {
-      const names = parseStickerSetNames(text);
+      const fromSticker = sticker ? stickerSetName(sticker) : null;
+      if (sticker && !fromSticker) {
+        out = `${STICKER_NOT_IN_PACK}\n\nНазвание «${awaiting.title}» сохранено.`;
+      } else {
+      const names = fromSticker ? [fromSticker] : parseStickerSetNames(text);
       const lookups = [];
       for (const name of names) {
         try {
@@ -838,7 +846,9 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       }
       const verdict = judgeCreateLinks(awaiting.title, names, lookups);
       if (!verdict.ok) {
-        out = verdict.text;
+        out = fromSticker
+          ? `${verdict.text}\n\nМожно прислать другой один стикер или ссылки.`
+          : verdict.text;
       } else {
         const accepted = await acceptCountedRequest(
           env,
@@ -848,6 +858,7 @@ async function answer(env, update, send, stickerCount, deps = {}) {
         );
         out = accepted.out;
         userCardAfterAccept = accepted.userCardAfterAccept;
+      }
       }
     } else if (!admin) {
       out = NEED_CREATE;

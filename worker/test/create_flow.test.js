@@ -509,3 +509,98 @@ test("admin /status names a starting run and an upload instead of idle", () => {
 
   assert.equal(adminLiveStatusText({ queue: { items: [] }, job: { running: false } }), "простаивает");
 });
+
+function stickerUpdate(chatId, sticker) {
+  return new Request("https://tg2tmbot.example/telegram", {
+    method: "POST",
+    headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret", "content-type": "application/json" },
+    body: JSON.stringify({ message: { chat: { id: chatId }, sticker } }),
+  });
+}
+
+async function saySticker(env, chatId, sticker, deps = {}) {
+  const sent = [];
+  const res = await handle(stickerUpdate(chatId, sticker), env, {
+    sendMessage: async (_env, id, reply) => {
+      sent.push({ chatId: id, reply });
+      return { message_id: sent.length };
+    },
+    ...deps,
+  });
+  assert.equal(res.status, 200);
+  return sent;
+}
+
+test("a sticker with set_name is one source pack", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  const asked = await say(env, 7, "Шерсть");
+  assert.match(asked[0].reply, /один стикер — один набор/);
+  assert.match(asked[0].reply, /Несколько наборов — только ссылками/);
+  const accepted = await saySticker(env, 7, { set_name: "piidarasy", file_id: "abc" }, {
+    stickerCount: async () => 12,
+  });
+  assert.match(accepted[0].reply, /Запрос принят/);
+  assert.match(accepted[0].reply, /«Шерсть»/);
+  const queue = JSON.parse(env.BOT_KV.store.get("queue"));
+  assert.equal(queue.items.length, 1);
+  assert.deepEqual(queue.items[0].links, ["https://t.me/addstickers/piidarasy"]);
+  assert.equal(queue.items[0].stickers, 12);
+  const again = await saySticker(env, 7, { set_name: "other_set" }, {
+    stickerCount: async () => 3,
+  });
+  assert.match(again[0].reply, /\/create/);
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items.length, 1);
+});
+
+test("a sticker without set_name is not a pack", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Шерсть");
+  const rejected = await saySticker(env, 7, { file_id: "loose" }, {
+    stickerCount: async () => {
+      throw new Error("should not look up");
+    },
+  });
+  assert.match(rejected[0].reply, /не из набора/);
+  assert.match(rejected[0].reply, /«Шерсть» сохранено/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Шерсть" });
+});
+
+test("links still accept several packs after the name", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Два");
+  const accepted = await say(
+    env,
+    7,
+    "https://t.me/addstickers/one_set\nhttps://t.me/addstickers/two_set",
+    { stickerCount: async () => 10 },
+  );
+  assert.match(accepted[0].reply, /Запрос принят/);
+  const item = JSON.parse(env.BOT_KV.store.get("queue")).items[0];
+  assert.equal(item.title, "Два");
+  assert.deepEqual(item.links, [
+    "https://t.me/addstickers/one_set",
+    "https://t.me/addstickers/two_set",
+  ]);
+  assert.equal(item.stickers, 20);
+});
+
+test("one sticker set over 150 is rejected and the name stays", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Большой");
+  const rejected = await saySticker(env, 7, { set_name: "huge_set" }, {
+    stickerCount: async () => 160,
+  });
+  assert.match(rejected[0].reply, /160 > 150/);
+  assert.match(rejected[0].reply, /«Большой» сохранено/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  assert.deepEqual(decodeAwaitCreate(env.BOT_KV.store.get("await:7")), { step: "links", title: "Большой" });
+});
