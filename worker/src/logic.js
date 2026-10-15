@@ -71,15 +71,102 @@ export const CREATE_PROMPT =
 export function createLinksPrompt(title) {
   return (
     `Название: «${title}». Приняла.\n\n` +
-    "Пришлите ссылки на наборы стикеров t.me/addstickers/… — одну или несколько, по одной в строке. " +
-    "Порядок ссылок — порядок стикеров.\n\n" +
-    "Или пришлите один стикер из набора: один стикер — один набор. Несколько наборов — только ссылками.\n\n" +
-    `Всего стикеров во всех наборах должно быть не больше ${MAX_STICKERS}.`
+    "Пришлите стикер из набора или ссылки t.me/addstickers/…. Один стикер добавляет весь его набор. " +
+    "Можно прислать несколько стикеров и ссылок в любом порядке — порядок наборов сохранится.\n\n" +
+    `Когда соберёте, отправьте /done — запрос встанет в очередь. Всего не больше ${MAX_STICKERS} стикеров.`
   );
 }
 
 export const STICKER_NOT_IN_PACK =
-  "Этот стикер не из набора. Пришлите ссылку t.me/addstickers/… или другой стикер из набора.";
+  "Этот стикер не из набора — в нём нет set_name. Пришлите стикер из набора или ссылку t.me/addstickers/….";
+
+export const CREATE_DONE_EMPTY =
+  "Пока ничего не собрано. Пришлите стикер из набора или ссылки t.me/addstickers/….";
+
+export function addedSetsReply({ addedCount, total, duplicates, rejected, missing }) {
+  const lines = [];
+  if (addedCount > 0) {
+    lines.push(
+      `Добавлено ${addedCount}, всего ${total} из ${MAX_STICKERS}. Пришлите ещё стикер или ссылку — или /done, чтобы поставить в очередь.`,
+    );
+  }
+  if (duplicates.length) {
+    const listed = duplicates.map((name) => `«${name}»`).join(", ");
+    lines.push(
+      duplicates.length === 1
+        ? `Набор ${listed} уже в этом запросе.`
+        : `Наборы ${listed} уже в этом запросе.`,
+    );
+  }
+  if (missing.length) {
+    lines.push(
+      missing.length === 1
+        ? `Набор «${missing[0]}» не найден.`
+        : `Не найдены наборы: ${missing.map((name) => `«${name}»`).join(", ")}.`,
+    );
+  }
+  if (rejected.length) {
+    const listed = rejected.map((row) => `«${row.name}» (${row.count})`).join(", ");
+    const batch = rejected.reduce((sum, row) => sum + row.count, 0);
+    lines.push(
+      `Это сообщение не добавлено: ${listed} дали бы всего ${total + batch} стикеров, лимит ${MAX_STICKERS}. Уже собрано ${total}.`,
+    );
+  }
+  if (!addedCount && (duplicates.length || missing.length || rejected.length)) {
+    lines.push(`Всего ${total} из ${MAX_STICKERS}.`);
+  }
+  if (!lines.length) return CREATE_DONE_EMPTY;
+  return lines.join("\n\n");
+}
+
+// One message is atomic: every new set in it is added, in order, or none of them are.
+// Sets already collected stay. A name already in the request is not counted again.
+export function collectSets(existing, incoming) {
+  const sets = [];
+  for (const row of Array.isArray(existing) ? existing : []) {
+    const name = String((row && row.name) || "").trim();
+    const count = Math.floor(Number(row && row.count));
+    if (!/^[A-Za-z0-9_]+$/.test(name) || !Number.isFinite(count) || count < 0) continue;
+    if (sets.some((item) => item.name === name)) continue;
+    sets.push({ name, count });
+  }
+  let total = sets.reduce((sum, row) => sum + row.count, 0);
+  const duplicates = [];
+  const missing = [];
+  const fresh = [];
+  for (const row of Array.isArray(incoming) ? incoming : []) {
+    const name = String((row && row.name) || "").trim();
+    if (!name) continue;
+    if (row.missing || !Number.isFinite(Number(row.count)) || Number(row.count) < 0) {
+      missing.push(name);
+      continue;
+    }
+    const count = Math.floor(Number(row.count));
+    if (sets.some((item) => item.name === name) || fresh.some((item) => item.name === name)) {
+      duplicates.push(name);
+      continue;
+    }
+    fresh.push({ name, count });
+  }
+  const batch = fresh.reduce((sum, row) => sum + row.count, 0);
+  const rejected = total + batch > MAX_STICKERS ? fresh : [];
+  const added = rejected.length ? [] : fresh;
+  if (!rejected.length) {
+    for (const row of added) {
+      sets.push(row);
+      total += row.count;
+    }
+  }
+  return {
+    sets,
+    added,
+    addedCount: added.reduce((sum, row) => sum + row.count, 0),
+    duplicates,
+    rejected,
+    missing,
+    total,
+  };
+}
 
 // Bot API Sticker.set_name — the sticker set this sticker belongs to. Absent when it is not in a set.
 export function stickerSetName(sticker) {
@@ -412,7 +499,15 @@ export function renderPackCheck(title, rows, total) {
 export function encodeAwaitCreate(state) {
   if (!state || state.step !== "links") return JSON.stringify({ step: "name" });
   const title = String(state.title || "").replace(/\s+/g, " ").trim();
-  return JSON.stringify({ step: "links", title });
+  const sets = [];
+  for (const row of Array.isArray(state.sets) ? state.sets : []) {
+    const name = String((row && row.name) || "").trim();
+    const count = Math.floor(Number(row && row.count));
+    if (!/^[A-Za-z0-9_]+$/.test(name) || !Number.isFinite(count) || count < 0) continue;
+    if (sets.some((item) => item.name === name)) continue;
+    sets.push({ name, count });
+  }
+  return JSON.stringify({ step: "links", title, sets });
 }
 
 export function decodeAwaitCreate(raw) {
@@ -430,7 +525,15 @@ export function decodeAwaitCreate(raw) {
   if (parsed.step === "links") {
     const title = String(parsed.title || "").replace(/\s+/g, " ").trim();
     if (!title || title.length > MAX_PACK_TITLE) return { step: "name" };
-    return { step: "links", title };
+    const sets = [];
+    for (const row of Array.isArray(parsed.sets) ? parsed.sets : []) {
+      const name = String((row && row.name) || "").trim();
+      const count = Math.floor(Number(row && row.count));
+      if (!/^[A-Za-z0-9_]+$/.test(name) || !Number.isFinite(count) || count < 0) continue;
+      if (sets.some((item) => item.name === name)) continue;
+      sets.push({ name, count });
+    }
+    return { step: "links", title, sets };
   }
   return null;
 }

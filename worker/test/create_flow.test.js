@@ -152,9 +152,12 @@ test("valid links enqueue the saved title and clear the dialog", async () => {
   env.BOT_KV.store.set("meta:seeded", "1");
   await say(env, 7, "/create");
   await say(env, 7, "Лисёнок");
-  const accepted = await say(env, 7, "не ссылка\nhttps://t.me/addstickers/fox_one\nhttps://t.me/addstickers/fox_two", {
+  const added = await say(env, 7, "не ссылка\nhttps://t.me/addstickers/fox_one\nhttps://t.me/addstickers/fox_two", {
     stickerCount: async (_env, name) => (name === "fox_one" ? 3 : 4),
   });
+  assert.match(added[0].reply, /Добавлено 7, всего 7 из 150/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+  const accepted = await say(env, 7, "/done");
   assert.match(accepted[0].reply, /Запрос принят/);
   assert.match(accepted[0].reply, /«Лисёнок»/);
   assert.match(accepted[0].reply, /href="https:\/\/t\.me\/addstickers\/fox_one">#<\/a>/);
