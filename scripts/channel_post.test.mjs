@@ -20,7 +20,7 @@ test('postPackLink sends the compact HTML post and disables the preview', async 
   assert.equal(
     body.text,
     '📞 <b>Шерсть Ебаная</b> · 109 стикеров\n' +
-      `<a href="${PACK_URL}">Открыть в Телемосте</a> · источники: ` +
+      `<a href="${PACK_URL}">Открыть в Телемосте</a> · из тг ` +
       '<a href="https://t.me/addstickers/piidarasy">#</a> ' +
       '<a href="https://t.me/addstickers/second">#</a>',
   );
