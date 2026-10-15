@@ -55,8 +55,9 @@ export const START =
   "\n\nПишу только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылаю. /status — ваши запросы, /stop — прервать ввод.";
 
 // BotFather long description. Different sentences from /start: no call sign.
+// Search words for Telegram: стикеры, Telegram, Телемост, перенос. The display name is set in BotFather.
 export const DESCRIPTION =
-  "Сбор набора для Телемоста.\n" +
+  "Стикеры Telegram — в Телемост. Перенос наборов стикеров: обычные и анимированные (TGS) становятся набором в Телемосте.\n" +
   "\n" +
   `/create, затем название (до ${MAX_PACK_TITLE} символов). ` +
   "Дальше стикеры из наборов и ссылки t.me/addstickers — в любом порядке, " +
@@ -70,7 +71,7 @@ export const DESCRIPTION =
   "\n" +
   `Канал с готовыми наборами: ${CHANNEL}`;
 
-export const ABOUT = "Стикеры из Telegram в Телемост. Набор: /create, затем /done.";
+export const ABOUT = "Стикеры Telegram → Телемост. Перенос наборов: /create, затем /done.";
 
 export const CREATE_PROMPT =
   "Соединяю. Как назвать пак в Телемосте?\n\n" +
