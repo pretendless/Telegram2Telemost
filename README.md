@@ -1,4 +1,4 @@
-# tg2tm
+# Telegram stickers → Telemost
 
 [@tg2tmbot](https://t.me/tg2tmbot) turns Telegram sticker packs into Telemost sticker packs. A person sends a pack name, then one or more `t.me/addstickers/…` links. A Cloudflare Worker keeps the queue and, when no browser job is running, starts a GitHub Actions workflow. That workflow opens a saved browser session and uploads images, one at a time, into the Telemost bot «Стикеры». Finished packs are announced in [t.me/tg2tm](https://t.me/tg2tm).
 
