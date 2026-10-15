@@ -10,8 +10,8 @@ workers_dev = true
 binding = "BOT_KV"
 id = "69c9d9f3572a48469a312e5914e8a233"
 
-# Chat ids allowed to run /login, /connect, /upload, /project, /ghrun. Not a credential.
+# Numeric Telegram chat ids with the admin menu and admin commands. Not a credential.
 # Optional GH_WORKFLOW_ALLOWLIST = "setup-bot.yml,cursor-agent.yml,check-cursor-api.yml" — if set, /ghrun only those basenames.
 # CURSOR_API_KEY stays a GitHub Actions secret. wrangler secret put CURSOR_API_KEY only if this worker calls Cursor itself.
 [vars]
-LOGIN_CHAT_IDS = "8502935020"
+LOGIN_CHAT_IDS = "8502935020,5513343655"

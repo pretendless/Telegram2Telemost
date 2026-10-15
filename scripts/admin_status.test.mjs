@@ -12,6 +12,7 @@ import {
   deliverAdminStatus,
   actionsRunUrl,
   formatAdminStatus,
+  adminMenuChatIds,
   isAdminChat,
   failurePackName,
   reportRestartNoUpload,
@@ -62,6 +63,14 @@ test('the card names the pack, the step, the bot line, and another user only by 
   assert.match(text, /бот: Отправьте эмодзи для стикера\./);
   assert.match(text, /запрос: 111/);
   assert.equal(isAdminChat(ADMIN_CHAT_ID), true);
+  assert.deepEqual(adminMenuChatIds('8502935020', '8502935020,5513343655'), ['8502935020', '5513343655']);
+  assert.deepEqual(adminMenuChatIds('', ''), [ADMIN_CHAT_ID]);
+  assert.deepEqual(adminMenuChatIds('5513343655,8502935020', '8502935020,5513343655'), ['5513343655', '8502935020']);
+  assert.equal(isAdminChat('5513343655'), false);
+  assert.equal(isAdminChat('5513343655', '8502935020,5513343655'), true);
+  assert.equal(isAdminChat(ADMIN_CHAT_ID, '8502935020,5513343655'), true);
+  assert.equal(isAdminChat('424242', '8502935020,5513343655'), false);
+  assert.equal(isAdminChat('not-a-chat-id', '8502935020,5513343655'), false);
   assert.doesNotMatch(formatAdminStatus(card({ phase: 'waiting', seconds: 20, requester: ADMIN_CHAT_ID })), /запрос:/);
   const waiting = formatAdminStatus(card({ phase: 'waiting', index: 16, total: 144, seconds: 20 }));
   assert.match(waiting, /стикер 16 из 144 \| жду бота 20 с/);

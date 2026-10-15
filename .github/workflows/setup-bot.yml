@@ -25,4 +25,5 @@ jobs:
         run: npm run setup-bot
         env:
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
-          LOGIN_CHAT_IDS: ${{ vars.LOGIN_CHAT_IDS || '8502935020' }}
+          # Repo variable, or the same ids as worker/wrangler.toml. setup-bot.mjs unions both sources.
+          LOGIN_CHAT_IDS: ${{ vars.LOGIN_CHAT_IDS || '8502935020,5513343655' }}
