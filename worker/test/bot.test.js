@@ -929,7 +929,7 @@ test("a link message over 150 adds nothing and keeps the name", async () => {
   );
   assert.equal(res.status, 200);
   const reply = sent.join("\n");
-  assert.match(reply, /не добавлено/);
+  assert.match(reply, /Ничего из этого сообщения не добавлено/);
   assert.match(reply, /160/);
   assert.match(reply, /лимит 150/);
   assert.match(reply, /minty_vk/);
@@ -2130,7 +2130,7 @@ test("/format, /example and /stop", async () => {
     env,
     { sendMessage: send },
   );
-  assert.match(sent[0].text, /два следующих сообщения/);
+  assert.match(sent[0].text, /стикеры или ссылки и \/done/);
   assert.match(sent[0].text, /только название пака, без ссылок/);
   assert.match(sent[0].text, /не больше 150/);
   await handle(

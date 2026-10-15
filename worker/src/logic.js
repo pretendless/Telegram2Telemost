@@ -32,12 +32,12 @@ export const EXAMPLE =
   "https://t.me/addstickers/minty2_vk";
 
 export const FORMAT =
-  "Новый пак — команда /create и два следующих сообщения.\n" +
+  "Новый пак — команда /create, название, затем стикеры или ссылки и /done.\n" +
   "\n" +
   "1. /create.\n" +
   `2. Следующее сообщение — только название пака, без ссылок, не длиннее ${MAX_PACK_TITLE} символов.\n` +
-  "3. Затем ссылки t.me/addstickers/…, по одной в строке. Порядок ссылок = порядок стикеров.\n" +
-  `4. Всего не больше ${MAX_STICKERS} стикеров: это лимит Телемоста на пак.\n` +
+  "3. Затем стикер из набора или ссылки t.me/addstickers/… — сколько угодно сообщений, в любом порядке. Порядок наборов = порядок стикеров.\n" +
+  `4. /done ставит запрос в очередь. Всего не больше ${MAX_STICKERS} стикеров: это лимит Телемоста на пак.\n` +
   "\n" +
   "Пример (название и ссылки — разными сообщениями):\n" +
   "\n" +
@@ -48,7 +48,7 @@ export const START =
   "\n" +
   FORMAT +
   `\n\nГотовые наборы публикуются в канале ${CHANNEL}` +
-  "\n\nСначала /create — спрошу название, затем ссылки (см. /format). Проверю набор и передам в очередь." +
+  "\n\nСначала /create — спрошу название, затем стикеры или ссылки (см. /format). После /done передам в очередь." +
   "\n\nПишу только про ваш запрос: место в очереди, ход загрузки и ссылку на готовый пак. Чужие наборы не присылаю. /status — ваши запросы, /stop — прервать ввод.";
 
 export const DESCRIPTION =
@@ -109,11 +109,14 @@ export function addedSetsReply({ addedCount, total, duplicates, rejected, missin
     const listed = rejected.map((row) => `«${row.name}» (${row.count})`).join(", ");
     const batch = rejected.reduce((sum, row) => sum + row.count, 0);
     lines.push(
-      `Это сообщение не добавлено: ${listed} дали бы всего ${total + batch} стикеров, лимит ${MAX_STICKERS}. Уже собрано ${total}.`,
+      rejected.length === 1
+        ? `Набор ${listed} не добавлен: вышло бы ${total + batch} стикеров, лимит ${MAX_STICKERS}.`
+        : `Ничего из этого сообщения не добавлено: ${listed} вместе дали бы ${total + batch} стикеров, лимит ${MAX_STICKERS}.`,
     );
   }
   if (!addedCount && (duplicates.length || missing.length || rejected.length)) {
-    lines.push(`Всего ${total} из ${MAX_STICKERS}.`);
+    const next = total > 0 ? "Пришлите другой стикер или ссылку — или /done." : "Пришлите другой стикер или ссылку.";
+    lines.push(`Всего ${total} из ${MAX_STICKERS}. ${next}`);
   }
   if (!lines.length) return CREATE_DONE_EMPTY;
   return lines.join("\n\n");
@@ -494,7 +497,7 @@ export function renderPackCheck(title, rows, total) {
   return `Пак «${title}»\n\n${rows.join("\n")}\n\n${verdict}`;
 }
 
-// await:<chatId> is either {"step":"name"} or {"step":"links","title":"…"}.
+// await:<chatId> is either {"step":"name"} or {"step":"links","title":"…","sets":[{"name","count"}]}.
 // Legacy value "1" (one combined pack message) is the name step.
 export function encodeAwaitCreate(state) {
   if (!state || state.step !== "links") return JSON.stringify({ step: "name" });
