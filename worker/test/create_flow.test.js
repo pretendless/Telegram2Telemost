@@ -8,6 +8,7 @@ import {
   MAX_STICKERS,
   STOP_CLEARED,
   STOP_IDLE,
+  classifyStickers,
   createLinksPrompt,
   decodeAwaitCreate,
   encodeAwaitCreate,
@@ -690,4 +691,104 @@ test("/stop after collecting sets clears them and queues nothing", async () => {
   const after = await say(env, 7, "/done");
   assert.doesNotMatch(after[0].reply, /Запрос принят/);
   assert.equal(env.BOT_KV.store.get("queue"), undefined);
+});
+
+test("TGS animation counts and is named; video WEBM does not", () => {
+  assert.deepEqual(
+    classifyStickers([
+      { is_animated: true },
+      { is_video: true },
+      { is_video: true, is_animated: true },
+      {},
+    ]),
+    { static: 1, animated: 1, video: 2, supported: 2, unsupported: 2 },
+  );
+});
+
+test("a set that converts, including TGS, is added and says it will become PNG", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Анимация");
+  const added = await say(env, 7, "https://t.me/addstickers/lottie", {
+    stickerCount: async () => ({ supported: 12, unsupported: 0, animated: 12, video: 0 }),
+  });
+  assert.match(added[0].reply, /Добавлено 12, всего 12 из 150/);
+  assert.match(added[0].reply, /12 стикеров, в том числе анимация, переведу в PNG/);
+  assert.deepEqual(pending(env).sets, [{ name: "lottie", count: 12 }]);
+  assert.equal(pending(env).hold, undefined);
+  await say(env, 7, "/done");
+  assert.equal(JSON.parse(env.BOT_KV.store.get("queue")).items[0].stickers, 12);
+});
+
+test("a mixed set waits for да and then counts only convertible stickers", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Смесь");
+  await say(env, 7, "https://t.me/addstickers/cats", countOf);
+  const asked = await saySticker(env, 7, { set_name: "mixed" }, {
+    stickerCount: async () => ({ supported: 8, unsupported: 5, animated: 3, video: 5 }),
+  });
+  assert.match(asked[0].reply, /видео WEBM/);
+  assert.match(asked[0].reply, /Остальные 8/);
+  assert.match(asked[0].reply, /«да»/);
+  assert.deepEqual(pending(env).sets.map((row) => row.name), ["cats"]);
+  assert.equal(pending(env).hold.name, "mixed");
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+
+  const ignored = await say(env, 7, "https://t.me/addstickers/owls", countOf);
+  assert.match(ignored[0].reply, /«да» или «нет»/);
+  assert.deepEqual(pending(env).sets.map((row) => row.name), ["cats"]);
+  assert.equal(pending(env).hold.name, "mixed");
+
+  const blocked = await say(env, 7, "/done");
+  assert.match(blocked[0].reply, /«да» или «нет»/);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+
+  const added = await say(env, 7, "Да");
+  assert.match(added[0].reply, /Добавлено 8, всего 41 из 150/);
+  assert.match(added[0].reply, /в том числе анимация, переведу в PNG/);
+  assert.equal(pending(env).hold, undefined);
+  await say(env, 7, "/done");
+  const item = JSON.parse(env.BOT_KV.store.get("queue")).items[0];
+  assert.equal(item.stickers, 41);
+  assert.deepEqual(item.links, ["https://t.me/addstickers/cats", "https://t.me/addstickers/mixed"]);
+});
+
+test("нет drops the mixed set, and a video-only set is refused without a question", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Видео");
+  const refused = await say(env, 7, "https://t.me/addstickers/onlywebm", {
+    stickerCount: async () => ({ supported: 0, unsupported: 20, animated: 0, video: 20 }),
+  });
+  assert.match(refused[0].reply, /все 20 стикеров — видео WEBM/);
+  assert.doesNotMatch(refused[0].reply, /«да»/);
+  assert.deepEqual(pending(env).sets, []);
+
+  await say(env, 7, "https://t.me/addstickers/mixed", {
+    stickerCount: async () => ({ supported: 4, unsupported: 2, animated: 0, video: 2 }),
+  });
+  const no = await say(env, 7, "нет");
+  assert.match(no[0].reply, /Набор «mixed» не добавлен/);
+  assert.deepEqual(pending(env).sets, []);
+  assert.equal(pending(env).hold, undefined);
+  assert.equal(env.BOT_KV.store.get("queue"), undefined);
+});
+
+test("да that would pass 150 does not add the convertible remainder", async () => {
+  const env = envWith();
+  env.BOT_KV.store.set("meta:seeded", "1");
+  await say(env, 7, "/create");
+  await say(env, 7, "Край");
+  await say(env, 7, "https://t.me/addstickers/piidarasy", countOf);
+  await say(env, 7, "https://t.me/addstickers/mixed", {
+    stickerCount: async () => ({ supported: 50, unsupported: 10, animated: 0, video: 10 }),
+  });
+  const over = await say(env, 7, "да");
+  assert.match(over[0].reply, /лимит 150/);
+  assert.deepEqual(pending(env).sets.map((row) => row.name), ["piidarasy"]);
+  assert.equal(pending(env).hold, undefined);
 });

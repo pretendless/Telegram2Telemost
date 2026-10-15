@@ -114,8 +114,26 @@ def is_promo(set_name: str, pos: int, total: int, sticker: dict) -> bool:
     return set_name.endswith("_by_TgEmojiBot") and pos == total and sticker.get("emoji") in ("©️", "©")
 
 
+def sticker_kind(sticker: dict) -> str:
+    """Bot API flags: is_video is WEBM, is_animated is TGS, otherwise static WEBP/PNG."""
+    if sticker.get("is_video"):
+        return "video"
+    if sticker.get("is_animated"):
+        return "animated"
+    return "static"
+
+
+def will_convert(sticker: dict) -> bool:
+    """Static files go through Pillow. TGS goes through rlottie. WEBM does not.
+
+    frame_from_webm needs ffmpeg, and ffmpeg is not installed in vm/Dockerfile
+    or in the Actions fetch step. A video sticker is skipped, not failed.
+    """
+    return sticker_kind(sticker) != "video"
+
+
 def frame_from_webm(path: Path) -> Image.Image:
-    """Middle frame of a VP9 video sticker, alpha kept (libvpx decoder)."""
+    """Middle frame of a VP9 video sticker. Not called: ffmpeg is not installed."""
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
         capture_output=True, text=True,
@@ -182,17 +200,19 @@ def process_pack(folder: Path) -> None:
             if is_promo(entry["name"], pos, len(stickers), st):
                 skipped.append({"position": pos, "emoji": st.get("emoji"), "reason": "promo sticker for the pack author's channel"})
                 continue
-            index += 1
-            kind = "video" if st.get("is_video") else "animated" if st.get("is_animated") else "static"
+            kind = sticker_kind(st)
             kinds[kind] += 1
-            ext = {"video": "webm", "animated": "tgs", "static": "webp"}[kind]
+            if not will_convert(st):
+                skipped.append({
+                    "position": pos,
+                    "emoji": st.get("emoji"),
+                    "reason": "video WEBM is not converted; ffmpeg is not installed",
+                })
+                continue
+            index += 1
+            ext = {"animated": "tgs", "static": "webp"}[kind]
             src = download(st["file_id"], cache_dir() / entry["name"] / f"{pos:03d}.{ext}")
-            if kind == "video":
-                img = frame_from_webm(src)
-            elif kind == "animated":
-                img = frame_from_tgs(src)
-            else:
-                img = Image.open(src)
+            img = frame_from_tgs(src) if kind == "animated" else Image.open(src)
             data = to_telemost_png(img)
             name = f"{index:03d}.png"
             (folder / name).write_bytes(data)
