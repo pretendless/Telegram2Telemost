@@ -186,7 +186,7 @@ export function channelPost(pack) {
   const url = htmlEscape((pack && pack.url) || "");
   const sources = stickerSourceUrls(pack && pack.links);
   const sourceBit = sources.length
-    ? ` · источники: ${sources.map((href) => `<a href="${htmlEscape(href)}">#</a>`).join(" ")}`
+    ? ` · из тг ${sources.map((href) => `<a href="${htmlEscape(href)}">#</a>`).join(" ")}`
     : "";
   return `📞 <b>${title}</b>${countBit}\n<a href="${url}">Открыть в Телемосте</a>${sourceBit}`;
 }

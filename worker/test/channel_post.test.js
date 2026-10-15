@@ -53,7 +53,7 @@ test("one source is a single hash after the phone and the title", () => {
   assert.equal(
     text,
     "📞 <b>Шерсть Ебаная</b> · 109 стикеров\n" +
-      `<a href="${PACK_URL}">Открыть в Телемосте</a> · источники: ` +
+      `<a href="${PACK_URL}">Открыть в Телемосте</a> · из тг ` +
       '<a href="https://t.me/addstickers/piidarasy">#</a>',
   );
   assert.equal(telegramParseMode(text), "HTML");
@@ -87,7 +87,7 @@ test("the title is escaped and a pack without sources omits that clause", () => 
     "📞 <b>Tom &amp; &lt;Jerry&gt; &quot;x&quot;</b> · 3 стикера\n" +
       `<a href="${PACK_URL}">Открыть в Телемосте</a>`,
   );
-  assert.doesNotMatch(text, /источники/);
+  assert.doesNotMatch(text, /из тг/);
   assert.doesNotMatch(text, /github\.com/);
   assert.doesNotMatch(text, /8502935020/);
   assert.doesNotMatch(text, /actions\/runs/);
@@ -176,7 +176,7 @@ test("a finished pack posts the compact channel message from the queue row", asy
   assert.equal(
     channel.text,
     "📞 <b>Шерсть &amp; Ебаная</b> · 109 стикеров\n" +
-      `<a href="${PACK_URL}">Открыть в Телемосте</a> · источники: ` +
+      `<a href="${PACK_URL}">Открыть в Телемосте</a> · из тг ` +
       '<a href="https://t.me/addstickers/piidarasy">#</a>',
   );
   assert.equal(sent.filter((row) => row.chatId === "@tg2tm").length, 1);

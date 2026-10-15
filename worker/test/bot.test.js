@@ -128,7 +128,7 @@ test("done with packUrl notifies once and posts the channel message", () => {
     `📞 <b>Джек и Бевка</b> · 144 стикера\n<a href="${PACK_URL}">Открыть в Телемосте</a>`,
   );
   assert.doesNotMatch(plan.channel, /addstickers/);
-  assert.doesNotMatch(plan.channel, /источники/);
+  assert.doesNotMatch(plan.channel, /из тг/);
   assert.doesNotMatch(plan.channel, /t\.me\/tg2tm\/4/);
   assert.doesNotMatch(plan.channel, /github\.com/);
   const again = planNotifications(plan.state, pack({ url: PACK_URL }));
