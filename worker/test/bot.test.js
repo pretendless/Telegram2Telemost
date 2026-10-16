@@ -2664,3 +2664,164 @@ test("both configured admins see every pack and admin commands; an unrelated cha
     assert.doesNotMatch(sent.map((row) => row.text).join("\n"), /только для администратора/);
   }
 });
+
+test("background notices reach both admins, edits keep separate cards, and a requester is not doubled", async () => {
+  const adminA = "8502935020";
+  const adminB = "5513343655";
+  const requester = "424242";
+  const unrelated = "333";
+  const run = "https://github.com/pretendless/tg2tm/actions/runs/38644156549";
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = `${adminA},${adminB}`;
+  env.BOT_KV.store.set("meta:seeded", "1");
+  const item = {
+    id: "req-wool",
+    chatId: requester,
+    title: "Шерсть Ебаная",
+    links: ["https://t.me/addstickers/piidarasy"],
+    priority: false,
+    createdAt: "2026-10-14T18:00:00.000Z",
+    status: "uploading",
+    stickers: 109,
+  };
+  env.BOT_KV.store.set("queue", JSON.stringify({ priority: [], items: [item] }));
+  const sent = [];
+  const edited = [];
+  let nextId = 50;
+  const sendMessage = async (_env, chatId, text) => {
+    const messageId = nextId;
+    nextId += 1;
+    sent.push({ chatId: String(chatId), text, messageId });
+    return { message_id: messageId };
+  };
+  const editMessage = async (_env, chatId, messageId, text) => {
+    edited.push({ chatId: String(chatId), messageId, text });
+  };
+  const deps = { sendMessage, editMessage };
+
+  await handle(
+    new Request("https://tg2tmbot.example/session-started", {
+      method: "POST",
+      headers: { authorization: "Bearer uploader-secret", "content-type": "application/json" },
+      body: JSON.stringify({
+        runId: "38644156549",
+        url: run,
+        reason: "очередь: новый запрос принят — «Шерсть Ебаная»",
+      }),
+    }),
+    env,
+    deps,
+  );
+  const starts = sent.filter((row) => /Новый запуск Actions/.test(row.text));
+  assert.deepEqual(starts.map((row) => row.chatId), [adminA, adminB]);
+  assert.equal(starts[0].text, starts[1].text);
+  assert.match(starts[0].text, /38644156549/);
+  assert.equal(sent.some((row) => row.chatId === requester || row.chatId === unrelated), false);
+
+  sent.length = 0;
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(item),
+      title: item.title,
+      status: "uploading",
+      uploaded: 2,
+      total: 109,
+      phase: "sending",
+      runUrl: run,
+      queueRequestId: item.id,
+      requesterChatId: requester,
+    }),
+    env,
+    deps,
+  );
+  const adminSends = sent.filter((row) => row.chatId === adminA || row.chatId === adminB);
+  const requesterSends = sent.filter((row) => row.chatId === requester);
+  assert.equal(adminSends.length, 2);
+  assert.equal(adminSends[0].text, adminSends[1].text);
+  assert.match(adminSends[0].text, /стикер 2 из 109/);
+  assert.match(adminSends[0].text, /38644156549/);
+  assert.equal(requesterSends.length, 1);
+  assert.match(requesterSends[0].text, /Шерсть Ебаная/);
+  assert.match(requesterSends[0].text, /стикер 2 из 109/);
+  assert.doesNotMatch(requesterSends[0].text, /github\.com/i);
+  assert.doesNotMatch(requesterSends[0].text, /запрос:/);
+  assert.equal(sent.some((row) => row.chatId === unrelated), false);
+  assert.equal(adminSends[0].messageId === adminSends[1].messageId, false);
+
+  const adminIds = new Map(adminSends.map((row) => [row.chatId, row.messageId]));
+  sent.length = 0;
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(item),
+      title: item.title,
+      status: "uploading",
+      uploaded: 3,
+      total: 109,
+      phase: "waiting",
+      seconds: 20,
+      runUrl: run,
+      queueRequestId: item.id,
+      requesterChatId: requester,
+    }),
+    env,
+    deps,
+  );
+  const adminEdits = edited.filter((row) => row.chatId === adminA || row.chatId === adminB);
+  assert.equal(adminEdits.length, 2);
+  assert.equal(adminEdits[0].text, adminEdits[1].text);
+  assert.match(adminEdits[0].text, /стикер 3 из 109/);
+  assert.match(adminEdits[0].text, /жду бота 20 с/);
+  assert.match(adminEdits[0].text, /38644156549/);
+  assert.equal(adminEdits.find((row) => row.chatId === adminA).messageId, adminIds.get(adminA));
+  assert.equal(adminEdits.find((row) => row.chatId === adminB).messageId, adminIds.get(adminB));
+  assert.equal(sent.filter((row) => row.chatId === adminA || row.chatId === adminB).length, 0);
+  const requesterEdits = edited.filter((row) => row.chatId === requester);
+  assert.equal(requesterEdits.length, 1);
+  assert.doesNotMatch(requesterEdits[0].text, /github\.com/i);
+  assert.equal(edited.some((row) => row.chatId === unrelated), false);
+
+  sent.length = 0;
+  edited.length = 0;
+  await handle(
+    new Request("https://tg2tmbot.example/session-ended", {
+      method: "POST",
+      headers: { authorization: "Bearer uploader-secret", "content-type": "application/json" },
+      body: JSON.stringify({ runId: "38644156550", runUrl: run }),
+    }),
+    env,
+    deps,
+  );
+  const limits = sent.filter((row) => /лимита GitHub/.test(row.text));
+  assert.deepEqual(limits.map((row) => row.chatId), [adminA, adminB]);
+  assert.equal(limits[0].text, limits[1].text);
+  assert.match(limits[0].text, /38644156549/);
+  assert.equal(sent.some((row) => row.chatId === requester || row.chatId === unrelated), false);
+
+  sent.length = 0;
+  const adminItem = { ...item, id: "req-admin", chatId: adminA };
+  env.BOT_KV.store.set("queue", JSON.stringify({ priority: [], items: [adminItem] }));
+  await handle(
+    progressRequest({
+      slug: queueItemSlug(adminItem),
+      title: adminItem.title,
+      status: "error",
+      uploaded: 4,
+      total: 109,
+      phase: "error",
+      error: `таймаут шага | ${run}`,
+      runUrl: run,
+      queueRequestId: adminItem.id,
+      requesterChatId: adminA,
+    }),
+    env,
+    deps,
+  );
+  const toAdminA = sent.filter((row) => row.chatId === adminA);
+  const toAdminB = sent.filter((row) => row.chatId === adminB);
+  assert.equal(toAdminA.length, 1);
+  assert.equal(toAdminB.length, 1);
+  assert.equal(toAdminA[0].text, toAdminB[0].text);
+  assert.match(toAdminA[0].text, /38644156549/);
+  assert.match(toAdminA[0].text, /ошибка/);
+  assert.equal(sent.some((row) => row.chatId === requester || row.chatId === unrelated), false);
+});

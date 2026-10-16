@@ -82,6 +82,16 @@ export function isAdminChat(chatId, raw) {
   return adminChatIds(raw).includes(String(chatId));
 }
 
+// Background notices: every id in LOGIN_CHAT_IDS, or the single dispatch chat
+// when that list is empty. An empty list must not invent a second recipient.
+export function adminNoticeChatIds(primary, raw) {
+  const listed = String(raw ?? '').trim();
+  if (listed) return adminChatIds(listed);
+  const one = String(primary || '').trim();
+  if (/^[0-9]{1,16}$/.test(one)) return [one];
+  return [ADMIN_CHAT_ID];
+}
+
 function stickerMark(index, total) {
   const n = num(index);
   const all = num(total);
@@ -210,6 +220,9 @@ export function eventFromProgress(pack, prev) {
     runUrl: pack.runUrl || '',
     seconds: pack.seconds,
     attempt: pack.attempt,
+    at: pack.at || '',
+    step: pack.step || '',
+    next: pack.next || '',
   };
   if (pack.phase && PHASES.has(pack.phase)) return { ...base, phase: pack.phase };
   if (pack.status === 'error') return { ...base, phase: 'error' };
@@ -247,6 +260,64 @@ export async function deliverAdminStatus(io, chatId, prev, event, now) {
   }
   const messageId = messageIdOf(await io.send(chatId, text));
   return { action: 'send', messageId, event, text };
+}
+
+// A legacy admin-last.json has one messageId. That id belongs to the first
+// admin only. Reusing it for every chat makes later edits hit one conversation.
+export function loadAdminCursors(stored, ids) {
+  const list = ids && ids.length ? ids.map(String) : [ADMIN_CHAT_ID];
+  const map = {};
+  const byChat = stored && stored.byChat;
+  if (byChat && typeof byChat === 'object' && !Array.isArray(byChat)) {
+    for (const [id, cursor] of Object.entries(byChat)) {
+      if (/^[0-9]{1,16}$/.test(id) && cursor && typeof cursor === 'object') map[id] = cursor;
+    }
+  }
+  const legacyId = list[0];
+  if (stored && stored.messageId && legacyId && !map[legacyId]) {
+    map[legacyId] = { messageId: stored.messageId, event: stored.event || null, text: stored.text };
+  }
+  return map;
+}
+
+export function serializeAdminCursors(byChat) {
+  const ids = Object.keys(byChat || {});
+  const first = ids.length ? byChat[ids[0]] : null;
+  return {
+    byChat: byChat || {},
+    messageId: first && first.messageId ? first.messageId : undefined,
+    event: first && first.event ? first.event : undefined,
+    text: first && first.text ? first.text : undefined,
+  };
+}
+
+export async function deliverAdminFeed(io, chatIds, prevByChat, event, now) {
+  const ids = chatIds && chatIds.length ? chatIds.map(String) : [ADMIN_CHAT_ID];
+  const byChat = { ...(prevByChat || {}) };
+  const clock = now || new Date();
+  let notified = 0;
+  for (const chatId of ids) {
+    try {
+      const delivered = await deliverAdminStatus(io, chatId, byChat[chatId] || null, event, clock);
+      byChat[chatId] = {
+        messageId: delivered.messageId,
+        event: delivered.event,
+        text: delivered.text,
+      };
+      if (delivered.action !== 'skip') notified += 1;
+    } catch {
+      console.log('admin status skipped', chatId);
+    }
+  }
+  const first = byChat[ids[0]] || null;
+  return {
+    action: notified ? 'fanout' : 'skip',
+    byChat,
+    notified,
+    messageId: first && first.messageId,
+    event: (first && first.event) || event,
+    text: first && first.text,
+  };
 }
 
 function withSticker(event, previous) {
@@ -299,25 +370,22 @@ export function progressFieldsForPack(dirRef) {
   return { requester: requesterChatId, requesterChatId, queueRequestId };
 }
 
-export function createAdminFeed({ io, requester, writeState, onDelivered, now, env = process.env } = {}) {
-  let cursor = null;
+export function createAdminFeed({ io, requester, writeState, onDelivered, now, env = process.env, adminIds } = {}) {
+  const ids = adminNoticeChatIds('', adminIds != null ? adminIds : (env && env.LOGIN_CHAT_IDS) || '');
+  let cursors = {};
   return async function notify(event) {
-    const carried = withSticker(event, cursor);
+    const carried = withSticker(event, cursorFor(cursors, ids));
     const liveRequester = typeof requester === 'function' ? requester() : requester;
     let full = { ...carried, requester: carried.requester || liveRequester || '' };
     if ((full.phase === 'error' || full.phase === 'failed') && !oneLine(full.runUrl)) {
       const runUrl = actionsRunUrl(env);
       if (runUrl) full = { ...full, runUrl };
     }
-    let delivery = { action: 'record', event: full };
+    let delivery = { action: 'record', event: full, byChat: cursors };
     if (io) {
-      try {
-        delivery = await deliverAdminStatus(io, ADMIN_CHAT_ID, cursor, full, now ? now() : new Date());
-        if (delivery.action !== 'skip') cursor = delivery;
-        if (writeState) writeState(cursor || delivery);
-      } catch {
-        console.log('admin status skipped');
-      }
+      delivery = await deliverAdminFeed(io, ids, cursors, full, now ? now() : new Date());
+      cursors = delivery.byChat || cursors;
+      if (writeState) writeState(serializeAdminCursors(cursors));
     } else if (writeState) {
       writeState(delivery);
     }
@@ -330,6 +398,14 @@ export function createAdminFeed({ io, requester, writeState, onDelivered, now, e
       }
     }
   };
+}
+
+function cursorFor(cursors, ids) {
+  for (const id of ids) {
+    if (cursors[id] && cursors[id].event) return cursors[id];
+  }
+  const any = Object.values(cursors).find((cursor) => cursor && cursor.event);
+  return any || null;
 }
 
 export function telegramIo(fetchImpl, token) {
@@ -359,7 +435,7 @@ export async function postProgress(fetchImpl, url, secret, body, opts = {}) {
       'content-type': 'application/json',
       'user-agent': 'tg2tm-upload',
     },
-    body: JSON.stringify({ ...body, adminDelivered: true }),
+    body: JSON.stringify({ ...body, adminDelivered: Boolean(body && body.adminDelivered) }),
     signal: opts && opts.signal,
   });
   if (!response.ok) throw new Error('progress http ' + response.status);
@@ -429,6 +505,55 @@ export function restartNoUploadCopy({ reason = '', lastLine = '', title = '' } =
   };
 }
 
+function progressSlug(stored, runId, prefix) {
+  const slug = stored && typeof stored.slug === 'string' ? stored.slug.trim() : '';
+  if (/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(slug)) return slug;
+  const id = String(runId || '').replace(/[^0-9]/g, '');
+  const built = `${prefix}-${id || 'notice'}`.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 48);
+  return /^[A-Za-z0-9]/.test(built) ? built : 'run-notice';
+}
+
+function countOrZero(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
+}
+
+async function tryPostAdminProgress(fetchImpl, body, env = process.env) {
+  const url = (env && env.TG2TM_PROGRESS_URL) || '';
+  const secret = (env && env.UPLOADER_SECRET) || '';
+  if (!url || !secret || !fetchImpl || !body) return false;
+  try {
+    await postProgress(fetchImpl, url, secret, { ...body, adminDelivered: false });
+    return true;
+  } catch (err) {
+    console.log('admin progress post failed', err && err.message ? err.message : err);
+    return false;
+  }
+}
+
+function failureSettled(event, cursor, runUrl) {
+  const already = event && (event.phase === 'error' || event.phase === 'failed');
+  if (!already) return false;
+  const urlLanded = Boolean(runUrl) && oneLine(event.runUrl) === oneLine(runUrl);
+  if (runUrl && !urlLanded && cursor && cursor.messageId) return false;
+  return true;
+}
+
+// Legacy state without byChat describes only the original admin card.
+function pendingFailureChats(stored, ids, runUrl) {
+  const cursors = loadAdminCursors(stored, ids);
+  const legacyEvent = (stored && stored.event) || {};
+  const hasByChat = Boolean(stored && stored.byChat && typeof stored.byChat === 'object' && !Array.isArray(stored.byChat));
+  const pending = ids.filter((id, index) => {
+    const cursor = cursors[id];
+    const event = (cursor && cursor.event) || (!hasByChat && index === 0 ? legacyEvent : null);
+    if (!event || !event.phase) return true;
+    return !failureSettled(event, cursor, runUrl);
+  });
+  return { cursors, pending };
+}
+
 export async function reportRestartNoUpload({
   fetchImpl = globalThis.fetch,
   token = process.env.TG2TMBOT_TOKEN || '',
@@ -437,34 +562,48 @@ export async function reportRestartNoUpload({
   requester = process.env.TELEGRAM_CHAT_ID || '',
   runUrl = process.env.RUN_URL || '',
   reason = process.env.RESTART_REASON || '',
+  runId = process.env.GITHUB_RUN_ID || '',
+  adminIds = process.env.LOGIN_CHAT_IDS || '',
+  env = process.env,
 } = {}) {
-  if (!token) {
-    console.log('admin status skipped');
-    return;
-  }
   const packMeta = readRestartPack(logsDir);
   const copy = restartNoUploadCopy({
     reason: reason || packMeta.reason || 'empty-queue',
     lastLine: packMeta.lastLine || '',
     title: packMeta.title || titleFromRestartLogs(logsDir),
   });
-  const io = telegramIo(fetchImpl, token);
   const stored = readState(statePath);
-  const prev = stored && stored.messageId ? { messageId: stored.messageId, event: stored.event } : null;
-  try {
-    await deliverAdminStatus(io, ADMIN_CHAT_ID, prev, {
-      phase: 'error',
-      pack: copy.pack,
-      lastLine: copy.lastLine,
-      error: copy.error,
-      next: copy.next,
-      runUrl,
-      requester,
-      at: formatClock(),
-    });
-  } catch {
+  const ids = adminNoticeChatIds('', adminIds);
+  const posted = await tryPostAdminProgress(fetchImpl, {
+    slug: progressSlug(stored, runId, 'restart'),
+    title: copy.pack || 'перезапуск',
+    status: 'error',
+    uploaded: 0,
+    total: 0,
+    error: copy.error,
+    lastLine: copy.lastLine,
+    next: copy.next,
+    runUrl,
+    phase: 'error',
+    requester,
+  }, env);
+  if (posted) return;
+  if (!token) {
     console.log('admin status skipped');
+    return;
   }
+  const io = telegramIo(fetchImpl, token);
+  const cursors = loadAdminCursors(stored, ids);
+  await deliverAdminFeed(io, ids, cursors, {
+    phase: 'error',
+    pack: copy.pack,
+    lastLine: copy.lastLine,
+    error: copy.error,
+    next: copy.next,
+    runUrl,
+    requester,
+    at: formatClock(),
+  });
 }
 
 export async function reportRunFailed({
@@ -477,39 +616,52 @@ export async function reportRunFailed({
   requester = process.env.TELEGRAM_CHAT_ID || '',
   runUrl = process.env.RUN_URL || '',
   runId = process.env.GITHUB_RUN_ID || '',
+  adminIds = process.env.LOGIN_CHAT_IDS || '',
+  env = process.env,
 } = {}) {
+  const stored = readState(statePath);
+  const event = (stored && stored.event) || {};
+  const ids = adminNoticeChatIds('', adminIds);
+  const noted = readStepFailure(logsDir, runId);
+  const step = noted.step || LABEL[event.phase] || event.phase || '';
+  const pack = failurePackName({ pack: event.pack, packs, mode, title: titleFromRestartLogs(logsDir) });
+  const error = event.error || noted.error || 'Actions завершились с ошибкой';
+  const posted = await tryPostAdminProgress(fetchImpl, {
+    slug: progressSlug(stored, runId, 'run'),
+    title: pack || 'пак',
+    status: 'error',
+    uploaded: countOrZero(event.index),
+    total: countOrZero(event.total),
+    error,
+    lastLine: event.lastLine || '',
+    runUrl,
+    phase: 'failed',
+    step,
+    requester,
+  }, env);
+  if (posted) return;
   if (!token) {
     console.log('admin status skipped');
     return;
   }
-  const stored = readState(statePath);
-  const event = (stored && stored.event) || {};
-  const already = event.phase === 'error' || event.phase === 'failed';
-  const urlLanded = Boolean(runUrl) && oneLine(event.runUrl) === oneLine(runUrl);
-  if (already && (!runUrl || urlLanded || !(stored && stored.messageId))) {
+  const { cursors, pending } = pendingFailureChats(stored, ids, runUrl);
+  if (!pending.length) {
     console.log('admin status already sent');
     return;
   }
-  const noted = readStepFailure(logsDir, runId);
-  const step = noted.step || LABEL[event.phase] || event.phase || '';
   const io = telegramIo(fetchImpl, token);
-  const prev = stored && stored.messageId ? { messageId: stored.messageId, event } : null;
-  try {
-    await deliverAdminStatus(io, ADMIN_CHAT_ID, prev, {
-      phase: 'failed',
-      pack: failurePackName({ pack: event.pack, packs, mode, title: titleFromRestartLogs(logsDir) }),
-      index: event.index,
-      total: event.total,
-      lastLine: event.lastLine || '',
-      error: event.error || noted.error || 'Actions завершились с ошибкой',
-      step,
-      runUrl,
-      requester,
-      at: formatClock(),
-    });
-  } catch {
-    console.log('admin status skipped');
-  }
+  await deliverAdminFeed(io, pending, cursors, {
+    phase: 'failed',
+    pack,
+    index: event.index,
+    total: event.total,
+    lastLine: event.lastLine || '',
+    error,
+    step,
+    runUrl,
+    requester,
+    at: formatClock(),
+  });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
