@@ -19,6 +19,7 @@ import {
   isLoggedIn,
   safeOrigin,
 } from "./session.mjs";
+import { failureStepName, writeStepFailure } from "./step_failure.mjs";
 
 export const PASSPORT_URL = "https://passport.yandex.ru/auth?mode=qr";
 export const DEFAULT_BOT_URL = "https://telemost.yandex.ru/user/fe21ed07-748c-969d-7459-b4e06d03e84d";
@@ -36,6 +37,26 @@ export function writeSession(file, bundle, passphrase) {
 
 export function readSession(file, passphrase) {
   return decryptSession(readFileSync(file), passphrase);
+}
+
+export function documentMatchesOrigin(current, wanted) {
+  return Boolean(wanted) && String(current || "") === wanted;
+}
+
+// localStorage throws SecurityError on about:blank and on Chrome's error page.
+// Catch it in the page so a restore keeps going on cookies alone.
+export function storageReadExpression() {
+  return `(() => { try { return Object.entries(localStorage); } catch (err) { return { denied: (err && err.name ? err.name + ": " : "") + (err && err.message ? err.message : String(err)) }; } })()`;
+}
+
+export function storageWriteExpression(entries) {
+  const pairs = JSON.stringify(entries);
+  return `(() => { const pairs = ${pairs}; try { for (const pair of pairs) localStorage.setItem(pair[0], pair[1]); return pairs.length; } catch (err) { return { denied: (err && err.name ? err.name + ": " : "") + (err && err.message ? err.message : String(err)) }; } })()`;
+}
+
+export function storageDenied(result) {
+  if (!result || typeof result !== "object" || Array.isArray(result) || !result.denied) return "";
+  return String(result.denied);
 }
 
 async function telegram(method, token, chatId, payload, fetchImpl) {
@@ -149,8 +170,13 @@ export async function restoreLoop(page, bundle, opts) {
   for (const row of bundle.origins || []) {
     const origin = safeOrigin(row.origin);
     if (!origin) continue;
-    await page.goto(origin + "/");
-    await page.setStorage(row.entries || []);
+    const landed = await page.goto(origin + "/");
+    if (landed && landed.ready === false) {
+      console.error("storage skipped", origin);
+      continue;
+    }
+    const stored = await page.setStorage(row.entries || []);
+    if (stored && stored.denied) console.error("storage skipped", origin, stored.denied);
   }
   const telemost = await page.openTelemost(opts.botUrl);
   return { ok: Boolean(telemost.composer), telemost, reason: telemost.composer ? "ready" : "connecting" };
@@ -195,8 +221,24 @@ export async function attachPage() {
       }).catch(() => {});
       return {
         async goto(url) {
+          let origin = "";
+          try {
+            origin = new URL(url).origin;
+          } catch {
+            origin = "";
+          }
           await c.send("Page.navigate", { url });
-          await sleep(500);
+          for (let n = 0; n < 40; n++) {
+            let here = "";
+            try {
+              here = await c.ev("location.origin");
+            } catch {
+              here = "";
+            }
+            if (documentMatchesOrigin(here, origin)) return { origin, ready: true };
+            await sleep(500);
+          }
+          return { origin, ready: false };
         },
         async cookies() {
           const result = await c.send("Network.getCookies");
@@ -230,15 +272,23 @@ export async function attachPage() {
           })()`);
         },
         async collectStorage() {
-          const origin = await c.ev("location.origin");
-          const entries = trimEntries(await c.ev("Object.entries(localStorage)"));
-          if (!origin) return [];
-          return [{ origin, entries }];
+          const origin = await c.ev("location.origin").catch(() => "");
+          const entries = await c.ev(storageReadExpression());
+          const denied = storageDenied(entries);
+          if (denied) {
+            console.error("storage skipped", denied);
+            return [];
+          }
+          if (!origin || origin === "null") return [];
+          return [{ origin, entries: trimEntries(entries) }];
         },
         async setStorage(entries) {
-          for (const [key, value] of trimEntries(entries)) {
-            await c.ev(`localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)})`);
-          }
+          const pairs = trimEntries(entries);
+          if (!pairs.length) return { wrote: 0 };
+          const wrote = await c.ev(storageWriteExpression(pairs));
+          const denied = storageDenied(wrote);
+          if (denied) return { wrote: 0, denied };
+          return { wrote: Number(wrote) || 0 };
         },
         async openTelemost(url) {
           await c.send("Page.navigate", { url });
@@ -314,10 +364,17 @@ async function main() {
         console.error(err.message === "session key does not match" ? err.message : "no session");
       }
       if (!bundle) {
+        noteStepFailure("restore", "нет сессии");
         await io.result("no-session");
         process.exitCode = 2;
       } else {
         const result = await restoreLoop(page, bundle, { botUrl });
+        if (!result.ok) {
+          noteStepFailure(
+            "restore",
+            result.reason === "connecting" ? "Telemost открылся без поля ввода" : (result.reason || "сессия не открылась"),
+          );
+        }
         await io.result(result.ok ? "upload-ready" : "connecting");
         process.exitCode = result.ok ? 0 : 1;
       }
@@ -337,9 +394,23 @@ async function main() {
   }
 }
 
+function noteStepFailure(cmd, error) {
+  try {
+    writeStepFailure(process.env.STEP_FAILURE_DIR || "logs", {
+      step: failureStepName(cmd, process.env.MODE || ""),
+      error,
+      runId: process.env.GITHUB_RUN_ID || "",
+    });
+  } catch {
+    // The admin card falls back to the generic line when the note cannot be written.
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
-    console.error(err && err.message ? err.message : "login failed");
+    const error = err && err.message ? err.message : "login failed";
+    noteStepFailure(process.argv[2] || "login", error);
+    console.error(error);
     process.exit(1);
   });
 }

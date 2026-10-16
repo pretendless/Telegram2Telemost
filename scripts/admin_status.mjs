@@ -7,6 +7,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { activeUploadJob, sortQueuedItems } from '../worker/src/logic.js';
+import { readStepFailure } from '../vm/step_failure.mjs';
 import { isStepTimeout } from './step_timeout.mjs';
 
 export const ADMIN_CHAT_ID = '8502935020';
@@ -475,6 +476,7 @@ export async function reportRunFailed({
   logsDir = process.env.RESTART_LOG_DIR || 'logs',
   requester = process.env.TELEGRAM_CHAT_ID || '',
   runUrl = process.env.RUN_URL || '',
+  runId = process.env.GITHUB_RUN_ID || '',
 } = {}) {
   if (!token) {
     console.log('admin status skipped');
@@ -488,7 +490,8 @@ export async function reportRunFailed({
     console.log('admin status already sent');
     return;
   }
-  const step = LABEL[event.phase] || event.phase || '';
+  const noted = readStepFailure(logsDir, runId);
+  const step = noted.step || LABEL[event.phase] || event.phase || '';
   const io = telegramIo(fetchImpl, token);
   const prev = stored && stored.messageId ? { messageId: stored.messageId, event } : null;
   try {
@@ -498,7 +501,7 @@ export async function reportRunFailed({
       index: event.index,
       total: event.total,
       lastLine: event.lastLine || '',
-      error: event.error || 'Actions завершились с ошибкой',
+      error: event.error || noted.error || 'Actions завершились с ошибкой',
       step,
       runUrl,
       requester,

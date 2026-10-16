@@ -16,6 +16,7 @@ import {
   telegramIo,
 } from './admin_status.mjs';
 import { channelPost } from '../worker/src/logic.js';
+import { failureStepName, writeStepFailure } from '../vm/step_failure.mjs';
 import { drainRemainingQueue } from './queue_drain.mjs';
 import { postDrainComplete, postSessionEnded, queueCredentialsReadable } from './queue_client.mjs';
 import {
@@ -4305,7 +4306,17 @@ async function main() {
     try {
       await peekRestart(bot);
     } catch (e) {
-      log('restart', '', 'остановлено', e.message);
+      const message = e && e.message ? e.message : String(e);
+      log('restart', '', 'остановлено', message);
+      try {
+        writeStepFailure(join(ROOT, 'logs'), {
+          step: failureStepName('peek', 'restart-peek'),
+          error: message,
+          runId: process.env.GITHUB_RUN_ID || '',
+        });
+      } catch {
+        // The admin card falls back to the generic line when the note cannot be written.
+      }
       process.exitCode = 1;
     }
     sessions.close();

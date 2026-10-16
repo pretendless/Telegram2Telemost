@@ -312,6 +312,39 @@ test('a failed Actions run sends one forwardable card and skips when the error w
   assert.equal(sent.length, 1);
 });
 
+test('a failed restart names the step reason left by the container', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { writeStepFailure } = await import('../vm/step_failure.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'admin-step-'));
+  writeStepFailure(dir, {
+    step: 'чтение диалога',
+    error: 'SecurityError: Failed to read the \'localStorage\' property from \'Window\': Access is denied for this document.',
+    runId: '38873216831',
+  });
+  const sent = [];
+  await reportRunFailed({
+    fetchImpl: async (_url, options) => {
+      sent.push(JSON.parse(options.body).text);
+      return { ok: true, json: async () => ({ ok: true, result: { message_id: 4 } }) };
+    },
+    token: 'bot-token',
+    statePath: join(dir, 'missing-admin.json'),
+    logsDir: dir,
+    mode: 'restart',
+    packs: '',
+    runId: '38873216831',
+    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/38873216831',
+  });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /«перезапуск»/);
+  assert.match(sent[0], /сбой Actions \| чтение диалога/);
+  assert.match(sent[0], /ошибка: SecurityError: Failed to read the 'localStorage'/);
+  assert.match(sent[0], /actions\/runs\/38873216831/);
+  rmSync(dir, { recursive: true });
+});
+
 test('a quiet restart idle posts reason and next action to admin', async () => {
   const empty = restartNoUploadCopy({ reason: 'empty-queue', lastLine: '/done — завершить действие' });
   assert.equal(empty.pack, 'перезапуск');
