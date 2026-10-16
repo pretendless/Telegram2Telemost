@@ -125,6 +125,7 @@ import {
   typedPackTitle,
   shouldAbandonOpenPack,
   closeOpenPackPlan,
+  emojiStillRequested,
   acceptedInOpenPack,
   latestIncomingText,
   incomingTailText,
@@ -1230,6 +1231,25 @@ test("closeOpenPackPlan uses /done when stickers were accepted", () => {
   assert.ok(acceptedInOpenPack(messages) >= 1);
   assert.equal(shouldAbandonOpenPack(ready, messages), false);
   assert.deepEqual(closeOpenPackPlan(ready, messages), { action: "done" });
+});
+
+test("a later Это не картинка does not /done a pack that still wants an emoji", () => {
+  const reject = "Не удалось обработать картинку. Попробуйте отправить другую.";
+  const emoji = "Отправьте эмодзи для стикера.";
+  const human = "Это не картинка :)";
+  const messages = [
+    { own: false, text: reject },
+    { own: false, text: emoji },
+    { own: false, text: human },
+  ];
+  assert.equal(emojiStillRequested(human, messages), true);
+  assert.equal(packDialogOpen(human), false);
+  assert.deepEqual(closeOpenPackPlan(human, messages), { action: "blocked" });
+  const afterReady = [
+    { own: false, text: emoji },
+    { own: false, text: "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done" },
+  ];
+  assert.equal(emojiStillRequested("Отправьте картинку для стикера.", afterReady), false);
 });
 
 test("closeOpenPackPlan blocks emoji dialog without publishing", () => {
