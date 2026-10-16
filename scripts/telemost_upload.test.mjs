@@ -126,6 +126,7 @@ import {
   shouldAbandonOpenPack,
   closeOpenPackPlan,
   emojiStillRequested,
+  freshStartAfterSavedPartial,
   acceptedInOpenPack,
   latestIncomingText,
   incomingTailText,
@@ -1250,6 +1251,29 @@ test("a later Это не картинка does not /done a pack that still want
     { own: false, text: "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done" },
   ];
   assert.equal(emojiStillRequested("Отправьте картинку для стикера.", afterReady), false);
+});
+
+test("a saved partial Zoloto restarts from sticker 1 and a done row does not", () => {
+  const errorRow = {
+    id: "request-zoloto",
+    title: "Zoloto",
+    status: "error",
+    links: ["https://t.me/addstickers/zoloto"],
+    chatId: "751702056",
+  };
+  const fresh = freshStartAfterSavedPartial({ savedTitle: "Zoloto", requests: [errorRow] });
+  assert.equal(fresh.action, "upload");
+  assert.equal(fresh.fresh, true);
+  assert.equal(fresh.requestId, "request-zoloto");
+  assert.equal(freshStartAfterSavedPartial({
+    savedTitle: "Zoloto",
+    requests: [{ ...errorRow, status: "done" }],
+  }), null);
+  assert.equal(freshStartAfterSavedPartial({ savedTitle: "", requests: [errorRow] }), null);
+  assert.equal(freshStartAfterSavedPartial({
+    savedTitle: "Zoloto",
+    requests: [errorRow, { ...errorRow, id: "other" }],
+  }), null);
 });
 
 test("closeOpenPackPlan blocks emoji dialog without publishing", () => {

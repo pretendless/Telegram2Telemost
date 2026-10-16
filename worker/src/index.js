@@ -571,7 +571,7 @@ async function handlePlan(request, env) {
   const secret = env.UPLOADER_SECRET || "";
   if (!secret || !timingSafeEqual(bearer(request), secret)) return new Response("unauthorized", { status: 401 });
   const queue = await readQueue(env.BOT_KV);
-  const active = queue.items.filter((item) => item.status === "queued" || item.status === "uploading");
+  const active = queue.items.filter((item) => item.status === "queued" || item.status === "uploading" || item.status === "error");
   const items = [];
   for (const item of active) {
     const pack = await readPackProgress(env.BOT_KV, item);

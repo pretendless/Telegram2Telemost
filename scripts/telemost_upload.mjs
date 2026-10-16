@@ -2954,6 +2954,34 @@ export function activeQueueRequests(requests) {
   return (requests || []).filter((item) => activeQueueRow(item));
 }
 
+// A human /done can save a short pack and leave the queue row in error.
+// That row is still the pack to upload. A done row is not.
+export function recoverableQueueRequests(requests) {
+  return (requests || []).filter((item) => {
+    if (!item) return false;
+    return item.status === 'queued' || item.status === 'uploading' || item.status === 'error';
+  });
+}
+
+// After a partial save, start that request again from sticker 1.
+// A finished queue row is not started again. Two matches is not a guess.
+export function freshStartAfterSavedPartial({ savedTitle, requests } = {}) {
+  const title = statusPackName(savedTitle);
+  if (!title) return null;
+  const hits = recoverableQueueRequests(requests).filter((item) => samePackTitle(item.title, title));
+  if (hits.length !== 1) return null;
+  const item = hits[0];
+  return {
+    action: 'upload',
+    title: item.title,
+    dir: '',
+    requestId: item.id || '',
+    links: item.links || [],
+    chatId: item.chatId || '',
+    fresh: true,
+  };
+}
+
 export function restartTarget({ unfinished, title, liveText, catalogs, requests, allowCatalog = false } = {}) {
   const stored = activeQueueRequests(requests);
   const namedTitle = statusPackName(title);
@@ -4001,6 +4029,24 @@ async function restartRun(bot, note, dirRef) {
     }
   }
   if (selected.action === 'close') {
+    const fresh = freshStartAfterSavedPartial({
+      savedTitle: seenTitle,
+      requests: selected.recoverable,
+    });
+    if (fresh) {
+      console.log('restart-fresh', fresh.title, 'from sticker 1');
+      const { writeRequestPack, focusRequest } = await import('./restart_prepare.mjs');
+      const slug = writeRequestPack({ ...fresh, fresh: true });
+      await focusRequest(fresh.requestId);
+      if (dirRef) {
+        dirRef.dir = slug;
+        dirRef.title = fresh.title;
+        dirRef.queueRequestId = fresh.requestId || '';
+        dirRef.requesterChatId = fresh.chatId || '';
+      }
+      await uploadPack(bot, slug, { close: true, restart: true, note, dirRef });
+      return;
+    }
     console.log('restart-closed', JSON.stringify({ title: seenTitle, lastLine: screenLine(closedText) || choice.lastLine || '' }));
     await note({
       phase: 'done',
