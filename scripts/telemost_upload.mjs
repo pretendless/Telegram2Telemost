@@ -2645,11 +2645,42 @@ export function settledImageReply(text, sameForMs) {
 // A real «Не удалось обработать» can be retried. A silent wait is not one of
 // these attempts and does not skip the file.
 export const IMAGE_ATTEMPTS = 5;
+// An emoji ask is already on screen. Do not sit for the full image stall.
+export const EMOJI_STALL_MS = 20000;
 
 export function afterImageAttempts(attempt, accepted) {
   if (accepted) return 'next';
   if (attempt < IMAGE_ATTEMPTS) return 'retry';
   return 'skip';
+}
+
+// A joined stall dump is "Стикеры … 07:11 Стикеры … 07:14". The live cue is the last one.
+export function latestBotCue(text) {
+  const body = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!body) return '';
+  const parts = body.split(/(?=Стикеры\s)/).map((part) => part.trim()).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : body;
+}
+
+// What to send next. Older bubbles in the same dump are not this send.
+// «Это не картинка» while an emoji was requested is the emoji again, not a fatal stop.
+// A wedged picture dialog gets one /done and stays on this pack.
+export function replyRecovery({ outboundStep = 'image', kind = '', text = '' } = {}) {
+  const latest = latestBotCue(text);
+  const blob = String(text || '');
+  if (READY.test(latest) || kind === 'ready') return 'ready';
+  if (isEmojiRequest(latest) || kind === 'emoji') return 'emoji';
+  if (notAnImageReply(latest)) {
+    if (outboundStep === 'emoji' || isEmojiRequest(blob)) return 'emoji';
+    return 'done-once';
+  }
+  if (IMAGE_FAIL.test(latest) || kind === 'reject') return 'retry-image';
+  if (kind === 'stall') {
+    if (outboundStep === 'emoji' || isEmojiRequest(latest)) return 'emoji';
+    if (IMAGE_FAIL.test(latest)) return 'retry-image';
+    return 'recover';
+  }
+  return 'wait';
 }
 
 // The page script cannot see the Node variable. The direction has to be a
@@ -3608,7 +3639,11 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     return bot.onBot(() => bot.waitForReply(baseline, { until: 'sticker', ownBeforeIds, onWait }));
   }
 
-  for (let i = tm.uploaded; i < m.images.length; i++) {
+  const work = [];
+  for (let i = tm.uploaded; i < m.images.length; i++) work.push({ i, endPass: false });
+  let wedgeDone = false;
+  for (let n = 0; n < work.length; n++) {
+    const { i, endPass } = work[n];
     if (pastSessionSoftDeadline()) {
       const saved = checkpointTelemost(tm, { uploaded: tm.uploaded, total: m.images.length });
       Object.assign(tm, saved);
@@ -3677,27 +3712,64 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       } else {
         reply = await bot.onBot(async () => {
           const text = emojiAnswerText || emojiAnswer('', img.emoji);
-          return bot.say(text, { onWait, until: 'sticker' });
+          return bot.say(text, { onWait, until: 'sticker', stallMs: EMOJI_STALL_MS });
         });
       }
       const shown = String(reply.text || '').replace(/\s+/g, ' ').trim();
       console.log(botReplyLogLine(i + 1, m.images.length, `${outboundStep} ${reply.kind} ${shown.slice(0, 180)}`));
-      if (reply.kind === 'not-image' || notAnImageReply(shown)) {
-        throw new Error(notAnImageStop(shown, actionsRunUrl()));
-      }
-      if (reply.kind === 'stall' || afterSendReply(reply.kind) === 'recover') {
-        await recoverFromStall(reply, outboundStep === 'image' ? 'зависание, перезагрузка' : 'зависание после эмодзи');
+      const recovery = replyRecovery({ outboundStep, kind: reply.kind, text: shown });
+      if (recovery === 'emoji') {
+        if (outboundStep !== 'emoji') {
+          console.log(dir, 'emoji', img.file);
+          await note({ phase: 'emoji', pack: m.title, index: i + 1, total: m.images.length, lastLine: latestBotCue(shown) });
+          emojiAnswerText = emojiAnswer(latestBotCue(shown), img.emoji);
+          outboundStep = 'emoji';
+        } else {
+          console.log(dir, 'emoji-again', img.file);
+        }
         continue;
       }
-      if (reply.kind === 'reject') {
+      if (recovery === 'done-once') {
+        if (!wedgeDone) {
+          wedgeDone = true;
+          console.log(dir, 'wedge-done', latestBotCue(shown).slice(0, 160));
+          await note({
+            phase: 'done',
+            pack: m.title,
+            index: i + 1,
+            total: m.images.length,
+            lastLine: latestBotCue(shown),
+          });
+          await bot.onBot(() => bot.say('/done', { stallMs: EMOJI_STALL_MS }));
+        }
+        outboundStep = 'image';
+        continue;
+      }
+      if (recovery === 'retry-image') {
         rejects += 1;
-        log(m.title, img.file, `ошибка, попытка ${rejects}`, shown);
-        await note({ phase: 'retry', pack: m.title, index: i + 1, total: m.images.length, attempt: rejects, lastLine: shown, error: shown });
+        log(m.title, img.file, `ошибка, попытка ${rejects}`, latestBotCue(shown) || shown);
+        await note({
+          phase: 'retry',
+          pack: m.title,
+          index: i + 1,
+          total: m.images.length,
+          attempt: rejects,
+          lastLine: latestBotCue(shown) || shown,
+          error: latestBotCue(shown) || shown,
+        });
         if (afterImageAttempts(rejects, false) === 'skip') {
           tm.skipped = [...(tm.skipped || []), img.file];
-          log(m.title, img.file, 'пропуск', 'бот отклонил картинку');
-          await note({ phase: 'error', pack: m.title, index: i + 1, total: m.images.length, lastLine: shown, error: 'бот отклонил картинку' });
+          log(m.title, img.file, 'пропуск', endPass ? 'повтор в конце не прошёл' : 'бот отклонил картинку');
+          await note({
+            phase: 'error',
+            pack: m.title,
+            index: i + 1,
+            total: m.images.length,
+            lastLine: latestBotCue(shown) || shown,
+            error: 'бот отклонил картинку',
+          });
           savePack(p);
+          if (!endPass) work.push({ i, endPass: true });
           break;
         }
         if (useStaging && outboundStep === 'image') stagedIndices.delete(i);
@@ -3705,53 +3777,13 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
         await sleep(1000);
         continue;
       }
-      if (outboundStep === 'image' && reply.kind === 'emoji') {
-        console.log(dir, 'emoji', img.file);
-        await note({ phase: 'emoji', pack: m.title, index: i + 1, total: m.images.length, lastLine: shown });
-        emojiAnswerText = emojiAnswer(reply.text, img.emoji);
-        outboundStep = 'emoji';
+      if (reply.kind === 'stall') {
+        await recoverFromStall(reply, outboundStep === 'image' ? 'зависание, перезагрузка' : 'зависание после эмодзи');
         continue;
       }
-      let done = reply;
-      if (outboundStep === 'emoji' && reply.kind === 'emoji') {
-        done = await bot.onBot(async () => {
-          let step = await bot.say('🙂', { onWait, until: 'sticker' });
-          if (step.kind === 'emoji') {
-            const baseline = await bot.botRows();
-            step = await bot.waitForReply(baseline, { onWait, until: 'sticker' });
-          }
-          return step;
-        });
-        if (done.kind === 'stall') {
-          await recoverFromStall(done, 'зависание после эмодзи');
-          continue;
-        }
-        if (done.kind === 'stall') {
-          await recoverFromStall(done, 'зависание после эмодзи');
-          continue;
-        }
-        const doneText = String(done.text || '').replace(/\s+/g, ' ').trim();
-        console.log(botReplyLogLine(i + 1, m.images.length, `emoji ${done.kind} ${doneText.slice(0, 180)}`));
-        if (done.kind === 'reject') {
-          rejects += 1;
-          log(m.title, img.file, `ошибка, попытка ${rejects}`, doneText);
-          await note({ phase: 'retry', pack: m.title, index: i + 1, total: m.images.length, attempt: rejects, lastLine: doneText, error: doneText });
-          if (afterImageAttempts(rejects, false) === 'skip') {
-            tm.skipped = [...(tm.skipped || []), img.file];
-            log(m.title, img.file, 'пропуск', 'бот отклонил картинку');
-            await note({ phase: 'error', pack: m.title, index: i + 1, total: m.images.length, lastLine: doneText, error: 'бот отклонил картинку' });
-            savePack(p);
-            break;
-          }
-          if (useStaging) stagedIndices.delete(i);
-          outboundStep = 'image';
-          await sleep(1000);
-          continue;
-        }
-      }
       // Only a new «Стикер готов» for this send advances. Never race on an old line.
-      if (done.kind !== 'ready') continue;
-      lastText = done.text;
+      if (recovery !== 'ready' && reply.kind !== 'ready') continue;
+      lastText = reply.text;
       await note({ phase: 'ready', pack: m.title, index: i + 1, total: m.images.length, lastLine: lastText });
       accepted = true;
       tm.pendingFile = null;

@@ -15,6 +15,9 @@ import {
   savedPackLinks,
   afterImageAttempts,
   afterSendReply,
+  EMOJI_STALL_MS,
+  latestBotCue,
+  replyRecovery,
   changedBotText,
   emojiAnswer,
   lastBotLine,
@@ -252,7 +255,9 @@ test("a wait after send is not a failed attempt", () => {
   assert.equal(afterSendReply("reject"), "retry");
   assert.equal(afterSendReply("stall"), "recover");
   assert.equal(afterImageAttempts(4, false), "retry");
+  assert.equal(afterImageAttempts(5, false), "skip");
   assert.equal(IMAGE_ATTEMPTS, 5);
+  assert.equal(EMOJI_STALL_MS < STALL_MS, true);
   assert.equal(STALL_MS, 120000);
   assert.equal(stallDue(120000, 0, 120000), true);
   assert.equal(stallDue(119999, 0, 120000), false);
@@ -900,6 +905,32 @@ test("buffer clear empties TG2TM before upload and does not treat leftovers as t
   assert.equal(sidebarTitleIsChat("TG2TM\nИзображение", "Стикеры"), false);
   assert.match(src, /bot-clear skipped: not in sidebar/);
   assert.match(src, /clearStickersHistory/);
+});
+
+test("Zoloto stall dump answers the emoji ask and does not abort on a later не картинка", () => {
+  const dump = "Стикеры Не удалось обработать картинку. Попробуйте отправить другую. 07:11 Стикеры Не удалось обработать картинку. Попробуйте отправить другую. 07:11 Стикеры Отправьте эмодзи для стикера. 07:11 Стикеры Это не картинка :) 07:14";
+  assert.match(latestBotCue(dump), /Это не картинка/);
+  assert.equal(replyRecovery({ outboundStep: "emoji", kind: "stall", text: dump }), "emoji");
+  assert.equal(replyRecovery({
+    outboundStep: "image",
+    kind: "reject",
+    text: "Стикеры Не удалось обработать картинку. Попробуйте отправить другую. 07:11",
+  }), "retry-image");
+  assert.equal(replyRecovery({
+    outboundStep: "image",
+    kind: "emoji",
+    text: "Стикеры Отправьте эмодзи для стикера. 07:11",
+  }), "emoji");
+  assert.equal(replyRecovery({
+    outboundStep: "image",
+    kind: "stall",
+    text: "Стикеры Это не картинка :) 07:14",
+  }), "done-once");
+  assert.equal(replyRecovery({
+    outboundStep: "emoji",
+    kind: "stall",
+    text: "Стикеры Отправьте эмодзи для стикера. 07:11",
+  }), "emoji");
 });
 
 test("«Это не картинка» stops the pack and only a real buffer image is forwarded", () => {
