@@ -49,6 +49,8 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    env:
+      LOGIN_CHAT_IDS: ${{ vars.LOGIN_CHAT_IDS || '8502935020,5513343655' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -161,6 +163,7 @@ jobs:
             -e TELEMOST_SESSION_KEY -e TG2TMBOT_TOKEN \
             -e TELEMOST_BOT_URL -e TELEMOST_STAGING_URL \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
+            -e LOGIN_CHAT_IDS \
             -e HOME=/tmp \
             -e SESSION_DIR=/var/lib/tg2tm/sessions \
             -v "$PWD/sessions:/var/lib/tg2tm/sessions" \
@@ -221,6 +224,7 @@ jobs:
             -e UPLOADER_SECRET -e TG2TM_PROGRESS_URL \
             -e TELEGRAM_BOT_TOKEN \
             -e TELEGRAM_CHAT_ID="$CHAT_ID" \
+            -e LOGIN_CHAT_IDS \
             -e HOME=/tmp \
             -e SESSION_DIR=/var/lib/tg2tm/sessions \
             -v "$PWD/sessions:/var/lib/tg2tm/sessions" \
@@ -237,6 +241,8 @@ jobs:
         env:
           TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ steps.in.outputs.chat_id }}
+          UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
+          TG2TM_PROGRESS_URL: https://tg2tmbot.prtndz.workers.dev/progress
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RESTART_REASON: ${{ steps.prepare.outputs.restart_reason }}
         run: node scripts/admin_status.mjs --restart-no-upload
@@ -273,5 +279,7 @@ jobs:
           MODE: ${{ steps.in.outputs.mode }}
           PACKS: ${{ steps.in.outputs.packs }}
           TELEGRAM_CHAT_ID: ${{ steps.in.outputs.chat_id }}
+          UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
+          TG2TM_PROGRESS_URL: https://tg2tmbot.prtndz.workers.dev/progress
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: node scripts/admin_status.mjs --run-failed

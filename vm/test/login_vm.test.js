@@ -240,6 +240,35 @@ test("login loop sends one QR then stores a ciphertext session", async () => {
   rmSync(dir, { recursive: true });
 });
 
+test("status results reach every admin and the QR stays in the login chat", async () => {
+  const calls = [];
+  const fetchImpl = async (_url, init) => {
+    const body = init.body instanceof FormData
+      ? { chat_id: String(init.body.get("chat_id")), form: true }
+      : JSON.parse(init.body);
+    calls.push(body);
+    return { ok: true, status: 200 };
+  };
+  const io = makeIo({
+    token: "bot-token",
+    chatId: "8502935020",
+    noticeIds: ["8502935020", "5513343655"],
+    file: join(tmpdir(), "tg2tm-login-notice-unused"),
+    passphrase: KEY,
+    account: "default",
+    fetchImpl,
+  });
+  await io.result("upload-ready");
+  assert.deepEqual(calls.map((body) => body.chat_id), ["8502935020", "5513343655"]);
+  assert.equal(calls[0].text, calls[1].text);
+  assert.match(calls[0].text, /Начинаю загрузку/);
+  calls.length = 0;
+  await io.qr(Buffer.from("png"), 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].chat_id, "8502935020");
+  assert.equal(calls[0].form, true);
+});
+
 test("login loop reports timeout without writing a session", async () => {
   const clock = { t: 0 };
   let saved = 0;

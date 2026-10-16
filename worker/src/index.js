@@ -190,7 +190,14 @@ function sameVisibleProgress(prev, pack) {
     prev.total === pack.total &&
     prev.title === pack.title &&
     prev.url === pack.url &&
-    (prev.error || null) === (pack.error || null)
+    (prev.error || null) === (pack.error || null) &&
+    (prev.phase || null) === (pack.phase || null) &&
+    (prev.lastLine || null) === (pack.lastLine || null) &&
+    (prev.runUrl || null) === (pack.runUrl || null) &&
+    (prev.seconds ?? null) === (pack.seconds ?? null) &&
+    (prev.attempt ?? null) === (pack.attempt ?? null) &&
+    (prev.step || null) === (pack.step || null) &&
+    (prev.next || null) === (pack.next || null)
   );
 }
 
@@ -214,8 +221,9 @@ function adminCursors(prev, primaryId) {
   return map;
 }
 
-// Every admin chat gets every pack. adminDelivered means the uploader already
-// wrote the card to ADMIN_CHAT_ID; the other admin chats still need a copy.
+// One card per admin chat. Cursors live on adminByChat[chatId] so an edit
+// never reuses another admin's message id. adminDelivered means an older
+// uploader already wrote that card to ADMIN_CHAT_ID; skip only that chat.
 async function deliverAdminProgress(env, pack, prev, deps) {
   const ids = adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
   const cursors = adminCursors(prev, ids[0]);
@@ -224,19 +232,18 @@ async function deliverAdminProgress(env, pack, prev, deps) {
     return { admin: cursors[ids[0]] || null, adminByChat: cursors, notified };
   }
   const io = adminIo(env, deps);
+  const now = new Date();
   for (const chatId of ids) {
     if (pack.adminDelivered && String(chatId) === String(ADMIN_CHAT_ID)) continue;
     const event = eventFromProgress(pack, cursors[chatId] && cursors[chatId].event);
     try {
-      const delivered = await deliverAdminStatus(io, chatId, cursors[chatId] || null, event);
-      if (delivered.action !== "skip") {
-        cursors[chatId] = {
-          messageId: delivered.messageId,
-          event: delivered.event,
-          text: delivered.text,
-        };
-        notified++;
-      }
+      const delivered = await deliverAdminStatus(io, chatId, cursors[chatId] || null, event, now);
+      cursors[chatId] = {
+        messageId: delivered.messageId,
+        event: delivered.event,
+        text: delivered.text,
+      };
+      if (delivered.action !== "skip") notified++;
     } catch {
       console.log("admin status skipped");
     }
@@ -250,6 +257,9 @@ async function deliverRequesterCard(env, pack, prev, deps) {
   if (!match) return null;
   const item = match.item;
   const chatId = Number(match.chatId);
+  // An admin who requested the pack already gets the admin card. A second
+  // scrubbed card in the same chat is a duplicate.
+  if (isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) return null;
   const io = adminIo(env, deps);
   const event = userRequestEvent({ item, pack, queue });
   let cursor = prev && prev.userCard ? prev.userCard : null;
@@ -463,12 +473,20 @@ async function handleSessionEnded(request, env, deps) {
   const runUrl = String(body.runUrl || body.url || "").trim();
   const queue = await readQueue(env.BOT_KV);
   const send = deps.sendMessage || defaultSend;
-  const adminId = adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)[0];
+  const adminIds = adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
   const result = await finalizeSessionOnce(env.BOT_KV, {
     runId,
     runUrl,
     queue,
-    notify: (text) => send(env, adminId, text),
+    notify: async (text) => {
+      for (const chatId of adminIds) {
+        try {
+          await send(env, chatId, text);
+        } catch {
+          console.log("session end notice skipped", chatId);
+        }
+      }
+    },
     dispatch: () => startReplacementSession(deps.fetch || fetch, env, queue, {
       exceptRunId: runId,
       dispatchReason: queuePipelineReason(QUEUE_REASON.afterDrainSession, queue, { preferQueued: true }),
@@ -607,8 +625,8 @@ async function handleSessionStarted(request, env, deps) {
   const url = String(body.url || body.runUrl || "").trim();
   const reason = String(body.reason || "").trim() || defaultSessionReason(body.mode);
   const send = deps.sendMessage || defaultSend;
-  const adminId = adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)[0];
-  const result = await notifySessionStartOnce(env.BOT_KV, (target, text) => send(env, target, text), adminId, {
+  const adminIds = adminChatIds(env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
+  const result = await notifySessionStartOnce(env.BOT_KV, (target, text) => send(env, target, text), adminIds, {
     runId,
     url,
     reason,

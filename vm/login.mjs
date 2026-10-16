@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { adminNoticeChatIds } from "../scripts/admin_status.mjs";
 import { connect, sleep } from "../scripts/chrome_cdp.mjs";
 import { checkInputs } from "./inputs.mjs";
 import { linkText, qrCaption, resultText } from "./messages.js";
@@ -70,7 +71,8 @@ async function telegram(method, token, chatId, payload, fetchImpl) {
   return { ok: res.ok, status: res.status };
 }
 
-export function makeIo({ token, chatId, file, passphrase, account, fetchImpl = fetch }) {
+export function makeIo({ token, chatId, noticeIds, file, passphrase, account, fetchImpl = fetch }) {
+  const notices = (noticeIds && noticeIds.length ? noticeIds : [chatId]).map((id) => String(id || "")).filter(Boolean);
   return {
     async qr(png, n) {
       const form = new FormData();
@@ -101,14 +103,18 @@ export function makeIo({ token, chatId, file, passphrase, account, fetchImpl = f
     async result(kind) {
       const text = resultText(kind, account);
       if (!quiet()) console.log(kind, account);
-      if (!token || !chatId) return { ok: false, skipped: true };
-      return telegram(
-        "sendMessage",
-        token,
-        chatId,
-        JSON.stringify({ chat_id: chatId, text, link_preview_options: { is_disabled: true } }),
-        fetchImpl,
-      );
+      if (!token || !notices.length) return { ok: false, skipped: true };
+      let last = { ok: false, skipped: true };
+      for (const id of notices) {
+        last = await telegram(
+          "sendMessage",
+          token,
+          id,
+          JSON.stringify({ chat_id: id, text, link_preview_options: { is_disabled: true } }),
+          fetchImpl,
+        );
+      }
+      return last;
     },
     async save(bundle) {
       mkdirSync(join(file, ".."), { recursive: true });
@@ -326,7 +332,8 @@ async function main() {
   const token = process.env.TG2TMBOT_TOKEN || "";
   const chatId = checked.chat_id;
   const passphrase = process.env.TELEMOST_SESSION_KEY || "";
-  const io = makeIo({ token, chatId, file, passphrase, account: checked.account });
+  const noticeIds = adminNoticeChatIds(chatId, process.env.LOGIN_CHAT_IDS || "");
+  const io = makeIo({ token, chatId, noticeIds, file, passphrase, account: checked.account });
 
   if (cmd === "notify") {
     if (!token || !chatId) {

@@ -592,6 +592,18 @@ function optionalHttpUrl(value) {
   return text.slice(0, 300);
 }
 
+function optionalCount(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 100000) return null;
+  return Math.floor(n);
+}
+
+function clockStamp(value) {
+  const text = String(value || "").trim();
+  return /^\d{2}:\d{2}$/.test(text) ? text : null;
+}
+
 export function normalizeProgress(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("body");
   const telemost = body.telemost && typeof body.telemost === "object" ? body.telemost : {};
@@ -620,6 +632,11 @@ export function normalizeProgress(body) {
     adminDelivered: Boolean(body.adminDelivered),
     lastLine: body.lastLine ? String(body.lastLine).slice(0, 300) : null,
     phase: typeof body.phase === "string" ? body.phase.slice(0, 40) : null,
+    seconds: optionalCount(body.seconds),
+    attempt: optionalCount(body.attempt),
+    at: clockStamp(body.at),
+    step: body.step ? String(body.step).slice(0, 80) : null,
+    next: body.next ? String(body.next).slice(0, 300) : null,
     requester: body.requester ? String(body.requester).slice(0, 32) : null,
     requesterChatId: body.requesterChatId ? String(body.requesterChatId).slice(0, 16) : null,
     queueRequestId: body.queueRequestId ? String(body.queueRequestId).slice(0, 64) : null,

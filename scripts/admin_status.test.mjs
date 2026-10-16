@@ -13,6 +13,9 @@ import {
   actionsRunUrl,
   formatAdminStatus,
   adminMenuChatIds,
+  adminNoticeChatIds,
+  deliverAdminFeed,
+  loadAdminCursors,
   isAdminChat,
   failurePackName,
   reportRestartNoUpload,
@@ -484,6 +487,107 @@ test('a new start does not keep the previous pack sticker count', async () => {
   assert.equal(seen.at(-1).total, 92);
   await notify({ phase: 'sending', pack: 'ХорниМуд', index: 54, total: 92 });
   assert.equal(seen.at(-1).index, 54);
+});
+
+test('the admin feed sends the same card to every admin and edits each message id', async () => {
+  const calls = [];
+  let next = 20;
+  const io = {
+    send: async (chatId, text) => {
+      const messageId = next;
+      next += 1;
+      calls.push(['send', String(chatId), messageId, text]);
+      return { message_id: messageId };
+    },
+    edit: async (chatId, messageId, text) => {
+      calls.push(['edit', String(chatId), messageId, text]);
+    },
+    delete: async (chatId, messageId) => {
+      calls.push(['delete', String(chatId), messageId]);
+    },
+  };
+  const ids = ['8502935020', '5513343655'];
+  const notify = createAdminFeed({ io, adminIds: ids.join(','), requester: '424242' });
+  await notify({ phase: 'sending', pack: 'Дьяволица', index: 1, total: 4, at: '20:33', runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/9' });
+  await notify({ phase: 'sending', pack: 'Дьяволица', index: 2, total: 4, at: '20:33', runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/9' });
+  const sends = calls.filter((call) => call[0] === 'send');
+  const edits = calls.filter((call) => call[0] === 'edit');
+  assert.deepEqual(sends.map((call) => call[1]), ids);
+  assert.equal(sends[0][3], sends[1][3]);
+  assert.match(sends[0][3], /actions\/runs\/9/);
+  assert.match(sends[0][3], /стикер 1 из 4/);
+  assert.deepEqual(edits.map((call) => [call[1], call[2]]), [
+    ['8502935020', 20],
+    ['5513343655', 21],
+  ]);
+  assert.equal(edits[0][3], edits[1][3]);
+  assert.match(edits[0][3], /стикер 2 из 4/);
+  assert.equal(edits[0][2] === edits[1][2], false);
+});
+
+test('a legacy single message id is not reused for the second admin', async () => {
+  const ids = ['8502935020', '5513343655'];
+  const cursors = loadAdminCursors({ messageId: 9, event: { phase: 'sending', pack, index: 1, total: 4 } }, ids);
+  assert.equal(cursors['8502935020'].messageId, 9);
+  assert.equal(cursors['5513343655'], undefined);
+  const calls = [];
+  const io = {
+    send: async (chatId) => {
+      calls.push(['send', String(chatId)]);
+      return { message_id: 40 + calls.length };
+    },
+    edit: async (chatId, messageId) => {
+      calls.push(['edit', String(chatId), messageId]);
+    },
+    delete: async () => {},
+  };
+  await deliverAdminFeed(io, ids, cursors, card({ phase: 'sending', index: 2, total: 4 }));
+  assert.deepEqual(calls, [
+    ['edit', '8502935020', 9],
+    ['send', '5513343655'],
+  ]);
+  assert.deepEqual(adminNoticeChatIds('111', '8502935020,5513343655'), ids);
+  assert.deepEqual(adminNoticeChatIds('111', ''), ['111']);
+});
+
+test('a failed run reaches both admins, or the worker when progress is configured', async () => {
+  const ids = '8502935020,5513343655';
+  const direct = [];
+  await reportRunFailed({
+    fetchImpl: async (_url, options) => {
+      direct.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true, result: { message_id: direct.length } }) };
+    },
+    token: 'bot-token',
+    statePath: 'logs/does-not-exist-admin.json',
+    packs: '08',
+    adminIds: ids,
+    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/1',
+    env: {},
+  });
+  assert.equal(direct.length, 2);
+  assert.deepEqual(direct.map((body) => String(body.chat_id)), ['8502935020', '5513343655']);
+  assert.equal(direct[0].text, direct[1].text);
+  assert.match(direct[0].text, /actions\/runs\/1/);
+
+  const posted = [];
+  await reportRunFailed({
+    fetchImpl: async (url, options) => {
+      posted.push({ url, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+    token: 'bot-token',
+    statePath: 'logs/does-not-exist-admin.json',
+    packs: '08',
+    adminIds: ids,
+    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/2',
+    env: { TG2TM_PROGRESS_URL: 'https://tg2tmbot.example/progress', UPLOADER_SECRET: 'secret' },
+  });
+  assert.equal(posted.length, 1);
+  assert.match(posted[0].url, /\/progress$/);
+  assert.equal(posted[0].body.adminDelivered, false);
+  assert.match(posted[0].body.runUrl, /actions\/runs\/2/);
+  assert.equal(posted[0].body.chat_id, undefined);
 });
 
 test('the admin feed sends the card only to the admin chat', async () => {

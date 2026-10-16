@@ -3126,15 +3126,24 @@ export function extractPackUrl(text, links) {
   return url;
 }
 
+function workerOwnsAdminCards() {
+  return Boolean(process.env.TG2TM_PROGRESS_URL) && Boolean(process.env.UPLOADER_SECRET);
+}
+
 function openAdminFeed(dirRef) {
   const token = process.env.TG2TMBOT_TOKEN || '';
+  // The worker knows LOGIN_CHAT_IDS and keeps one message id per admin.
+  // Sending the same card from here as well would duplicate the first admin.
+  const delegate = workerOwnsAdminCards();
   return createAdminFeed({
-    io: token ? telegramIo(fetch, token) : null,
+    io: !delegate && token ? telegramIo(fetch, token) : null,
+    adminIds: process.env.LOGIN_CHAT_IDS || '',
     requester: () => progressFieldsForPack(dirRef).requesterChatId || '',
     writeState: (state) => {
       try {
         mkdirSync(join(ROOT, 'logs'), { recursive: true });
-        writeFileSync(join(ROOT, 'logs', 'admin-last.json'), JSON.stringify(state));
+        const payload = state && typeof state === 'object' ? { ...state, slug: dirRef.dir || '' } : state;
+        writeFileSync(join(ROOT, 'logs', 'admin-last.json'), JSON.stringify(payload));
       } catch {
         console.log('admin status file skipped');
       }
@@ -3159,6 +3168,11 @@ function openAdminFeed(dirRef) {
         runUrl: event.runUrl || null,
         lastLine: event.lastLine || null,
         phase: event.phase,
+        seconds: event.seconds,
+        attempt: event.attempt,
+        at: event.at || null,
+        step: event.step || null,
+        next: event.next || null,
         requester: fields.requester,
         requesterChatId: fields.requesterChatId,
         queueRequestId: fields.queueRequestId,
