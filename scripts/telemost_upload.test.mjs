@@ -912,7 +912,7 @@ test("buffer clear empties TG2TM before upload and does not treat leftovers as t
 test("Zoloto stall dump answers the emoji ask and does not abort on a later не картинка", () => {
   const dump = "Стикеры Не удалось обработать картинку. Попробуйте отправить другую. 07:11 Стикеры Не удалось обработать картинку. Попробуйте отправить другую. 07:11 Стикеры Отправьте эмодзи для стикера. 07:11 Стикеры Это не картинка :) 07:14";
   assert.match(latestBotCue(dump), /Это не картинка/);
-  assert.equal(replyRecovery({ outboundStep: "emoji", kind: "stall", text: dump }), "emoji");
+  assert.equal(replyRecovery({ outboundStep: "emoji", kind: "stall", text: dump, emojiSent: true }), "next");
   assert.equal(replyRecovery({
     outboundStep: "image",
     kind: "reject",
@@ -929,10 +929,22 @@ test("Zoloto stall dump answers the emoji ask and does not abort on a later не
     text: "Стикеры Это не картинка :) 07:14",
   }), "done-once");
   assert.equal(replyRecovery({
-    outboundStep: "emoji",
+    outboundStep: "image",
     kind: "stall",
     text: "Стикеры Отправьте эмодзи для стикера. 07:11",
   }), "emoji");
+  assert.equal(replyRecovery({
+    outboundStep: "emoji",
+    kind: "stall",
+    text: "Стикеры Отправьте эмодзи для стикера. 08:15",
+    emojiSent: true,
+  }), "next");
+  assert.equal(replyRecovery({
+    outboundStep: "emoji",
+    kind: "stall",
+    text: "Стикеры Это не картинка :) 08:16",
+    emojiSent: true,
+  }), "next");
 });
 
 test("«Это не картинка» stops the pack and only a real buffer image is forwarded", () => {
