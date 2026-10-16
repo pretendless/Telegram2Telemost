@@ -2985,6 +2985,34 @@ export function activeQueueRequests(requests) {
   return (requests || []).filter((item) => activeQueueRow(item));
 }
 
+// A human /done can save a short pack and leave the queue row in error.
+// That row is still the pack to upload. A done row is not.
+export function recoverableQueueRequests(requests) {
+  return (requests || []).filter((item) => {
+    if (!item) return false;
+    return item.status === 'queued' || item.status === 'uploading' || item.status === 'error';
+  });
+}
+
+// After a partial save, start that request again from sticker 1.
+// A finished queue row is not started again. Two matches is not a guess.
+export function freshStartAfterSavedPartial({ savedTitle, requests } = {}) {
+  const title = statusPackName(savedTitle);
+  if (!title) return null;
+  const hits = recoverableQueueRequests(requests).filter((item) => samePackTitle(item.title, title));
+  if (hits.length !== 1) return null;
+  const item = hits[0];
+  return {
+    action: 'upload',
+    title: item.title,
+    dir: '',
+    requestId: item.id || '',
+    links: item.links || [],
+    chatId: item.chatId || '',
+    fresh: true,
+  };
+}
+
 export function restartTarget({ unfinished, title, liveText, catalogs, requests, allowCatalog = false } = {}) {
   const stored = activeQueueRequests(requests);
   const namedTitle = statusPackName(title);
@@ -3255,10 +3283,26 @@ export function shouldAbandonOpenPack(liveText, _messages = []) {
   return false;
 }
 
+// An emoji ask that has not been followed by «Стикер готов» or «сохранён» is still open.
+// /done would publish the short pack. A later «Это не картинка» does not cancel that ask.
+export function emojiStillRequested(text, messages = []) {
+  const lines = [];
+  for (const row of messages || []) {
+    if (row && row.text && !row.own) lines.push(String(row.text));
+  }
+  if (text) lines.push(String(text));
+  let asked = false;
+  for (const line of lines) {
+    if (READY.test(line) || SAVED.test(line)) asked = false;
+    if (ASK_EMOJI.test(line) || NOT_EMOJI.test(line)) asked = true;
+  }
+  return asked;
+}
+
 export function closeOpenPackPlan(liveText, messages = []) {
-  if (!unfinishedPack(liveText)) return { action: 'idle' };
+  if (!unfinishedPack(liveText) && !emojiStillRequested(liveText, messages)) return { action: 'idle' };
   // ASK_EMOJI / NOT_EMOJI: bot expects an emoji; /done would not safely finish the step.
-  if (packDialogOpen(liveText)) return { action: 'blocked' };
+  if (packDialogOpen(liveText) || emojiStillRequested(liveText, messages)) return { action: 'blocked' };
   if (finalizeDecision(liveText).action === 'done') return { action: 'done' };
   const accepted = acceptedInOpenPack(messages);
   if (accepted > 0) return { action: 'done' };
@@ -3277,7 +3321,11 @@ export async function closeOpenBotPackBeforeNew(bot, note, { label = 'перез
     return { action: 'idle', closedText: liveText, liveText, title: '' };
   }
 
-  const plan = closeOpenPackPlan(tailText, history.messages);
+  const plan = closeOpenPackPlan(`${liveText}\n${tailText}`, history.messages);
+  if (plan.action === 'blocked') {
+    console.log('close-before-new skipped: emoji still requested');
+    return { action: 'blocked', closedText: '', liveText, title: '' };
+  }
   await note({
     phase: 'done',
     pack: label,
@@ -3997,6 +4045,15 @@ async function restartRun(bot, note, dirRef) {
       label: seenTitle || 'перезапуск',
       lastLine: screenLine(tailText) || choice.lastLine || '',
     });
+    if (closed.action === 'blocked') {
+      console.log('restart-kept', 'emoji still requested');
+      await note({
+        phase: 'emoji',
+        pack: seenTitle || 'перезапуск',
+        lastLine: screenLine(tailText) || choice.lastLine || '',
+      });
+      return;
+    }
     closedText = String(closed.closedText || '');
     if (closed.title) {
       seenTitle = closed.title;
@@ -4004,6 +4061,24 @@ async function restartRun(bot, note, dirRef) {
     }
   }
   if (selected.action === 'close') {
+    const fresh = freshStartAfterSavedPartial({
+      savedTitle: seenTitle,
+      requests: selected.recoverable,
+    });
+    if (fresh) {
+      console.log('restart-fresh', fresh.title, 'from sticker 1');
+      const { writeRequestPack, focusRequest } = await import('./restart_prepare.mjs');
+      const slug = writeRequestPack({ ...fresh, fresh: true });
+      await focusRequest(fresh.requestId);
+      if (dirRef) {
+        dirRef.dir = slug;
+        dirRef.title = fresh.title;
+        dirRef.queueRequestId = fresh.requestId || '';
+        dirRef.requesterChatId = fresh.chatId || '';
+      }
+      await uploadPack(bot, slug, { close: true, restart: true, note, dirRef });
+      return;
+    }
     console.log('restart-closed', JSON.stringify({ title: seenTitle, lastLine: screenLine(closedText) || choice.lastLine || '' }));
     await note({
       phase: 'done',

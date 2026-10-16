@@ -128,6 +128,8 @@ import {
   typedPackTitle,
   shouldAbandonOpenPack,
   closeOpenPackPlan,
+  emojiStillRequested,
+  freshStartAfterSavedPartial,
   acceptedInOpenPack,
   latestIncomingText,
   incomingTailText,
@@ -1261,6 +1263,48 @@ test("closeOpenPackPlan uses /done when stickers were accepted", () => {
   assert.ok(acceptedInOpenPack(messages) >= 1);
   assert.equal(shouldAbandonOpenPack(ready, messages), false);
   assert.deepEqual(closeOpenPackPlan(ready, messages), { action: "done" });
+});
+
+test("a later Это не картинка does not /done a pack that still wants an emoji", () => {
+  const reject = "Не удалось обработать картинку. Попробуйте отправить другую.";
+  const emoji = "Отправьте эмодзи для стикера.";
+  const human = "Это не картинка :)";
+  const messages = [
+    { own: false, text: reject },
+    { own: false, text: emoji },
+    { own: false, text: human },
+  ];
+  assert.equal(emojiStillRequested(human, messages), true);
+  assert.equal(packDialogOpen(human), false);
+  assert.deepEqual(closeOpenPackPlan(human, messages), { action: "blocked" });
+  const afterReady = [
+    { own: false, text: emoji },
+    { own: false, text: "Стикер готов. Отправьте картинку для следующего стикера или сохраните набор: /done" },
+  ];
+  assert.equal(emojiStillRequested("Отправьте картинку для стикера.", afterReady), false);
+});
+
+test("a saved partial Zoloto restarts from sticker 1 and a done row does not", () => {
+  const errorRow = {
+    id: "request-zoloto",
+    title: "Zoloto",
+    status: "error",
+    links: ["https://t.me/addstickers/zoloto"],
+    chatId: "751702056",
+  };
+  const fresh = freshStartAfterSavedPartial({ savedTitle: "Zoloto", requests: [errorRow] });
+  assert.equal(fresh.action, "upload");
+  assert.equal(fresh.fresh, true);
+  assert.equal(fresh.requestId, "request-zoloto");
+  assert.equal(freshStartAfterSavedPartial({
+    savedTitle: "Zoloto",
+    requests: [{ ...errorRow, status: "done" }],
+  }), null);
+  assert.equal(freshStartAfterSavedPartial({ savedTitle: "", requests: [errorRow] }), null);
+  assert.equal(freshStartAfterSavedPartial({
+    savedTitle: "Zoloto",
+    requests: [errorRow, { ...errorRow, id: "other" }],
+  }), null);
 });
 
 test("closeOpenPackPlan blocks emoji dialog without publishing", () => {

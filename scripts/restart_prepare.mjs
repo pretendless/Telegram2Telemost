@@ -5,6 +5,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import {
   activeQueueRequests,
+  recoverableQueueRequests,
   isClockLine,
   restartTarget,
   screenLine,
@@ -69,7 +70,7 @@ async function storedRequests() {
   const response = await fetch(url, { headers: { authorization: 'Bearer ' + secret } });
   if (!response.ok) throw new Error('queue plan http ' + response.status);
   const data = await response.json();
-  return activeQueueRequests(data.items || []);
+  return data.items || [];
 }
 
 async function focusRequest(id) {
@@ -127,7 +128,9 @@ export function writeRequestPack(target) {
     requesterChatId: target.chatId || '',
     stickerLinks: target.links,
     stickerSets: sets,
-    telemost: telemostForRequest(existing, { uploaded: target.uploaded }),
+    telemost: target.fresh
+      ? { status: 'pending', uploaded: 0, packUrl: null, error: null }
+      : telemostForRequest(existing, { uploaded: target.uploaded }),
   }, null, 2) + '\n');
   return slug;
 }
@@ -166,7 +169,9 @@ async function main() {
   console.error('restart-seen', JSON.stringify(seen));
   const canReadQueue = queueReadable();
   const allowCatalog = /^(1|true|yes)$/i.test(String(process.env.TG2TM_CATALOG_RETRY || ''));
-  const requests = await storedRequests();
+  const planItems = await storedRequests();
+  const requests = activeQueueRequests(planItems);
+  const recoverable = recoverableQueueRequests(planItems);
   const target = restartTarget({
     unfinished: Boolean(choice.unfinished),
     title,
@@ -184,6 +189,7 @@ async function main() {
       liveText: choice.liveText || '',
       reason,
       queueReadable: canReadQueue,
+      recoverable,
     }));
     if (githubOutput) writeGithubOutput({ action: target.action, ...seen, reason });
     // Empty or clock-only title is fine: close the open dialog, or report a
@@ -195,7 +201,7 @@ async function main() {
   const dir = target.dir || writeRequestPack({ ...target, uploaded: row && row.uploaded });
   if (target.dir && target.requestId) patchRequestPack(dir, target);
   await focusRequest(target.requestId);
-  const selected = { ...target, dir, action: target.action };
+  const selected = { ...target, dir, action: target.action, recoverable };
   writeFileSync(join(ROOT, 'logs', 'restart-pack.json'), JSON.stringify(selected));
   writeFileSync(join(ROOT, 'logs', 'restart-fetch.txt'), join(ROOT, 'packs', dir));
   if (githubOutput) writeGithubOutput({ action: 'upload', ...seen });
