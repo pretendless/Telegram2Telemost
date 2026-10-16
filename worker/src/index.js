@@ -8,7 +8,7 @@ import {
   isAdminChat,
 } from "../../scripts/admin_status.mjs";
 import { handleRestart, handleVmCommand } from "../../vm/worker_login.js";
-import { startPipelineIfIdle, startReplacementSession, telemostRunActive } from "../../vm/queue_runner.js";
+import { cancelActiveTelemostRuns, startPipelineIfIdle, startReplacementSession } from "../../vm/queue_runner.js";
 import { finalizeSessionOnce } from "../../vm/session_end.js";
 import { QUEUE_REASON, queuePipelineReason } from "../../vm/dispatch_reason.js";
 import { LIVE_SESSION_KEY, defaultSessionReason, notifySessionStartOnce, readLiveSession } from "../../vm/session_notify.js";
@@ -60,7 +60,8 @@ import {
   queueStatusText,
   stripGithubPointers,
   RETIRED_COMMAND,
-  skipAllowedWhileActions,
+  currentPackAlreadyDone,
+  SKIP_REASON,
   skipReply,
   skipUploadingQueue,
   releaseRequest,
@@ -762,41 +763,30 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     } else {
       const fetchImpl = deps.fetch || fetch;
       const queue = await readQueue(env.BOT_KV);
-      const uploading = queue.items.find((item) => item.status === "uploading");
-      const pack = uploading ? await readPackProgress(env.BOT_KV, uploading) : null;
-      const session = readLiveSession(await env.BOT_KV.get(LIVE_SESSION_KEY));
-      const actionsRunning = await telemostRunActive(fetchImpl, env);
-      const now = typeof deps.now === "function" ? deps.now() : Date.now();
-      const decision =
-        uploading && actionsRunning
-          ? skipAllowedWhileActions({ item: uploading, pack, session, now })
-          : { allow: true, reason: uploading ? "idle" : "none" };
-      if (uploading && actionsRunning && !decision.allow) {
-        out =
-          decision.reason === "progress"
-            ? "Сейчас идёт загрузка стикеров — /skip не выполняю."
-            : skipReply({ reason: "none", skipped: [], actionsRunning: true });
+      const uploading = queue.items.filter((item) => item.status === "uploading");
+      if (!uploading.length) {
+        out = skipReply({ reason: "none", skipped: [] });
       } else {
-        const why =
-          decision.reason === "finished"
-            ? "пак уже был готов, строка зависла"
-            : decision.reason === "hung"
-              ? "загрузка зависла, стикеры не идут"
-              : "пропущено";
-        const skipped = skipUploadingQueue(queue, why);
-        if (skipped.changed) {
-          await writeQueue(env.BOT_KV, skipped.queue);
-          if (actionsRunning) await env.BOT_KV.delete(LIVE_SESSION_KEY);
+        const done = [];
+        const skipIds = [];
+        for (const item of uploading) {
+          const pack = await readPackProgress(env.BOT_KV, item);
+          if (currentPackAlreadyDone(pack)) done.push(item);
+          else skipIds.push(item.id);
+        }
+        if (!skipIds.length) {
+          out = skipReply({ reason: "done", skipped: done });
+        } else {
+          const skipped = skipUploadingQueue(queue, SKIP_REASON, { ids: skipIds });
+          if (skipped.changed) await writeQueue(env.BOT_KV, skipped.queue);
+          await env.BOT_KV.delete(LIVE_SESSION_KEY);
+          await cancelActiveTelemostRuns(fetchImpl, env);
           schedulePipeline(env, skipped.queue, deps, {
             dispatchReason: QUEUE_REASON.afterSkip,
-            force: Boolean(actionsRunning),
+            force: true,
           });
+          out = skipReply({ reason: skipped.reason, skipped: skipped.skipped });
         }
-        out = skipReply({
-          reason: skipped.reason,
-          skipped: skipped.skipped,
-          actionsRunning: false,
-        });
       }
     }
   } else if (cmd === "/status") {

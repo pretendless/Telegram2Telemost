@@ -1085,57 +1085,24 @@ export function unstickUploadingQueue(queue, { packForItem = null, terminalOnly 
   };
 }
 
-export const SKIP_START_GRACE_MS = 20000;
-export const SKIP_PROGRESS_STALE_MS = 120000;
-
-function ageMs(stamp, now) {
-  if (!stamp) return null;
-  const at = Date.parse(stamp);
-  if (!Number.isFinite(at)) return null;
-  return now - at;
+// A finished pack is not a skip target. Live sticker progress is.
+export function currentPackAlreadyDone(pack) {
+  return Boolean(pack && pack.status === "done" && pack.url);
 }
 
-// While Actions still looks active, /skip may release a row that is not actually
-// moving stickers. A dispatch only a few seconds old stays protected.
-export function skipAllowedWhileActions({ item, pack, session, now = Date.now() } = {}) {
-  if (!item || item.status !== "uploading") return { allow: false, reason: "none" };
-  const uploaded = pack && Number.isFinite(Number(pack.uploaded)) ? Number(pack.uploaded) : null;
-  const total = pack && Number.isFinite(Number(pack.total)) && Number(pack.total) > 0 ? Number(pack.total) : null;
-  const finished =
-    pack &&
-    (pack.status === "done" ||
-      pack.status === "error" ||
-      (pack.url && pack.status !== "uploading") ||
-      (uploaded != null && total != null && uploaded >= total && pack.status !== "uploading"));
-  if (finished) return { allow: true, reason: "finished" };
-  const reporting =
-    pack &&
-    pack.status === "uploading" &&
-    uploaded != null &&
-    total != null &&
-    uploaded > 0 &&
-    uploaded < total;
-  const progressAge = ageMs(pack && pack.progressAt, now);
-  const started = ageMs(session && session.at, now);
-  if (reporting) {
-    const fresh = progressAge == null ? started != null && started < SKIP_PROGRESS_STALE_MS : progressAge < SKIP_PROGRESS_STALE_MS;
-    return fresh ? { allow: false, reason: "progress" } : { allow: true, reason: "hung" };
-  }
-  if (started != null && started >= 0 && started < SKIP_START_GRACE_MS) {
-    return { allow: false, reason: "starting" };
-  }
-  return { allow: true, reason: "hung" };
-}
+export const SKIP_REASON = "пропущено: /skip остановил загрузку";
 
 // Admin /skip: drop the current uploading row and advance the queue.
-export function skipUploadingQueue(queue, reason) {
-  const stuck = (queue.items || []).filter((item) => item.status === "uploading");
+export function skipUploadingQueue(queue, reason, { ids } = {}) {
+  const allow = ids ? new Set(ids.map((id) => String(id))) : null;
+  const stuck = (queue.items || []).filter((item) => item.status === "uploading" && (!allow || allow.has(String(item.id))));
   if (!stuck.length) return { queue, changed: false, reason: "none", skipped: [] };
   const error = String(reason || "пропущено").slice(0, 300);
   let changed = false;
   const skipped = [];
   const items = queue.items.map((item) => {
     if (item.status !== "uploading") return item;
+    if (allow && !allow.has(String(item.id))) return item;
     changed = true;
     const next = { ...item, status: "error", error };
     skipped.push(next);
@@ -1149,12 +1116,13 @@ export function skipUploadingQueue(queue, reason) {
   };
 }
 
-export function skipReply({ reason, skipped, actionsRunning }) {
-  if (actionsRunning) {
-    return "Сейчас идёт запуск Actions — /skip не выполняю.";
+export function skipReply({ reason, skipped }) {
+  if (reason === "done") {
+    const titles = (skipped || []).map((item) => `«${item.title}»`).join(", ") || "пак";
+    return `Пак ${titles} уже готов — /skip его не снимает.`;
   }
-  if (reason === "none" || !skipped.length) {
-    return "Нет строки «загружается» — /skip не к чему применить.";
+  if (reason === "none" || !skipped || !skipped.length) {
+    return "Нет текущего пака — /skip не к чему применить.";
   }
   const titles = skipped.map((item) => `«${item.title}»`).join(", ");
   const why = skipped.map((item) => item.error).find((text) => text && text !== "пропущено") || "ошибка в очереди";

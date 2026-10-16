@@ -5,6 +5,7 @@ import {
   DEFAULT_REPO,
   DEFAULT_WORKFLOW,
   activeWorkflowRuns,
+  cancelRunUrl,
   dispatchWorkflow,
   workflowRunsUrl,
   githubHeaders,
@@ -22,6 +23,24 @@ async function readRuns(fetchImpl, listUrl, headers) {
     body = {};
   }
   return { status: response.status, runs: activeWorkflowRuns(body) };
+}
+
+// Stop the Telemost Actions run that is still uploading the skipped pack.
+// Ids are captured first so a replacement dispatch is not cancelled with them.
+export async function cancelActiveTelemostRuns(fetchImpl, env) {
+  const token = env && env.GH_DISPATCH_TOKEN;
+  if (!token) return { cancelled: [] };
+  const repo = env.GH_REPO || DEFAULT_REPO;
+  const listUrl = workflowRunsUrl(repo, env.TELEMOST_WORKFLOW || DEFAULT_WORKFLOW);
+  const headers = githubHeaders(token);
+  const page = await readRuns(fetchImpl, listUrl, headers);
+  if (page.status !== 200) return { cancelled: [] };
+  const cancelled = [];
+  for (const run of page.runs) {
+    await fetchImpl(cancelRunUrl(repo, run.id), { method: "POST", headers });
+    cancelled.push(String(run.id));
+  }
+  return { cancelled };
 }
 
 export async function telemostRunActive(fetchImpl, env) {
