@@ -5,11 +5,21 @@ import { join } from "node:path";
 import test from "node:test";
 import { buildDispatch, dispatchWorkflow, parseVmCommand } from "../dispatch.js";
 import { checkInputs } from "../inputs.mjs";
-import { loginLoop, makeIo, restoreLoop, writeSession } from "../login.mjs";
+import {
+  documentMatchesOrigin,
+  loginLoop,
+  makeIo,
+  restoreLoop,
+  storageDenied,
+  storageReadExpression,
+  storageWriteExpression,
+  writeSession,
+} from "../login.mjs";
 import { linkText, qrCaption } from "../messages.js";
 import { safePublicUrl, tunnelUrlFromLog, vncPage } from "../public_url.js";
 import { pickQrRect } from "../qr.js";
 import { artifactName, findSessionFile, latestArtifact, restoreArtifact } from "../restore_artifact.mjs";
+import { failureStepName, readableFailure, readStepFailure, writeStepFailure } from "../step_failure.mjs";
 import {
   cookieNames,
   decryptSession,
@@ -359,6 +369,52 @@ test("artifact restore keeps the newest ciphertext and follows the zip redirect 
 test("QR caption names the account and not a cookie", () => {
   assert.match(qrCaption("work", 2), /аккаунт «work», код 2/);
   assert.equal(qrCaption("work", 2).includes(SECRET), false);
+});
+
+test("restore skips localStorage when the document never becomes that origin", async () => {
+  const stored = [];
+  const result = await restoreLoop(
+    {
+      async setCookies() {},
+      async goto() {
+        return { origin: "https://passport.yandex.ru", ready: false };
+      },
+      async setStorage(entries) {
+        stored.push(entries);
+      },
+      async openTelemost() {
+        return { composer: true, connecting: false };
+      },
+    },
+    {
+      v: 1,
+      cookies: filterYandexCookies(yandexCookies()),
+      origins: [{ origin: "https://passport.yandex.ru", entries: [["k", "v"]] }],
+    },
+    { botUrl: "https://telemost.yandex.ru/user/bot" },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(stored, []);
+  assert.equal(documentMatchesOrigin("null", "https://passport.yandex.ru"), false);
+  assert.equal(documentMatchesOrigin("https://passport.yandex.ru", "https://passport.yandex.ru"), true);
+  assert.match(storageReadExpression(), /try \{ return Object\.entries\(localStorage\)/);
+  assert.match(storageWriteExpression([["k", "v"]]), /localStorage\.setItem/);
+  assert.equal(storageDenied({ denied: "SecurityError: Access is denied for this document." }).includes("SecurityError"), true);
+  assert.equal(storageDenied([["k", "v"]]), "");
+});
+
+test("a CDP localStorage SecurityError becomes one admin line for this run", () => {
+  const raw = '{"exceptionId":1,"text":"Uncaught","exception":{"description":"SecurityError: Failed to read the \'localStorage\' property from \'Window\': Access is denied for this document.","preview":{"description":"SecurityError: Failed';
+  assert.equal(
+    readableFailure(raw),
+    "SecurityError: Failed to read the 'localStorage' property from 'Window': Access is denied for this document.",
+  );
+  assert.equal(failureStepName("restore", "restart-peek"), "чтение диалога");
+  const dir = mkdtempSync(join(tmpdir(), "tg2tm-step-"));
+  writeStepFailure(dir, { step: "чтение диалога", error: raw, runId: "38873216831" });
+  assert.equal(readStepFailure(dir, "38873216831").error.includes("localStorage"), true);
+  assert.equal(readStepFailure(dir, "1").error, "");
+  rmSync(dir, { recursive: true });
 });
 
 test("writeSession refuses a short key", () => {
