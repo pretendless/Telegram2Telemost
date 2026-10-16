@@ -2663,21 +2663,19 @@ export function latestBotCue(text) {
 }
 
 // What to send next. Older bubbles in the same dump are not this send.
-// «Это не картинка» while an emoji was requested is the emoji again, not a fatal stop.
-// A wedged picture dialog gets one /done and stays on this pack.
-export function replyRecovery({ outboundStep = 'image', kind = '', text = '' } = {}) {
+// Emoji is sent once, and only while «Отправьте эмодзи» is still the latest cue.
+// A second emoji is not a picture; if that draws «Это не картинка», the sticker
+// was already accepted, so move on. Do not /newpack.
+export function replyRecovery({ outboundStep = 'image', kind = '', text = '', emojiSent = false } = {}) {
   const latest = latestBotCue(text);
-  const blob = String(text || '');
   if (READY.test(latest) || kind === 'ready') return 'ready';
-  if (isEmojiRequest(latest) || kind === 'emoji') return 'emoji';
-  if (notAnImageReply(latest)) {
-    if (outboundStep === 'emoji' || isEmojiRequest(blob)) return 'emoji';
-    return 'done-once';
-  }
+  if (emojiSent && notAnImageReply(latest) && !isEmojiRequest(latest)) return 'next';
+  if (!emojiSent && (isEmojiRequest(latest) || kind === 'emoji')) return 'emoji';
+  if (notAnImageReply(latest)) return emojiSent ? 'next' : 'done-once';
   if (IMAGE_FAIL.test(latest) || kind === 'reject') return 'retry-image';
   if (kind === 'stall') {
-    if (outboundStep === 'emoji' || isEmojiRequest(latest)) return 'emoji';
-    if (IMAGE_FAIL.test(latest)) return 'retry-image';
+    if (emojiSent) return 'next';
+    if (isEmojiRequest(latest)) return 'emoji';
     return 'recover';
   }
   return 'wait';
@@ -3727,6 +3725,7 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
     // One outbound action at a time: image, then optional emoji, then wait for ready.
     let outboundStep = 'image';
     let emojiAnswerText = '';
+    let emojiSent = false;
     tm.pendingFile = img.file;
     savePack(p);
     const recoverFromStall = async (reply, label) => {
@@ -3765,16 +3764,27 @@ async function uploadPack(bot, dir, { close = false, restart = false, note = asy
       }
       const shown = String(reply.text || '').replace(/\s+/g, ' ').trim();
       console.log(botReplyLogLine(i + 1, m.images.length, `${outboundStep} ${reply.kind} ${shown.slice(0, 180)}`));
-      const recovery = replyRecovery({ outboundStep, kind: reply.kind, text: shown });
+      const recovery = replyRecovery({ outboundStep, kind: reply.kind, text: shown, emojiSent });
+      if (recovery === 'next') {
+        lastText = reply.text;
+        accepted = true;
+        tm.pendingFile = null;
+        stagedIndices.delete(i);
+        continue;
+      }
       if (recovery === 'emoji') {
-        if (outboundStep !== 'emoji') {
-          console.log(dir, 'emoji', img.file);
-          await note({ phase: 'emoji', pack: m.title, index: i + 1, total: m.images.length, lastLine: latestBotCue(shown) });
-          emojiAnswerText = emojiAnswer(latestBotCue(shown), img.emoji);
-          outboundStep = 'emoji';
-        } else {
-          console.log(dir, 'emoji-again', img.file);
+        if (emojiSent || !isEmojiRequest(latestBotCue(shown))) {
+          lastText = reply.text;
+          accepted = true;
+          tm.pendingFile = null;
+          stagedIndices.delete(i);
+          continue;
         }
+        console.log(dir, 'emoji', img.file);
+        await note({ phase: 'emoji', pack: m.title, index: i + 1, total: m.images.length, lastLine: latestBotCue(shown) });
+        emojiAnswerText = emojiAnswer(latestBotCue(shown), img.emoji);
+        outboundStep = 'emoji';
+        emojiSent = true;
         continue;
       }
       if (recovery === 'done-once') {
