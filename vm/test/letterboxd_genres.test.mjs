@@ -8,7 +8,11 @@ import {
   normalizeTelegramFileId,
   parseLetterboxdCommand,
 } from "../letterboxd_genres.js";
-import { mapScriptError, unmatchedFromWorkdir } from "../../scripts/letterboxd_genres_run.mjs";
+import {
+  calendarReadyText,
+  mapScriptError,
+  unmatchedFromWorkdir,
+} from "../../scripts/letterboxd_genres_run.mjs";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -65,4 +69,9 @@ test("unmatchedFromWorkdir reads csv", () => {
   const dir = mkdtempSync(join(tmpdir(), "lb-test-"));
   writeFileSync(join(dir, "tmdb_unmatched.csv"), "Name,Year\nA,2020\nB,2021\n");
   assert.equal(unmatchedFromWorkdir(dir), 2);
+});
+
+test("calendarReadyText announces genre phase", () => {
+  assert.match(calendarReadyText(), /Календарные графики готовы/);
+  assert.match(calendarReadyText(), /жанры/);
 });

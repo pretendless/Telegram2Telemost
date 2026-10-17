@@ -1,4 +1,4 @@
-// GitHub Actions: download Letterboxd ZIP from Telegram, run chart scripts, send PNGs.
+// GitHub Actions: download Letterboxd ZIP, send light charts first, then TMDB genres with progress.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -17,8 +17,6 @@ const CALENDAR_PNGS = [
   "views_by_year.png",
   "extra_stats_decade_rating.png",
 ];
-
-const PNG_NAMES = [...CALENDAR_PNGS, ...GENRE_PNGS];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GENRE_SCRIPT = join(__dirname, "letterboxd_genre_charts.py");
@@ -80,11 +78,15 @@ export function unmatchedFromWorkdir(workdir, stdout = "") {
   return 0;
 }
 
-export function existingPngs(workdir, names = PNG_NAMES) {
+export function existingPngs(workdir, names) {
   return names.filter((name) => {
     const path = join(workdir, name);
     return existsSync(path) && readFileSync(path).byteLength > 32;
   });
+}
+
+export function calendarReadyText() {
+  return "Календарные графики готовы, сейчас жанры…";
 }
 
 async function sendTelegramText(token, chatId, text) {
@@ -109,6 +111,22 @@ async function sendTelegramDocument(token, chatId, filePath, filename, caption =
   });
   if (!res.ok) console.error("sendDocument", filename, res.status);
   return res.ok;
+}
+
+async function sendPngBatch(token, chatId, workdir, names, firstCaption = "") {
+  let first = true;
+  let sent = 0;
+  for (const name of names) {
+    const caption = first ? firstCaption : "";
+    first = false;
+    const ok = await sendTelegramDocument(token, chatId, join(workdir, name), name, caption);
+    if (!ok) {
+      await sendTelegramText(token, chatId, `Не удалось отправить ${name}.`);
+    } else {
+      sent += 1;
+    }
+  }
+  return sent;
 }
 
 async function downloadTelegramFile(token, fileId, destPath) {
@@ -180,68 +198,54 @@ export async function main() {
     throw err;
   }
 
-  // Calendar charts need only diary.csv (no TMDB). Genre charts use the real user script + Bearer.
+  // 1) Light charts first (no TMDB) — send immediately.
   const calendar = runPython(CALENDAR_SCRIPT, zipPath, workdir);
   if (calendar.stdout) process.stdout.write(calendar.stdout);
   if (calendar.stderr) process.stderr.write(calendar.stderr);
 
-  const genres = runPython(GENRE_SCRIPT, zipPath, workdir);
-  if (genres.stdout) process.stdout.write(genres.stdout);
-  if (genres.stderr) process.stderr.write(genres.stderr);
-
   const calendarPngs = existingPngs(workdir, CALENDAR_PNGS);
-  const genrePngs = existingPngs(workdir, GENRE_PNGS);
-  const pngs = [...calendarPngs, ...genrePngs];
-
-  if (!pngs.length) {
+  if (!calendarPngs.length) {
     const mapped =
       mapScriptError(calendar.stderr, calendar.stdout, calendar.status) ||
-      mapScriptError(genres.stderr, genres.stdout, genres.status) ||
-      "Графики не созданы (нет PNG). Проверьте diary.csv и TMDB.";
+      "Календарные графики не созданы. Проверьте diary.csv.";
     await sendTelegramText(token, chatId, mapped);
     throw new Error(mapped);
   }
 
-  if (calendar.status !== 0 && !calendarPngs.length) {
-    const mapped = mapScriptError(calendar.stderr, calendar.stdout, calendar.status);
-    if (mapped) await sendTelegramText(token, chatId, mapped);
-  }
-  if (genres.status !== 0 && !genrePngs.length) {
-    const mapped = mapScriptError(genres.stderr, genres.stdout, genres.status);
-    if (mapped) {
-      await sendTelegramText(
-        token,
-        chatId,
-        calendarPngs.length ? `Календарные графики готовы; жанры не удалось: ${mapped}` : mapped,
-      );
-    }
+  await sendPngBatch(
+    token,
+    chatId,
+    workdir,
+    calendarPngs,
+    `Letterboxd: календарные графики (${calendarPngs.length} PNG).`,
+  );
+  await sendTelegramText(token, chatId, calendarReadyText());
+
+  // 2) Slow TMDB genre enrichment — script edits one progress message, then we send genre PNGs.
+  const genres = runPython(GENRE_SCRIPT, zipPath, workdir);
+  if (genres.stdout) process.stdout.write(genres.stdout);
+  if (genres.stderr) process.stderr.write(genres.stderr);
+
+  const genrePngs = existingPngs(workdir, GENRE_PNGS);
+  if (!genrePngs.length) {
+    const mapped =
+      mapScriptError(genres.stderr, genres.stdout, genres.status) ||
+      "Жанровые графики не созданы. Проверьте TMDB_BEARER_TOKEN и diary.csv.";
+    await sendTelegramText(token, chatId, mapped);
+    throw new Error(mapped);
   }
 
   const unmatched = unmatchedFromWorkdir(workdir, genres.stdout);
-  let first = true;
-  for (const name of pngs) {
-    const caption = first
-      ? unmatched > 0
-        ? `Letterboxd (${pngs.length} PNG). Без жанров TMDB: ${unmatched}.`
-        : `Letterboxd (${pngs.length} PNG).`
-      : "";
-    first = false;
-    const ok = await sendTelegramDocument(token, chatId, join(workdir, name), name, caption);
-    if (!ok) {
-      await sendTelegramText(token, chatId, `Не удалось отправить ${name}.`);
-    }
-  }
+  const genreCaption =
+    unmatched > 0
+      ? `Letterboxd: жанры (${genrePngs.length} PNG). Без жанров TMDB: ${unmatched}.`
+      : `Letterboxd: жанры (${genrePngs.length} PNG).`;
+  await sendPngBatch(token, chatId, workdir, genrePngs, genreCaption);
 
-  console.log("pngs", pngs.join(","));
+  console.log("calendar pngs", calendarPngs.join(","));
+  console.log("genre pngs", genrePngs.join(","));
   console.log("workdir files", readdirSync(workdir).join(","));
   console.log("unmatched", unmatched);
-
-  if (!genrePngs.length) {
-    throw new Error("genre charts missing");
-  }
-  if (!calendarPngs.length) {
-    throw new Error("calendar charts missing");
-  }
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
