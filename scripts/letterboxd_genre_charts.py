@@ -34,7 +34,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
-from letterboxd_palette import watch_year_palette
+from letterboxd_palette import (  # noqa: E402
+    FG,
+    GRID,
+    apply_dark_chart_theme,
+    save_dark_figure,
+    style_axes,
+    watch_year_palette,
+)
+
+apply_dark_chart_theme()
 
 BASE = "https://api.themoviedb.org/3"
 CACHE_PATH = Path("tmdb_genre_cache.json")
@@ -538,16 +547,15 @@ def chart_watches_by_country(diary, cache, path: Path, top_n: int = 12) -> bool:
     ax.set_yticklabels(top_countries)
     ax.set_xlabel("Просмотры")
     ax.set_title("Страны производства — цвет = год просмотра")
-    ax.xaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.xaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
     xmax = float(left.max()) if len(left) else 1.0
     ax.set_xlim(0, xmax * 1.18)
     for yi, total in enumerate(left):
-        ax.text(total + xmax * 0.02, yi, str(int(total)), va="center", fontsize=9)
+        ax.text(total + xmax * 0.02, yi, str(int(total)), va="center", fontsize=9, color=FG)
     handles = [plt.Rectangle((0, 0), 1, 1, color=palette[y]) for y in years]
-    fig.legend(
+    leg = fig.legend(
         handles,
         [str(y) for y in years],
         title="Год просмотра",
@@ -556,10 +564,13 @@ def chart_watches_by_country(diary, cache, path: Path, top_n: int = 12) -> bool:
         frameon=False,
         fontsize=8,
         title_fontsize=9,
+        labelcolor=FG,
     )
-    fig.text(0.01, 0.01, "Source: Letterboxd diary + TMDB metadata", fontsize=7)
+    if leg is not None and leg.get_title() is not None:
+        leg.get_title().set_color(FG)
+    fig.text(0.01, 0.01, "Source: Letterboxd diary + TMDB metadata", fontsize=7, color=FG)
     fig.tight_layout(rect=[0, 0.03, 0.88, 1])
-    fig.savefig(path, bbox_inches="tight")
+    save_dark_figure(fig, path)
     plt.close(fig)
     return True
 
@@ -620,8 +631,7 @@ def main():
 
     progress.finish(f"TMDB: {resolved}/{total}. Строю графики…")
 
-    # Plot defaults
-    plt.rcParams.update({"figure.dpi": 150, "savefig.dpi": 180, "font.size": 9})
+    # Dark theme already applied via apply_dark_chart_theme().
     footer = "Source: Letterboxd diary + TMDB metadata"
     years = sorted(diary["Watched Date"].dt.year.dropna().astype(int).unique())
 
@@ -642,10 +652,19 @@ def main():
     ax.set_title("Количество просмотров по жанрам и годам")
     ax.set_xlabel("Год просмотра"); ax.set_ylabel("Просмотры (жанры суммируются)")
     ax.set_xticks(years); ax.tick_params(axis="x", rotation=45)
-    ax.legend(title="12 самых частых жанров", bbox_to_anchor=(1.02, 1), loc="upper left")
-    fig.text(0.01, 0.01, footer, fontsize=7)
+    leg = ax.legend(
+        title="12 самых частых жанров",
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        labelcolor=FG,
+    )
+    if leg is not None and leg.get_title() is not None:
+        leg.get_title().set_color(FG)
+    style_axes(ax)
+    fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
     fig.tight_layout(rect=[0, 0.03, 0.84, 1])
-    fig.savefig("genre_counts_by_viewing_year.png", bbox_inches="tight"); plt.close(fig)
+    save_dark_figure(fig, "genre_counts_by_viewing_year.png")
+    plt.close(fig)
 
     # 2) Mean personal rating per genre (rating is counted once per diary viewing)
     rated = diary[diary["Rating"].notna()]
@@ -662,11 +681,19 @@ def main():
         ax.set_xlim(0, 5); ax.set_xlabel("Средняя личная оценка (из 5)")
         ax.set_title("Средняя оценка по жанрам (минимум 5 оценённых просмотров)")
         for bar, (_, r) in zip(bars, avg.iterrows()):
-            ax.text(r["Average rating"] + 0.04, bar.get_y() + bar.get_height()/2,
-                    f'{r["Average rating"]:.2f}  (n={int(r["Rated viewings"])})', va="center", fontsize=8)
-    fig.text(0.01, 0.01, footer, fontsize=7)
+            ax.text(
+                r["Average rating"] + 0.04,
+                bar.get_y() + bar.get_height() / 2,
+                f'{r["Average rating"]:.2f}  (n={int(r["Rated viewings"])})',
+                va="center",
+                fontsize=8,
+                color=FG,
+            )
+    style_axes(ax)
+    fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
     fig.tight_layout(rect=[0, 0.03, 1, 1])
-    fig.savefig("average_rating_by_genre.png", bbox_inches="tight"); plt.close(fig)
+    save_dark_figure(fig, "average_rating_by_genre.png")
+    plt.close(fig)
 
     # 3) Counts by release decade
     release_decades = {}
@@ -687,10 +714,19 @@ def main():
         p.plot(kind="bar", stacked=True, ax=ax, colormap="turbo", width=0.82)
         ax.set_title("Просмотры по десятилетию выхода фильма и жанру")
         ax.set_xlabel("Десятилетие выхода"); ax.set_ylabel("Количество просмотров")
-        ax.legend(title="10 самых частых жанров", bbox_to_anchor=(1.02, 1), loc="upper left")
-        fig.text(0.01, 0.01, footer, fontsize=7)
+        leg = ax.legend(
+            title="10 самых частых жанров",
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            labelcolor=FG,
+        )
+        if leg is not None and leg.get_title() is not None:
+            leg.get_title().set_color(FG)
+        style_axes(ax)
+        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
         fig.tight_layout(rect=[0, 0.03, 0.83, 1])
-        fig.savefig("genre_by_release_decade.png", bbox_inches="tight"); plt.close(fig)
+        save_dark_figure(fig, "genre_by_release_decade.png")
+        plt.close(fig)
 
     # 4) Genre share within each viewing year (top 10 genres)
     top10 = [g for g, _ in Counter(all_genres).most_common(10)]
@@ -706,10 +742,15 @@ def main():
         ax.set_xticks(range(len(years))); ax.set_xticklabels(years, rotation=45)
         ax.set_title("Доля просмотров каждого жанра по годам (%)")
         ax.set_xlabel("Год просмотра")
-        cb = fig.colorbar(im, ax=ax); cb.set_label("% просмотров за год с этим жанром")
-        fig.text(0.01, 0.01, footer, fontsize=7)
+        cb = fig.colorbar(im, ax=ax)
+        cb.set_label("% просмотров за год с этим жанром", color=FG)
+        cb.ax.yaxis.set_tick_params(color=FG)
+        plt.setp(plt.getp(cb.ax.axes, "yticklabels"), color=FG)
+        style_axes(ax)
+        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
         fig.tight_layout(rect=[0, 0.03, 1, 1])
-        fig.savefig("genre_share_by_viewing_year.png", bbox_inches="tight"); plt.close(fig)
+        save_dark_figure(fig, "genre_share_by_viewing_year.png")
+        plt.close(fig)
 
     # Compact genre + people/country stats for the Telegram HTML report.
     top_for_report, genres_by_rating = rank_genres(diary, limit_count=8, limit_rating=8)

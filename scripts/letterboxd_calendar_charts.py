@@ -32,7 +32,16 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from letterboxd_palette import watch_year_palette  # noqa: E402
+from letterboxd_palette import (  # noqa: E402
+    FG,
+    GRID,
+    apply_dark_chart_theme,
+    save_dark_figure,
+    style_axes,
+    watch_year_palette,
+)
+
+apply_dark_chart_theme()
 
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
@@ -210,15 +219,14 @@ def stacked_counts(ax, categories: list[str], years: list[int], matrix: np.ndarr
     ax.set_xticks(x)
     ax.set_xticklabels(categories, rotation=45 if len(categories) > 8 else 0, ha="right" if len(categories) > 8 else "center")
     ax.set_ylabel(ylabel)
-    ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
 
 
 def add_watch_year_legend(fig, years: list[int], colors: dict, title: str = "Год"):
     handles = [plt.Rectangle((0, 0), 1, 1, color=colors[y]) for y in years]
-    fig.legend(
+    leg = fig.legend(
         handles,
         [str(y) for y in years],
         title=title,
@@ -227,7 +235,10 @@ def add_watch_year_legend(fig, years: list[int], colors: dict, title: str = "Г�
         frameon=False,
         fontsize=8,
         title_fontsize=9,
+        labelcolor=FG,
     )
+    if leg is not None and leg.get_title() is not None:
+        leg.get_title().set_color(FG)
 
 
 def chart_weekday_month(df: pd.DataFrame, path: Path) -> None:
@@ -262,7 +273,7 @@ def chart_weekday_month(df: pd.DataFrame, path: Path) -> None:
 
     add_watch_year_legend(fig, years, colors, title="Год")
     fig.tight_layout(rect=[0, 0, 0.9, 0.96])
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
 
 
@@ -282,10 +293,9 @@ def chart_views_by_year(df: pd.DataFrame, path: Path) -> None:
     ax.set_ylabel("Количество записей о просмотрах")
     ax.set_xticks(x)
     ax.set_xticklabels([str(y) for y in labels], rotation=45, ha="right")
-    ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
     ymax = max(values) if len(values) else 1
     ax.set_ylim(0, ymax * 1.12)
     for bar, value in zip(bars, values):
@@ -296,9 +306,10 @@ def chart_views_by_year(df: pd.DataFrame, path: Path) -> None:
             ha="center",
             va="bottom",
             fontsize=8,
+            color=FG,
         )
     fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
 
 
@@ -396,7 +407,7 @@ def chart_decade_rating(df: pd.DataFrame, path: Path) -> None:
 
     add_watch_year_legend(fig, years, colors, title="Год просмотра")
     fig.tight_layout(rect=[0, 0, 0.9, 0.96])
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
 
 
@@ -421,21 +432,28 @@ def chart_average_rating_by_year(df: pd.DataFrame, path: Path) -> bool:
     fig, ax = plt.subplots(figsize=(12, 6))
     x = np.arange(len(labels))
     ax.plot(x, values, color="#888888", linewidth=1.5, zorder=1)
-    ax.scatter(x, values, c=point_colors, s=64, zorder=2, edgecolors="white", linewidths=0.6)
+    ax.scatter(x, values, c=point_colors, s=64, zorder=2, edgecolors="#111111", linewidths=0.6)
     ax.set_ylim(0, 5.2)
     ax.set_title("Средняя оценка по годам просмотра")
     ax.set_xlabel("Год просмотра")
     ax.set_ylabel("Средняя оценка (из 5)")
     ax.set_xticks(x)
     ax.set_xticklabels([str(y) for y in labels], rotation=45, ha="right")
-    ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
     for xi, value, count in zip(x, values, counts):
-        ax.text(xi, value + 0.08, f"{value:.2f}\n(n={count})", ha="center", va="bottom", fontsize=7)
+        ax.text(
+            xi,
+            value + 0.08,
+            f"{value:.2f}\n(n={count})",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color=FG,
+        )
     fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
 
@@ -479,10 +497,18 @@ def chart_average_rating_by_release_decade(df: pd.DataFrame, path: Path) -> bool
         avg = float(avg_by_decade.loc[decade, "mean"])
         n = int(avg_by_decade.loc[decade, "count"])
         top = float(totals[di])
-        ax.text(di, top + ymax * 0.03, f"ср. {avg:.2f}\n(n={n})", ha="center", va="bottom", fontsize=7)
+        ax.text(
+            di,
+            top + ymax * 0.03,
+            f"ср. {avg:.2f}\n(n={n})",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color=FG,
+        )
     add_watch_year_legend(fig, years, colors, title="Год просмотра")
     fig.tight_layout(rect=[0, 0, 0.9, 1])
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
 
@@ -538,17 +564,16 @@ def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 10) -> bool:
     ax.set_yticklabels(labels)
     ax.set_xlabel("Записей в дневнике")
     ax.set_title("Чаще всего в дневнике — цвет = год просмотра")
-    ax.xaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.xaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
     xmax = float(left.max()) if len(left) else 1.0
     ax.set_xlim(0, xmax * 1.15)
     for yi, total in enumerate(left):
-        ax.text(total + xmax * 0.02, yi, str(int(total)), va="center", fontsize=9)
+        ax.text(total + xmax * 0.02, yi, str(int(total)), va="center", fontsize=9, color=FG)
     add_watch_year_legend(fig, years, colors, title="Год просмотра")
     fig.tight_layout(rect=[0, 0, 0.88, 1])
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
 
