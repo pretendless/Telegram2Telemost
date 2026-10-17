@@ -100,7 +100,7 @@ export function letterboxdPromptText() {
   return (
     "Пришлите ZIP экспорта Letterboxd одним документом.\n\n" +
     "Letterboxd → Settings → Import & Export → Export Your Data.\n" +
-    "В архиве нужен diary.csv; watched.csv тоже учтём в каталожной статистике. Отмена — /stop."
+    "В архиве нужен diary.csv; watched.csv и ratings.csv учтём в каталоге и средних оценках. Отмена — /stop."
   );
 }
 

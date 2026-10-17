@@ -33,8 +33,8 @@ import pandas as pd  # noqa: E402
 
 from letterboxd_export import (  # noqa: E402
     film_name_year_key,
-    latest_rated_union,
     load_export,
+    ratings_for_catalog,
 )
 from letterboxd_palette import (  # noqa: E402
     FG,
@@ -46,6 +46,7 @@ from letterboxd_palette import (  # noqa: E402
 )
 from letterboxd_ratings import (  # noqa: E402
     MIN_RATED_FOR_TOP,
+    film_identity_series,
     latest_rated_per_film,
     passes_rated_threshold,
 )
@@ -61,15 +62,22 @@ def build_diary_summary(
     diary: pd.DataFrame,
     catalog: pd.DataFrame | None = None,
     watched_only: pd.DataFrame | None = None,
+    film_ratings: pd.DataFrame | None = None,
 ) -> dict:
     """Compact stats for the Telegram HTML report (no TMDB).
 
-    Date-sensitive fields use diary only. Unique films, rating avg/mode, and
-    release-year tops use diary ∪ watched-only (catalog).
+    Date-sensitive fields use diary only. Unique films and release-year count
+    tops use diary ∪ watched-only (catalog). Rating avg/mode and rating tops
+    use ratings.csv (primary) ∪ diary fallback, joined to catalog.
     """
     df = diary
     cat = catalog if catalog is not None else diary
     only = watched_only if watched_only is not None else df.iloc[0:0].copy()
+    if film_ratings is None:
+        from letterboxd_export import merged_film_ratings
+
+        film_ratings = merged_film_ratings(None, df)
+    catalog_rated = ratings_for_catalog(cat, film_ratings)
 
     entries = int(len(df))
     names = df["Name"].fillna("").astype(str).str.strip()
@@ -98,9 +106,8 @@ def build_diary_summary(
     favorite_month = MONTHS[fav_m_i - 1] if fav_m_i is not None else None
     favorite_month_count = int(month_counts.iloc[0]) if len(month_counts) else 0
 
-    # Averages / mode: diary latest rating, plus watched-only Ratings.
-    latest_rated = latest_rated_union(df, only)
-    rated = latest_rated["Rating"] if not latest_rated.empty else pd.Series(dtype=float)
+    # Averages / mode: ratings.csv ∪ diary fallback (unique films).
+    rated = catalog_rated["Rating"] if not catalog_rated.empty else pd.Series(dtype=float)
     rated_count = int(len(rated))
     rated_share = round(rated_count / unique_films, 4) if unique_films else 0.0
     rating_avg = round(float(rated.mean()), 2) if rated_count else None
@@ -133,7 +140,7 @@ def build_diary_summary(
                 }
             )
 
-    # Release-year tops: catalog (release year, not watch year).
+    # Release-year tops: catalog counts; ratings from ratings.csv join.
     top_rated_release_years: list[dict] = []
     top_release_years_by_count: list[dict] = []
     with_release = cat[cat["Year"].notna()].copy()
@@ -145,11 +152,11 @@ def build_diary_summary(
             .groupby("release_year")["_fk"]
             .nunique()
         )
-        latest_release = latest_rated_union(df, only)
+        latest_release = catalog_rated
         if not latest_release.empty and "Year" in latest_release.columns:
             latest_release = latest_release[latest_release["Year"].notna()].copy()
             latest_release["release_year"] = latest_release["Year"].astype(int)
-            # rated = unique films after latest_rated_union (Name+Year), not diary rows.
+            # rated = unique films after ratings.csv merge (Name+Year), not diary rows.
             rated_by_year = latest_release.groupby("release_year")["Rating"].agg(
                 avg="mean", rated="count"
             )
@@ -407,12 +414,36 @@ def chart_decade_rating(df: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
-def chart_average_rating_by_year(df: pd.DataFrame, path: Path) -> bool:
-    """Mean Letterboxd rating per watch year (latest rating per film)."""
-    rated = latest_rated_per_film(df)
+def chart_average_rating_by_year(
+    df: pd.DataFrame,
+    path: Path,
+    film_ratings: pd.DataFrame | None = None,
+) -> bool:
+    """Mean Letterboxd rating per watch year (ratings.csv joined to diary films)."""
+    work = df[df["Watched Date"].notna()].copy()
+    if work.empty:
+        return False
+    work["_film_key"] = film_identity_series(work)
+    work = work.sort_values("Watched Date", kind="mergesort")
+    # One film → latest diary watch year for the time axis.
+    latest_watch = work.groupby("_film_key", dropna=False, as_index=False).tail(1)
+
+    if film_ratings is not None and not film_ratings.empty:
+        fr = film_ratings.copy()
+        if "_film_key" not in fr.columns:
+            fr["_film_key"] = film_identity_series(fr)
+        rate_map = fr.drop_duplicates("_film_key").set_index("_film_key")["Rating"]
+        rated = latest_watch.copy()
+        rated["Rating"] = rated["_film_key"].map(rate_map)
+        rated = rated[rated["Rating"].notna()].copy()
+    else:
+        rated = latest_rated_per_film(df)
+        if rated.empty:
+            return False
+        rated = rated.copy()
+
     if rated.empty:
         return False
-    rated = rated.copy()
     rated["watch_year"] = rated["Watched Date"].dt.year.astype(int)
     grouped = rated.groupby("watch_year")["Rating"].agg(["mean", "count"]).sort_index()
     grouped = grouped[grouped["count"] >= 1]
@@ -459,14 +490,20 @@ def chart_average_rating_by_release_decade(
     diary: pd.DataFrame,
     path: Path,
     watched_only: pd.DataFrame | None = None,
+    film_ratings: pd.DataFrame | None = None,
+    catalog: pd.DataFrame | None = None,
 ) -> bool:
-    """Mean Letterboxd Rating per film release decade (catalog ratings).
+    """Mean Letterboxd Rating per film release decade (ratings.csv ∪ diary).
 
     Watch-count stacks by decade live in extra_stats_decade_rating.png — do not
-    duplicate that metric here. Includes watched-only Ratings; no watch-year stack.
+    duplicate that metric here. No watch-year stack.
     """
-    only = watched_only if watched_only is not None else diary.iloc[0:0].copy()
-    work = latest_rated_union(diary, only)
+    cat = catalog if catalog is not None else diary
+    if film_ratings is None:
+        from letterboxd_export import merged_film_ratings
+
+        film_ratings = merged_film_ratings(None, diary)
+    work = ratings_for_catalog(cat, film_ratings)
     if work.empty:
         return False
     work = work[work["Year"].notna()].copy()
@@ -589,17 +626,25 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     zip_path = Path(args[0])
     try:
-        diary, catalog, watched_only = load_export(zip_path)
+        diary, catalog, watched_only, film_ratings = load_export(zip_path)
         # Date-sensitive charts: diary only (need Watched Date).
         chart_weekday_month(diary, Path("views_by_weekday_month.png"))
         chart_views_by_year(diary, Path("views_by_year.png"))
         chart_decade_rating(diary, Path("extra_stats_decade_rating.png"))
-        made_rating = chart_average_rating_by_year(diary, Path("average_rating_by_year.png"))
+        made_rating = chart_average_rating_by_year(
+            diary, Path("average_rating_by_year.png"), film_ratings=film_ratings
+        )
         made_decade_avg = chart_average_rating_by_release_decade(
-            diary, Path("average_rating_by_release_decade.png"), watched_only=watched_only
+            diary,
+            Path("average_rating_by_release_decade.png"),
+            watched_only=watched_only,
+            film_ratings=film_ratings,
+            catalog=catalog,
         )
         made_rewatch = chart_top_rewatches(diary, Path("top_rewatches.png"))
-        summary = build_diary_summary(diary, catalog=catalog, watched_only=watched_only)
+        summary = build_diary_summary(
+            diary, catalog=catalog, watched_only=watched_only, film_ratings=film_ratings
+        )
         summary["charts"] = {
             "average_rating_by_year": bool(made_rating),
             "average_rating_by_release_decade": bool(made_decade_avg),

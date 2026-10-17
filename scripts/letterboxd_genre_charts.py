@@ -35,8 +35,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from letterboxd_export import (  # noqa: E402
-    latest_rated_union,
     load_export,
+    ratings_for_catalog,
 )
 from letterboxd_palette import (  # noqa: E402
     FG,
@@ -398,8 +398,8 @@ def _cache_key(row):
     return f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
 
 
-def aggregate_person_stats(catalog, cache, diary=None, watched_only=None):
-    """Catalog counts (diary rows + watched-only); ratings via latest_rated_union."""
+def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watched_only=None):
+    """Catalog counts (diary∪watched); avgs from ratings.csv ∪ diary joined to catalog."""
     countries = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     directors = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     actors = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
@@ -448,9 +448,12 @@ def aggregate_person_stats(catalog, cache, diary=None, watched_only=None):
 
         apply_meta(count_only, row, meta)
 
-    diary_df = diary if diary is not None else catalog
-    only_df = watched_only if watched_only is not None else catalog.iloc[0:0].copy()
-    for _, row in latest_rated_union(diary_df, only_df).iterrows():
+    if film_ratings is None:
+        from letterboxd_export import merged_film_ratings
+
+        film_ratings = merged_film_ratings(None, diary if diary is not None else catalog)
+    rated_rows = ratings_for_catalog(catalog, film_ratings)
+    for _, row in rated_rows.iterrows():
         meta = cache.get(_cache_key(row)) or {}
         rating = row.get("Rating")
 
@@ -486,16 +489,24 @@ def aggregate_person_stats(catalog, cache, diary=None, watched_only=None):
     }
 
 
-def rank_genres(catalog, diary=None, watched_only=None, limit_count=8, limit_rating=8):
-    """Genre tops: catalog hits; avg from diary∪watched-only latest ratings."""
+def rank_genres(catalog, film_ratings=None, diary=None, watched_only=None, limit_count=8, limit_rating=8):
+    """Genre tops: catalog hits; avg from ratings.csv ∪ diary joined to catalog."""
     stats = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     for _, row in catalog.iterrows():
         for g in row.get("Genre list") or []:
             if g:
                 stats[g]["count"] += 1
-    diary_df = diary if diary is not None else catalog
-    only_df = watched_only if watched_only is not None else catalog.iloc[0:0].copy()
-    for _, row in latest_rated_union(diary_df, only_df).iterrows():
+    if film_ratings is None:
+        from letterboxd_export import merged_film_ratings
+
+        film_ratings = merged_film_ratings(None, diary if diary is not None else catalog)
+    rated_rows = ratings_for_catalog(catalog, film_ratings)
+    # Map Name+Year → Genre list from catalog (already TMDB-enriched).
+    genre_by_key = {}
+    if "Genre list" in catalog.columns:
+        for _, crow in catalog.drop_duplicates(subset=["Name", "Year"]).iterrows():
+            genre_by_key[_cache_key(crow)] = crow.get("Genre list") or []
+    for _, row in rated_rows.iterrows():
         rating = row.get("Rating")
         try:
             r = float(rating)
@@ -503,7 +514,8 @@ def rank_genres(catalog, diary=None, watched_only=None, limit_count=8, limit_rat
             continue
         if not (r > 0):
             continue
-        for g in row.get("Genre list") or []:
+        genres = row.get("Genre list") or genre_by_key.get(_cache_key(row)) or []
+        for g in genres:
             if not g:
                 continue
             st = stats[g]
@@ -616,7 +628,7 @@ def main():
         print("Не задан TMDB_BEARER_TOKEN. Получите Read Access Token в Settings → API на TMDB и задайте переменную окружения.")
         sys.exit(2)
 
-    diary, catalog, watched_only = load_export(sys.argv[1])
+    diary, catalog, watched_only, film_ratings = load_export(sys.argv[1])
     cache = json.loads(CACHE_PATH.read_text(encoding="utf-8")) if CACHE_PATH.exists() else {}
     # Enrich unique titles across diary ∪ watched.
     films = catalog[["Name", "Year"]].drop_duplicates().reset_index(drop=True)
@@ -624,7 +636,7 @@ def main():
     progress = TelegramProgress(TG_TOKEN, TG_CHAT)
     print(
         f"Обогащаю TMDB {total} уникальных сочетаний «название + год»…"
-        f" (watched-only: {len(watched_only)})"
+        f" (watched-only: {len(watched_only)}, rated films: {len(film_ratings)})"
     )
     progress.update(0, total, force=True)
     done = 0
@@ -698,14 +710,15 @@ def main():
     save_dark_figure(fig, "genre_counts_by_viewing_year.png")
     plt.close(fig)
 
-    # 2) Mean personal rating per genre — catalog ratings (diary ∪ watched-only).
-    rated = latest_rated_union(diary, watched_only)
-    # Attach Genre list onto rated rows via cache key.
-    if not rated.empty and "Genre list" not in rated.columns:
+    # 2) Mean personal rating per genre — ratings.csv ∪ diary joined to catalog.
+    rated = ratings_for_catalog(catalog, film_ratings)
+    if not rated.empty:
         rated = _attach_tmdb_columns(rated, cache)
     all_genres_catalog = [g for genres in catalog["Genre list"] for g in genres]
     rows = []
     for genre in sorted(set(all_genres_catalog)):
+        if rated.empty:
+            break
         vals = rated[rated["Genre list"].apply(lambda gs: genre in (gs or []))]["Rating"]
         if len(vals) >= 5:
             rows.append((genre, float(vals.mean()), int(len(vals))))
@@ -788,12 +801,19 @@ def main():
         save_dark_figure(fig, "genre_share_by_viewing_year.png")
         plt.close(fig)
 
-    # HTML tops: catalog counts + union ratings.
+    # HTML tops: catalog counts + ratings.csv ∪ diary.
     top_for_report, genres_by_rating = rank_genres(
-        catalog, diary=diary, watched_only=watched_only, limit_count=8, limit_rating=8
+        catalog,
+        film_ratings=film_ratings,
+        diary=diary,
+        watched_only=watched_only,
+        limit_count=8,
+        limit_rating=8,
     )
 
-    deep = aggregate_person_stats(catalog, cache, diary=diary, watched_only=watched_only)
+    deep = aggregate_person_stats(
+        catalog, cache, film_ratings=film_ratings, diary=diary, watched_only=watched_only
+    )
     # Country chart stacks by watch year → diary only.
     made_country = chart_watches_by_country(diary, cache, Path("watches_by_country.png"))
 
