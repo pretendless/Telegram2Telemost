@@ -11,6 +11,7 @@ import {
 import {
   buildCalendarReportHtml,
   buildGenreReportHtml,
+  buildGenreReportMessages,
   calendarReadyText,
   escapeHtml,
   mapScriptError,
@@ -101,10 +102,15 @@ test("buildCalendarReportHtml uses bold numbers and HTML", () => {
     rating_mode: 4,
     rating_mode_count: 25,
     top_rewatches: [{ name: "Heat & Dust", year: 1995, count: 3 }],
+    top_rated_release_years: [{ year: 1999, avg: 4.5, films: 8, rated: 8 }],
+    top_release_years_by_count: [{ year: 2019, count: 22 }],
   });
   assert.match(html, /<b>Letterboxd<\/b>/);
   assert.match(html, /<b>100<\/b>/);
   assert.match(html, /Heat &amp; Dust/);
+  assert.match(html, /Годы выхода — выше оценка/);
+  assert.match(html, /<b>1999<\/b>/);
+  assert.match(html, /Годы выхода — больше просмотров/);
   assert.doesNotMatch(html, /parse_mode/);
 });
 
@@ -122,4 +128,26 @@ test("buildGenreReportHtml lists top genres", () => {
   assert.match(html, /<b>Жанры \(TMDB\)<\/b>/);
   assert.match(html, /Comedy &lt;x&gt;/);
   assert.match(html, /<b>2<\/b>/);
+});
+
+test("buildGenreReportMessages splits genres and people/countries", () => {
+  const msgs = buildGenreReportMessages({
+    top_genres: [{ name: "Drama", count: 50, pct: 20 }],
+    unmatched: 1,
+    countries: [{ name: "United States of America", count: 40, avg: 3.8 }],
+    directors: [{ name: "Nolan & Co", count: 5, avg: 4.2 }],
+    directors_by_rating: [{ name: "Nolan & Co", count: 5, avg: 4.2 }],
+    actors: [{ name: "Actor <X>", count: 4, avg: 3.5 }],
+    languages: [{ name: "en", count: 30 }],
+    companies: [{ name: "A24", count: 6, avg: 4.0 }],
+    min_person_count: 3,
+  });
+  assert.equal(msgs.length, 2);
+  assert.match(msgs[0], /Жанры \(TMDB\)/);
+  assert.match(msgs[1], /Страны/);
+  assert.match(msgs[1], /Режиссёры/);
+  assert.match(msgs[1], /Nolan &amp; Co/);
+  assert.match(msgs[1], /Actor &lt;X&gt;/);
+  assert.match(msgs[1], /английский/);
+  assert.match(msgs[1], /Студии/);
 });
