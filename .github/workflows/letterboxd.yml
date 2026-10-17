@@ -1,0 +1,43 @@
+# Telegram /letterboxd → Letterboxd ZIP from Telegram file_id → Python charts → send PNGs.
+# Secrets: TG2TMBOT_TOKEN, TMDB_BEARER_TOKEN (Read Access Token). Do not print tokens.
+name: Letterboxd
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Job id from Worker KV (lb-…)
+        required: true
+        type: string
+      chat_id:
+        description: Telegram chat id to reply to
+        required: true
+        type: string
+      file_id:
+        description: Telegram document file_id of the Letterboxd export ZIP
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  charts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python deps
+        run: pip install -r scripts/requirements-letterboxd.txt
+      - name: Build charts and send to Telegram
+        env:
+          TG2TMBOT_TOKEN: ${{ secrets.TG2TMBOT_TOKEN }}
+          TMDB_BEARER_TOKEN: ${{ secrets.TMDB_BEARER_TOKEN }}
+          CHAT_ID: ${{ inputs.chat_id }}
+          FILE_ID: ${{ inputs.file_id }}
+          JOB_ID: ${{ inputs.job_id }}
+          MPLBACKEND: Agg
+        run: node scripts/letterboxd_genres_run.mjs

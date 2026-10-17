@@ -78,6 +78,8 @@ import {
 import { loadAdminQueueState, reconcileTerminalUploadingFromProgress } from "./queue_view.js";
 import { applyProjectReply, handleProjectCommand, readProjectPrompt } from "./project_prompt.js";
 import { handleGhrunCommand } from "./ghrun.js";
+import { clearLetterboxdAwait, handleLetterboxdCommand, handleLetterboxdDocument } from "./letterboxd_genres.js";
+import { awaitLetterboxdKey, decodeAwaitLetterboxd, letterboxdNeedZipText } from "../../vm/letterboxd_genres.js";
 import { normalizeProjectReplyBody } from "../../vm/project_prompt.js";
 
 export function botToken(env) {
@@ -721,7 +723,8 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   if (!message) return;
   const text = typeof message.text === "string" ? message.text : "";
   const sticker = message.sticker && typeof message.sticker === "object" ? message.sticker : null;
-  if (!text && !sticker) return;
+  const document = message.document && typeof message.document === "object" ? message.document : null;
+  if (!text && !sticker && !document) return;
   const chatId = message.chat && message.chat.id;
   if (!Number.isSafeInteger(chatId) && typeof chatId !== "number") return;
   await ensureSeed(env.BOT_KV);
@@ -738,8 +741,18 @@ async function answer(env, update, send, stickerCount, deps = {}) {
   } else if (known) {
     out = known.text;
   } else if (cmd === "/create") {
+    await clearLetterboxdAwait(env.BOT_KV, chatId);
     await env.BOT_KV.put(awaitCreateKey(chatId), encodeAwaitCreate({ step: "name" }));
     out = CREATE_PROMPT;
+  } else if (cmd === "/letterboxd") {
+    await handleLetterboxdCommand(env, message, {
+      send,
+      fetch: deps.fetch,
+      now: deps.now,
+      waitUntil: deps.waitUntil,
+      sleep: deps.sleep,
+    });
+    return;
   } else if (cmd === "/done") {
     const awaiting = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
     if (!awaiting || awaiting.step !== "links") {
@@ -762,9 +775,12 @@ async function answer(env, update, send, stickerCount, deps = {}) {
       userCardAfterAccept = accepted.userCardAfterAccept;
     }
   } else if (cmd === "/stop") {
-    const pending = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
-    if (pending) await env.BOT_KV.delete(awaitCreateKey(chatId));
-    out = stopReply(Boolean(pending), adminChat);
+    const pendingCreate = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
+    if (pendingCreate) await env.BOT_KV.delete(awaitCreateKey(chatId));
+    const pendingLetterboxd = await clearLetterboxdAwait(env.BOT_KV, chatId);
+    const cleared = Boolean(pendingCreate || pendingLetterboxd);
+    const kind = pendingLetterboxd && !pendingCreate ? "letterboxd" : "create";
+    out = stopReply(cleared, adminChat, kind);
   } else if (cmd === "/queue") {
     if (!isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID)) {
       out = "Эта команда только для администратора.";
@@ -858,7 +874,21 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     return;
   } else if (cmd) {
     return;
+  } else if (document) {
+    const handled = await handleLetterboxdDocument(env, message, {
+      send,
+      fetch: deps.fetch,
+      now: deps.now,
+      waitUntil: deps.waitUntil,
+      sleep: deps.sleep,
+    });
+    if (!handled) return;
+    return;
   } else {
+    const letterboxdAwaiting = decodeAwaitLetterboxd(await env.BOT_KV.get(awaitLetterboxdKey(chatId)));
+    if (letterboxdAwaiting) {
+      out = letterboxdNeedZipText();
+    } else {
     const admin = isAdminChat(chatId, env.LOGIN_CHAT_IDS || ADMIN_CHAT_ID);
     const awaiting = decodeAwaitCreate(await env.BOT_KV.get(awaitCreateKey(chatId)));
     if (awaiting && awaiting.step === "name") {
@@ -954,6 +984,7 @@ async function answer(env, update, send, stickerCount, deps = {}) {
           userCardAfterAccept = accepted.userCardAfterAccept;
         }
       }
+    }
     }
   }
   if (out) {
