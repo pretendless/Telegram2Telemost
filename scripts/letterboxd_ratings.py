@@ -1,16 +1,16 @@
-"""Latest Letterboxd Rating per unique film (rewatch-safe averages).
+"""Unique-film Letterboxd ratings helpers.
 
 Identity: **Name + Year** (not diary Letterboxd URI — those point at diary
 entries, so each rewatch has a distinct URI and would inflate rated counts).
 
-Among diary rows for a film, keep the latest Watched Date that has a
-non-empty Rating («последняя оценка»). Watch-count metrics should still
-use the full diary; only mean ratings and rating tops use this frame.
+Primary rating source for averages / «выше оценка» is **ratings.csv**
+(via letterboxd_export.merged_film_ratings). `latest_rated_per_film` is the
+diary fallback when a film is rated only in the diary.
 
-For diary ∪ watched catalog ratings, use letterboxd_export.latest_rated_union.
+Watch-count metrics still use the full diary / catalog rows.
 
 «Выше оценка» tops require strictly more than MIN_RATED_FOR_TOP **unique**
-rated films (after this dedupe), never raw diary rating rows.
+rated films (after merge + Name+Year dedupe), never raw diary rating rows.
 """
 
 from __future__ import annotations
