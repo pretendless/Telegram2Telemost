@@ -42,6 +42,7 @@ from letterboxd_palette import (  # noqa: E402
     style_axes,
     watch_year_palette,
 )
+from letterboxd_ratings import latest_rated_per_film  # noqa: E402
 
 apply_dark_chart_theme()
 
@@ -407,43 +408,69 @@ def _paired_ranks(stats, min_count, limit_count=8, limit_rating=8):
     return by_count, by_rating
 
 
+def _cache_key(row):
+    return f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
+
+
 def aggregate_person_stats(diary, cache):
-    """Watch-count / avg-rating aggregates for countries, directors, cast, langs, companies."""
+    """Watch counts from every diary row; rating avgs from latest rating per film."""
     countries = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     directors = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     actors = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     languages = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     companies = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
 
-    def bump(bucket, name, rating):
+    def bump_count(bucket, name):
         if not name:
             return
-        st = bucket[name]
-        st["count"] += 1
-        if rating is not None and not (isinstance(rating, float) and np.isnan(rating)):
-            try:
-                r = float(rating)
-            except (TypeError, ValueError):
-                return
-            if r > 0:
-                st["rating_sum"] += r
-                st["rated"] += 1
+        bucket[name]["count"] += 1
 
-    for _, row in diary.iterrows():
-        key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
-        meta = cache.get(key) or {}
-        rating = row.get("Rating")
+    def bump_rating(bucket, name, rating):
+        if not name:
+            return
+        if rating is None or (isinstance(rating, float) and np.isnan(rating)):
+            return
+        try:
+            r = float(rating)
+        except (TypeError, ValueError):
+            return
+        if r <= 0:
+            return
+        st = bucket[name]
+        st["rating_sum"] += r
+        st["rated"] += 1
+
+    def apply_meta(buckets_fn, row, meta):
         for c in meta.get("countries") or []:
-            bump(countries, c, rating)
+            buckets_fn(countries, c, row)
         for d in meta.get("directors") or []:
-            bump(directors, d, rating)
+            buckets_fn(directors, d, row)
         for a in meta.get("cast") or []:
-            bump(actors, a, rating)
+            buckets_fn(actors, a, row)
         for co in meta.get("companies") or []:
-            bump(companies, co, rating)
+            buckets_fn(companies, co, row)
         lang = (meta.get("original_language") or "").strip()
         if lang:
-            bump(languages, lang, rating)
+            buckets_fn(languages, lang, row)
+
+    # Watch counts: every diary viewing.
+    for _, row in diary.iterrows():
+        meta = cache.get(_cache_key(row)) or {}
+
+        def count_only(bucket, name, _row):
+            bump_count(bucket, name)
+
+        apply_meta(count_only, row, meta)
+
+    # Ratings: one latest rated entry per film.
+    for _, row in latest_rated_per_film(diary).iterrows():
+        meta = cache.get(_cache_key(row)) or {}
+        rating = row.get("Rating")
+
+        def rating_only(bucket, name, _row):
+            bump_rating(bucket, name, rating)
+
+        apply_meta(rating_only, row, meta)
 
     countries_c, countries_r = _paired_ranks(countries, min_count=1, limit_count=10, limit_rating=8)
     directors_c, directors_r = _paired_ranks(
@@ -473,28 +500,29 @@ def aggregate_person_stats(diary, cache):
 
 
 def rank_genres(diary, limit_count=8, limit_rating=8):
-    """Genre tops by watch hits and by avg rating (rated > MIN_RATED_FOR_TOP)."""
+    """Genre tops: watch hits from all rows; avg from latest rating per film."""
     stats = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     for _, row in diary.iterrows():
-        genres = row.get("Genre list") or []
+        for g in row.get("Genre list") or []:
+            if g:
+                stats[g]["count"] += 1
+    for _, row in latest_rated_per_film(diary).iterrows():
         rating = row.get("Rating")
-        for g in genres:
+        try:
+            r = float(rating)
+        except (TypeError, ValueError):
+            continue
+        if not (r > 0):
+            continue
+        for g in row.get("Genre list") or []:
             if not g:
                 continue
             st = stats[g]
-            st["count"] += 1
-            if rating is not None and not (isinstance(rating, float) and np.isnan(rating)):
-                try:
-                    r = float(rating)
-                except (TypeError, ValueError):
-                    continue
-                if r > 0:
-                    st["rating_sum"] += r
-                    st["rated"] += 1
+            st["rating_sum"] += r
+            st["rated"] += 1
     by_count, by_rating = _paired_ranks(
         stats, min_count=1, limit_count=limit_count, limit_rating=limit_rating
     )
-    # Preserve pct on count list for HTML.
     total_hits = sum(int(st["count"]) for st in stats.values()) or 1
     for row in by_count:
         row["pct"] = round(100.0 * row["count"] / total_hits, 1)
@@ -666,25 +694,25 @@ def main():
     save_dark_figure(fig, "genre_counts_by_viewing_year.png")
     plt.close(fig)
 
-    # 2) Mean personal rating per genre (rating is counted once per diary viewing)
-    rated = diary[diary["Rating"].notna()]
+    # 2) Mean personal rating per genre (latest rating per film)
+    rated = latest_rated_per_film(diary)
     rows = []
     for genre in sorted(set(g for gs in diary["Genre list"] for g in gs)):
         vals = rated[rated["Genre list"].apply(lambda gs: genre in gs)]["Rating"]
         if len(vals) >= 5:
             rows.append((genre, float(vals.mean()), int(len(vals))))
-    avg = pd.DataFrame(rows, columns=["Genre", "Average rating", "Rated viewings"])
+    avg = pd.DataFrame(rows, columns=["Genre", "Average rating", "Rated films"])
     avg = avg.sort_values("Average rating")
     fig, ax = plt.subplots(figsize=(10, max(5, len(avg) * 0.32)))
     if len(avg):
         bars = ax.barh(avg["Genre"], avg["Average rating"], color=plt.cm.turbo(np.linspace(0.05, 0.95, len(avg))))
         ax.set_xlim(0, 5); ax.set_xlabel("Средняя личная оценка (из 5)")
-        ax.set_title("Средняя оценка по жанрам (минимум 5 оценённых просмотров)")
+        ax.set_title("Средняя оценка по жанрам (минимум 5 оценённых фильмов)")
         for bar, (_, r) in zip(bars, avg.iterrows()):
             ax.text(
                 r["Average rating"] + 0.04,
                 bar.get_y() + bar.get_height() / 2,
-                f'{r["Average rating"]:.2f}  (n={int(r["Rated viewings"])})',
+                f'{r["Average rating"]:.2f}  (n={int(r["Rated films"])})',
                 va="center",
                 fontsize=8,
                 color=FG,

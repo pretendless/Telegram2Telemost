@@ -156,7 +156,7 @@ export function buildCalendarReportHtml(summary) {
     ? s.top_rated_release_years.slice(0, 10)
     : [];
   if (ratedYears.length) {
-    lines.push("<b>Годы выхода — выше оценка</b> <i>(больше 3 оценок)</i>");
+    lines.push("<b>Годы выхода — выше оценка</b> <i>(больше 3 оценённых фильмов)</i>");
     for (const row of ratedYears) {
       lines.push(
         `• <b>${escapeHtml(row.year)}</b> — ср. <b>${escapeHtml(fmtRating(row.avg))}</b> (n=${escapeHtml(fmtNum(row.rated))})`,

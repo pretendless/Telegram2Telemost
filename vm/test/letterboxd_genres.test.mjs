@@ -110,7 +110,7 @@ test("buildCalendarReportHtml uses bold numbers and HTML", () => {
   assert.match(html, /<b>100<\/b>/);
   assert.match(html, /Heat &amp; Dust/);
   assert.match(html, /Годы выхода — выше оценка/);
-  assert.match(html, /больше 3 оценок/);
+  assert.match(html, /больше 3 оценённых фильмов/);
   assert.match(html, /<b>1999<\/b>/);
   assert.match(html, /Годы выхода — больше просмотров/);
   assert.doesNotMatch(html, /parse_mode/);
