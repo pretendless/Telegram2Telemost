@@ -459,55 +459,54 @@ def chart_average_rating_by_year(df: pd.DataFrame, path: Path) -> bool:
 
 
 def chart_average_rating_by_release_decade(df: pd.DataFrame, path: Path) -> bool:
-    """Rated views by release decade, stacked by watch year; avg rating labeled on top."""
+    """Mean Letterboxd Rating per film release decade (rated rows only).
+
+    Watch-count stacks by decade live in extra_stats_decade_rating.png — do not
+    duplicate that metric here.
+    """
     work = df[df["Year"].notna() & df["Rating"].notna()].copy()
     if work.empty:
         return False
     work["decade"] = work["Year"].map(release_decade_label)
-    work["watch_year"] = work["Watched Date"].dt.year.astype(int)
     work = work[work["decade"].notna()]
     if work.empty:
         return False
 
-    decades = sorted(
-        {d for d in work["decade"].unique().tolist()},
-        key=lambda label: int(str(label).rstrip("s")),
-    )
-    all_years = sorted(df["Watched Date"].dt.year.dropna().astype(int).unique().tolist())
-    years = sorted(work["watch_year"].unique().tolist())
-    colors = year_colors(years, palette_years=all_years)
-    year_index = {y: i for i, y in enumerate(years)}
-    decade_index = {d: i for i, d in enumerate(decades)}
-    matrix = np.zeros((len(years), len(decades)), dtype=float)
-    for _, row in work.iterrows():
-        matrix[year_index[int(row["watch_year"])], decade_index[row["decade"]]] += 1
+    grouped = work.groupby("decade")["Rating"].agg(["mean", "count"])
+    grouped = grouped[grouped["count"] >= 1].copy()
+    if grouped.empty:
+        return False
+    grouped["_sort"] = grouped.index.map(lambda label: int(str(label).rstrip("s")))
+    grouped = grouped.sort_values("_sort")
 
-    avg_by_decade = work.groupby("decade")["Rating"].agg(["mean", "count"])
-    totals = matrix.sum(axis=0)
+    labels = grouped.index.tolist()
+    values = grouped["mean"].astype(float).tolist()
+    counts = grouped["count"].astype(int).tolist()
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    stacked_counts(ax, decades, years, matrix, colors, "Оценённые просмотры")
-    ax.set_title("Оценки по десятилетию выхода — цвет = год просмотра")
+    x = np.arange(len(labels))
+    # Single accent on dark theme; stacking by watch year does not apply to means.
+    bars = ax.bar(x, values, color="#54A24B", width=0.8)
+    ax.set_ylim(0, 5.2)
+    ax.set_title("Средняя оценка по десятилетию выхода")
     ax.set_xlabel("Десятилетие выхода")
-    ymax = float(totals.max()) if len(totals) else 1.0
-    ax.set_ylim(0, ymax * 1.22)
-    for di, decade in enumerate(decades):
-        if decade not in avg_by_decade.index:
-            continue
-        avg = float(avg_by_decade.loc[decade, "mean"])
-        n = int(avg_by_decade.loc[decade, "count"])
-        top = float(totals[di])
+    ax.set_ylabel("Средняя оценка (из 5)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    style_axes(ax)
+    for bar, value, count in zip(bars, values, counts):
         ax.text(
-            di,
-            top + ymax * 0.03,
-            f"ср. {avg:.2f}\n(n={n})",
+            bar.get_x() + bar.get_width() / 2,
+            value + 0.08,
+            f"{value:.2f}\n(n={count})",
             ha="center",
             va="bottom",
             fontsize=7,
             color=FG,
         )
-    add_watch_year_legend(fig, years, colors, title="Год просмотра")
-    fig.tight_layout(rect=[0, 0, 0.9, 1])
+    fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
