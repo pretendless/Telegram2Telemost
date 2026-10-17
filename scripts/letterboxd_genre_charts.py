@@ -7,6 +7,9 @@ Usage:
   2) Set TMDB_BEARER_TOKEN in your environment (TMDB Settings -> API).
   3) Run: python letterboxd_genre_charts.py path/to/letterboxd-export.zip
 
+Optional Telegram progress (Actions /letterboxd): TG2TMBOT_TOKEN + CHAT_ID.
+Edits one message «Жанры: N/total…» during enrichment; does not print tokens.
+
 Creates:
   genre_counts_by_viewing_year.png
   average_rating_by_genre.png
@@ -27,6 +30,134 @@ import numpy as np
 BASE = "https://api.themoviedb.org/3"
 CACHE_PATH = Path("tmdb_genre_cache.json")
 TOKEN = os.getenv("TMDB_BEARER_TOKEN", "").strip()
+# Optional Telegram progress (Actions /letterboxd). Never log token values.
+TG_TOKEN = (os.getenv("TG2TMBOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+TG_CHAT = (os.getenv("CHAT_ID") or os.getenv("LETTERBOXD_CHAT_ID") or "").strip()
+PROGRESS_EVERY = max(1, int(os.getenv("LETTERBOXD_PROGRESS_EVERY", "25") or "25"))
+PROGRESS_MIN_SEC = max(5.0, float(os.getenv("LETTERBOXD_PROGRESS_MIN_SEC", "45") or "45"))
+
+
+def format_genre_progress(done, total):
+    """User-facing progress: unique titles processed so far / total unique titles."""
+    d = max(0, int(done))
+    t = max(0, int(total))
+    return f"Жанры: {d}/{t}…"
+
+
+class TelegramProgress:
+    """One progress message in the requesting chat; prefer editMessageText."""
+
+    def __init__(self, token, chat_id):
+        self.token = (token or "").strip()
+        self.chat_id = str(chat_id or "").strip()
+        self.message_id = None
+        self.last_sent_at = 0.0
+        self.last_text = ""
+        self.enabled = bool(self.token and self.chat_id)
+
+    def _call(self, method, payload):
+        if not self.enabled:
+            return None
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{self.token}/{method}",
+            data=body,
+            headers={
+                "content-type": "application/json",
+                "User-Agent": "LetterboxdGenreCharts/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            return None
+
+    def update(self, done, total, force=False):
+        if not self.enabled:
+            return
+        text = format_genre_progress(done, total)
+        now = time.time()
+        if not force and text == self.last_text:
+            return
+        if not force and self.message_id is not None:
+            elapsed = now - self.last_sent_at
+            on_step = (int(done) % PROGRESS_EVERY == 0) or (int(total) > 0 and int(done) >= int(total))
+            on_timer = elapsed >= PROGRESS_MIN_SEC
+            if not on_step and not on_timer:
+                return
+            # Debounce rapid cache-only steps that still hit PROGRESS_EVERY.
+            if on_step and not on_timer and elapsed < 5:
+                return
+        if self.message_id is None:
+            data = self._call(
+                "sendMessage",
+                {
+                    "chat_id": self.chat_id,
+                    "text": text,
+                    "link_preview_options": {"is_disabled": True},
+                },
+            )
+            if data and data.get("ok") and data.get("result"):
+                self.message_id = data["result"].get("message_id")
+                self.last_sent_at = now
+                self.last_text = text
+            return
+        data = self._call(
+            "editMessageText",
+            {
+                "chat_id": self.chat_id,
+                "message_id": self.message_id,
+                "text": text,
+                "link_preview_options": {"is_disabled": True},
+            },
+        )
+        if data and data.get("ok"):
+            self.last_sent_at = now
+            self.last_text = text
+        elif data and not data.get("ok"):
+            # Message unchanged / flood — ignore; fall back to a new message only if edit is gone.
+            desc = str((data or {}).get("description") or "")
+            if "message is not modified" in desc.lower():
+                self.last_text = text
+                self.last_sent_at = now
+
+    def finish(self, text):
+        if not self.enabled:
+            return
+        final = str(text or "").strip()
+        if not final:
+            return
+        if self.message_id is None:
+            self._call(
+                "sendMessage",
+                {
+                    "chat_id": self.chat_id,
+                    "text": final,
+                    "link_preview_options": {"is_disabled": True},
+                },
+            )
+            return
+        data = self._call(
+            "editMessageText",
+            {
+                "chat_id": self.chat_id,
+                "message_id": self.message_id,
+                "text": final,
+                "link_preview_options": {"is_disabled": True},
+            },
+        )
+        if not (data and data.get("ok")):
+            self._call(
+                "sendMessage",
+                {
+                    "chat_id": self.chat_id,
+                    "text": final,
+                    "link_preview_options": {"is_disabled": True},
+                },
+            )
+
 
 def request_json(url):
     req = urllib.request.Request(url, headers={
@@ -122,7 +253,11 @@ def main():
     cache = json.loads(CACHE_PATH.read_text(encoding="utf-8")) if CACHE_PATH.exists() else {}
     films = diary[["Name", "Year"]].drop_duplicates().reset_index(drop=True)
     total = len(films)
+    progress = TelegramProgress(TG_TOKEN, TG_CHAT)
     print(f"Обогащаю жанрами {total} уникальных сочетаний «название + год»…")
+    progress.update(0, total, force=True)
+    done = 0
+    resolved = 0
     for i, row in films.iterrows():
         name, year = row["Name"], row["Year"]
         if not name:
@@ -133,10 +268,19 @@ def main():
                 find_tmdb(name, year, cache)
             except Exception as e:
                 print(f"Ошибка для {name} ({year}): {e}")
-            if (i + 1) % 25 == 0:
-                save_cache(cache)
-                print(f"  {i+1}/{total}")
+                if key not in cache:
+                    cache[key] = {"tmdb_id": None, "genres": []}
+        done += 1
+        entry = cache.get(key) or {}
+        if entry.get("genres"):
+            resolved += 1
+        # Progress: unique titles looked up so far / total (Telegram edits one message).
+        progress.update(done, total, force=(done >= total))
+        if done % 25 == 0:
+            save_cache(cache)
+            print(f"  {done}/{total} (с жанрами {resolved})")
     save_cache(cache)
+    progress.update(done, total, force=True)
 
     def get_meta(row):
         key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
@@ -149,6 +293,8 @@ def main():
 
     unmatched = diary[diary["Genre list"].apply(len) == 0][["Name", "Year"]].drop_duplicates()
     unmatched.to_csv("tmdb_unmatched.csv", index=False)
+
+    progress.finish(f"Жанры: {resolved}/{total}. Строю графики…")
 
     # Plot defaults
     plt.rcParams.update({"figure.dpi": 150, "savefig.dpi": 180, "font.size": 9})
@@ -249,6 +395,7 @@ def main():
             print(" -", f)
     print(f"Фильмов/сочетаний без найденных жанров: {len(unmatched)}")
     print("TMDB data attribution: https://www.themoviedb.org/")
+    progress.finish("Готово, шлю графики.")
 
 if __name__ == "__main__":
     main()
