@@ -222,7 +222,7 @@ function appendPairedTops(lines, title, countRows, ratingRows, opts = {}) {
     }
   }
   if (ratingList.length) {
-    lines.push(`<b>${title} — выше оценка</b> <i>(больше 3 оценок)</i>`);
+    lines.push(`<b>${title} — выше оценка</b> <i>(больше 3 оценённых фильмов)</i>`);
     for (const row of ratingList) {
       lines.push(formatNamedRankLine(row, { language: !!opts.language, byRating: true }));
     }

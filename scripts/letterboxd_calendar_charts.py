@@ -44,15 +44,17 @@ from letterboxd_palette import (  # noqa: E402
     style_axes,
     watch_year_palette,
 )
-from letterboxd_ratings import latest_rated_per_film  # noqa: E402
+from letterboxd_ratings import (  # noqa: E402
+    MIN_RATED_FOR_TOP,
+    latest_rated_per_film,
+    passes_rated_threshold,
+)
 
 apply_dark_chart_theme()
 
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
 RATING_BINS = [round(x * 0.5, 1) for x in range(1, 11)]  # 0.5 … 5.0
-# Rating tops require strictly more than this many non-empty Letterboxd ratings.
-MIN_RATED_FOR_TOP = 3
 
 
 def build_diary_summary(
@@ -147,12 +149,13 @@ def build_diary_summary(
         if not latest_release.empty and "Year" in latest_release.columns:
             latest_release = latest_release[latest_release["Year"].notna()].copy()
             latest_release["release_year"] = latest_release["Year"].astype(int)
+            # rated = unique films after latest_rated_union (Name+Year), not diary rows.
             rated_by_year = latest_release.groupby("release_year")["Rating"].agg(
                 avg="mean", rated="count"
             )
             for year, row in rated_by_year.iterrows():
                 rated_n = int(row["rated"])
-                if rated_n <= MIN_RATED_FOR_TOP:
+                if not passes_rated_threshold(rated_n):
                     continue
                 top_rated_release_years.append(
                     {

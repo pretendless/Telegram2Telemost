@@ -46,6 +46,11 @@ from letterboxd_palette import (  # noqa: E402
     style_axes,
     watch_year_palette,
 )
+from letterboxd_ratings import (  # noqa: E402
+    MIN_RATED_FOR_TOP,
+    passes_rated_threshold,
+)
+
 apply_dark_chart_theme()
 
 BASE = "https://api.themoviedb.org/3"
@@ -60,8 +65,6 @@ PROGRESS_MIN_SEC = max(5.0, float(os.getenv("LETTERBOXD_PROGRESS_MIN_SEC", "45")
 MIN_PERSON_COUNT = max(2, int(os.getenv("LETTERBOXD_MIN_PERSON_COUNT", "3") or "3"))
 MIN_COMPANY_COUNT = max(2, int(os.getenv("LETTERBOXD_MIN_COMPANY_COUNT", "3") or "3"))
 CAST_TOP_BILLED = max(1, int(os.getenv("LETTERBOXD_CAST_TOP", "5") or "5"))
-# Rating tops: strictly more than this many non-empty Letterboxd ratings.
-MIN_RATED_FOR_TOP = 3
 
 
 def format_genre_progress(done, total):
@@ -353,14 +356,15 @@ def _rank_named(stats, min_count=1, limit=8, by_avg=False, min_rated=None):
     """stats: name -> {count, rating_sum, rated}.
 
     Count tops use min_count on watch hits.
-    Rating tops require rated > min_rated (strict); omit entities that fail.
+    Rating tops require unique rated films > min_rated (strict); omit failures.
+    `rated` must be unique-film count after latest_rated_* dedupe, not diary rows.
     """
     rows = []
     for name, st in stats.items():
         count = int(st.get("count") or 0)
         rated = int(st.get("rated") or 0)
         if by_avg:
-            if min_rated is None or rated <= min_rated:
+            if not passes_rated_threshold(rated, min_rated=min_rated):
                 continue
         elif count < min_count:
             continue
@@ -378,7 +382,7 @@ def _rank_named(stats, min_count=1, limit=8, by_avg=False, min_rated=None):
 
 
 def _paired_ranks(stats, min_count, limit_count=8, limit_rating=8):
-    """Count top + rating top (rated > MIN_RATED_FOR_TOP only)."""
+    """Count top + rating top (unique rated films > MIN_RATED_FOR_TOP only)."""
     by_count = _rank_named(stats, min_count=min_count, limit=limit_count, by_avg=False)
     by_rating = _rank_named(
         stats,
