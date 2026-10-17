@@ -40,6 +40,7 @@ from letterboxd_palette import (  # noqa: E402
     style_axes,
     watch_year_palette,
 )
+from letterboxd_ratings import latest_rated_per_film  # noqa: E402
 
 apply_dark_chart_theme()
 
@@ -110,9 +111,11 @@ def build_diary_summary(df: pd.DataFrame) -> dict:
     favorite_month = MONTHS[fav_m_i - 1] if fav_m_i is not None else None
     favorite_month_count = int(month_counts.iloc[0]) if len(month_counts) else 0
 
-    rated = df["Rating"].dropna()
+    # Averages / mode: one rating per film (latest rated diary entry).
+    latest_rated = latest_rated_per_film(df)
+    rated = latest_rated["Rating"] if not latest_rated.empty else pd.Series(dtype=float)
     rated_count = int(len(rated))
-    rated_share = round(rated_count / entries, 4) if entries else 0.0
+    rated_share = round(rated_count / unique_films, 4) if unique_films else 0.0
     rating_avg = round(float(rated.mean()), 2) if rated_count else None
     rating_mode = None
     rating_mode_count = 0
@@ -153,27 +156,30 @@ def build_diary_summary(df: pd.DataFrame) -> dict:
             .groupby("release_year")["Name"]
             .nunique()
         )
-        rated_by_year = (
-            with_release[with_release["Rating"].notna()]
-            .groupby("release_year")["Rating"]
-            .agg(avg="mean", rated="count")
-        )
-        # Rating top: only years with rated count > 3 (non-empty Letterboxd Rating).
-        for year, row in rated_by_year.iterrows():
-            rated_n = int(row["rated"])
-            if rated_n <= MIN_RATED_FOR_TOP:
-                continue
-            top_rated_release_years.append(
-                {
-                    "year": int(year),
-                    "avg": round(float(row["avg"]), 2),
-                    "films": int(film_counts.get(year, 0)),
-                    "rated": rated_n,
-                }
+        # Rating top: latest rating per film, then mean by release year.
+        latest_release = latest_rated_per_film(with_release)
+        if not latest_release.empty and "Year" in latest_release.columns:
+            latest_release = latest_release[latest_release["Year"].notna()].copy()
+            latest_release["release_year"] = latest_release["Year"].astype(int)
+            rated_by_year = latest_release.groupby("release_year")["Rating"].agg(
+                avg="mean", rated="count"
             )
-        top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["rated"], -r["year"]))
-        top_rated_release_years = top_rated_release_years[:10]
+            for year, row in rated_by_year.iterrows():
+                rated_n = int(row["rated"])
+                if rated_n <= MIN_RATED_FOR_TOP:
+                    continue
+                top_rated_release_years.append(
+                    {
+                        "year": int(year),
+                        "avg": round(float(row["avg"]), 2),
+                        "films": int(film_counts.get(year, 0)),
+                        "rated": rated_n,
+                    }
+                )
+            top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["rated"], -r["year"]))
+            top_rated_release_years = top_rated_release_years[:10]
 
+        # Watch counts still use every diary row.
         watch_by_release = with_release.groupby("release_year").size().sort_values(ascending=False)
         for year, count in watch_by_release.head(10).items():
             top_release_years_by_count.append({"year": int(year), "count": int(count)})
@@ -412,10 +418,11 @@ def chart_decade_rating(df: pd.DataFrame, path: Path) -> None:
 
 
 def chart_average_rating_by_year(df: pd.DataFrame, path: Path) -> bool:
-    """Mean Letterboxd rating per watch year. Marker colors follow watch-year palette."""
-    rated = df[df["Rating"].notna()].copy()
+    """Mean Letterboxd rating per watch year (latest rating per film)."""
+    rated = latest_rated_per_film(df)
     if rated.empty:
         return False
+    rated = rated.copy()
     rated["watch_year"] = rated["Watched Date"].dt.year.astype(int)
     grouped = rated.groupby("watch_year")["Rating"].agg(["mean", "count"]).sort_index()
     grouped = grouped[grouped["count"] >= 1]
@@ -459,12 +466,15 @@ def chart_average_rating_by_year(df: pd.DataFrame, path: Path) -> bool:
 
 
 def chart_average_rating_by_release_decade(df: pd.DataFrame, path: Path) -> bool:
-    """Mean Letterboxd Rating per film release decade (rated rows only).
+    """Mean Letterboxd Rating per film release decade (latest rating per film).
 
     Watch-count stacks by decade live in extra_stats_decade_rating.png — do not
     duplicate that metric here.
     """
-    work = df[df["Year"].notna() & df["Rating"].notna()].copy()
+    work = latest_rated_per_film(df)
+    if work.empty:
+        return False
+    work = work[work["Year"].notna()].copy()
     if work.empty:
         return False
     work["decade"] = work["Year"].map(release_decade_label)
