@@ -161,5 +161,5 @@ test("buildGenreReportMessages splits genres and people/countries", () => {
   assert.doesNotMatch(msgs[1], /Актёры — выше оценка/);
   assert.match(msgs[1], /английский/);
   assert.match(msgs[1], /Студии — выше оценка/);
-  assert.match(msgs[1], /больше 3 оценок/);
+  assert.match(msgs[1], /больше 3 оценённых фильмов/);
 });

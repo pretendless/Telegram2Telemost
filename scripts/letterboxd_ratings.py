@@ -1,22 +1,32 @@
 """Latest Letterboxd Rating per unique film (rewatch-safe averages).
 
-Identity (within diary): Letterboxd URI when present, else Name + Year.
+Identity: **Name + Year** (not diary Letterboxd URI — those point at diary
+entries, so each rewatch has a distinct URI and would inflate rated counts).
+
 Among diary rows for a film, keep the latest Watched Date that has a
 non-empty Rating («последняя оценка»). Watch-count metrics should still
 use the full diary; only mean ratings and rating tops use this frame.
 
-For diary ∪ watched catalog ratings (watched-only films, Name+Year match
-across files), use letterboxd_export.latest_rated_union — diary entry URIs
-do not match watched film URIs.
+For diary ∪ watched catalog ratings, use letterboxd_export.latest_rated_union.
+
+«Выше оценка» tops require strictly more than MIN_RATED_FOR_TOP **unique**
+rated films (after this dedupe), never raw diary rating rows.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
+# Rating tops («выше оценка»): entity needs rated unique films > this value.
+MIN_RATED_FOR_TOP = 3
+
 
 def film_identity_series(df: pd.DataFrame) -> pd.Series:
-    """Stable per-row film key: uri:… or name|||year."""
+    """Stable per-row film key: Name|||Year.
+
+    Diary export URIs are per-entry and must not be used for unique-film
+    identity (5 rated rewatches of one title would become 5 «films»).
+    """
     names = (
         df["Name"].fillna("").astype(str).str.strip()
         if "Name" in df.columns
@@ -24,17 +34,20 @@ def film_identity_series(df: pd.DataFrame) -> pd.Series:
     )
     years = df["Year"] if "Year" in df.columns else pd.Series([pd.NA] * len(df), index=df.index)
     year_part = years.map(lambda y: str(int(y)) if pd.notna(y) else "")
-    name_key = names + "|||" + year_part
+    return names + "|||" + year_part
 
-    uri_col = next(
-        (c for c in ("Letterboxd URI", "URI", "Letterboxd uri") if c in df.columns),
-        None,
-    )
-    if uri_col is None:
-        return name_key
 
-    uris = df[uri_col].fillna("").astype(str).str.strip()
-    return uris.map(lambda u: f"uri:{u}" if u else None).fillna(name_key)
+def passes_rated_threshold(rated_count: int, min_rated: int | None = None) -> bool:
+    """True when unique rated films strictly exceed the «выше оценка» gate.
+
+    min_rated defaults to MIN_RATED_FOR_TOP (need rated > 3 unique films).
+    """
+    threshold = MIN_RATED_FOR_TOP if min_rated is None else int(min_rated)
+    try:
+        n = int(rated_count)
+    except (TypeError, ValueError):
+        return False
+    return n > threshold
 
 
 def latest_rated_per_film(df: pd.DataFrame) -> pd.DataFrame:
@@ -51,7 +64,6 @@ def latest_rated_per_film(df: pd.DataFrame) -> pd.DataFrame:
     if work.empty:
         return work
     if "Watched Date" not in work.columns:
-        # Should not happen for diary.csv; keep first occurrence.
         work["_film_key"] = film_identity_series(work)
         return work.groupby("_film_key", dropna=False, as_index=False).head(1).drop(columns=["_film_key"])
 

@@ -159,7 +159,8 @@ def latest_rated_union(diary: pd.DataFrame, watched_only: pd.DataFrame) -> pd.Da
     """Latest diary rating per film; watched-only Ratings fill films absent from diary.
 
     Films that appear in the diary (even unrated) do not take a watched Rating —
-    diary preference. Within diary, #113 latest-rated-by-Watched-Date still applies.
+    diary preference. Within diary, latest-rated-by-Watched-Date uses Name+Year
+    identity (not diary entry URIs).
     """
     from_diary = latest_rated_per_film(diary)
 
