@@ -1,4 +1,4 @@
-// GitHub Actions: download Letterboxd ZIP, send light charts first, then TMDB genres with progress.
+// GitHub Actions: download Letterboxd ZIP, rich HTML report + photos, then TMDB genres.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -16,7 +16,24 @@ const CALENDAR_PNGS = [
   "views_by_weekday_month.png",
   "views_by_year.png",
   "extra_stats_decade_rating.png",
+  "average_rating_by_year.png",
+  "top_rewatches.png",
 ];
+
+const CALENDAR_CAPTIONS = {
+  "views_by_weekday_month.png": "Дни недели и месяцы — стек по годам просмотра",
+  "views_by_year.png": "Просмотры по годам",
+  "extra_stats_decade_rating.png": "Десятилетия выхода и оценки",
+  "average_rating_by_year.png": "Средняя оценка по годам",
+  "top_rewatches.png": "Чаще всего в дневнике",
+};
+
+const GENRE_CAPTIONS = {
+  "genre_counts_by_viewing_year.png": "Жанры по годам просмотра",
+  "average_rating_by_genre.png": "Средняя оценка по жанрам",
+  "genre_by_release_decade.png": "Жанры по десятилетию выхода",
+  "genre_share_by_viewing_year.png": "Доля жанров по годам",
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GENRE_SCRIPT = join(__dirname, "letterboxd_genre_charts.py");
@@ -28,6 +45,124 @@ function env(name) {
 
 function telegramApi(token, method) {
   return `https://api.telegram.org/bot${token}/${method}`;
+}
+
+/** Escape user/diary strings for Telegram HTML parse_mode. */
+export function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function readJsonFile(path) {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function fmtPct(share) {
+  const n = Number(share);
+  if (!Number.isFinite(n)) return "—";
+  return `${Math.round(n * 100)}%`;
+}
+
+function fmtNum(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return String(Number(n));
+}
+
+function fmtRating(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  const v = Number(n);
+  return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, "") || String(v);
+}
+
+/**
+ * Calendar-section HTML report (parse_mode=HTML). Prefer HTML over MarkdownV2:
+ * film titles only need &lt; &gt; &amp; escapes.
+ */
+export function buildCalendarReportHtml(summary) {
+  const s = summary && typeof summary === "object" ? summary : {};
+  const entries = fmtNum(s.entries);
+  const films = fmtNum(s.unique_films);
+  let years = "—";
+  if (s.year_min != null && s.year_max != null) {
+    years = s.year_min === s.year_max ? String(s.year_min) : `${s.year_min}–${s.year_max}`;
+  }
+  const lines = [
+    "<b>Letterboxd</b>",
+    `Дневник: <b>${escapeHtml(entries)}</b> записей · <b>${escapeHtml(films)}</b> фильмов · ${escapeHtml(years)}`,
+  ];
+
+  if (s.peak_year != null) {
+    lines.push(
+      `Пик: <b>${escapeHtml(s.peak_year)}</b> — <b>${escapeHtml(fmtNum(s.peak_year_count))}</b> просмотров`,
+    );
+  }
+  if (s.favorite_weekday) {
+    lines.push(
+      `День: <b>${escapeHtml(s.favorite_weekday)}</b> (${escapeHtml(fmtNum(s.favorite_weekday_count))})`,
+    );
+  }
+  if (s.favorite_month) {
+    lines.push(
+      `Месяц: <b>${escapeHtml(s.favorite_month)}</b> (${escapeHtml(fmtNum(s.favorite_month_count))})`,
+    );
+  }
+
+  const ratedShare = fmtPct(s.rated_share);
+  if (s.rated_count != null) {
+    let ratingLine = `Оценки: <b>${escapeHtml(fmtNum(s.rated_count))}</b> (${escapeHtml(ratedShare)})`;
+    if (s.rating_avg != null) {
+      ratingLine += ` · средняя <b>${escapeHtml(fmtRating(s.rating_avg))}</b>`;
+    }
+    if (s.rating_mode != null) {
+      ratingLine += ` · чаще <b>${escapeHtml(fmtRating(s.rating_mode))}</b>`;
+    }
+    lines.push(ratingLine);
+  }
+
+  const rewatches = Array.isArray(s.top_rewatches) ? s.top_rewatches.slice(0, 3) : [];
+  if (rewatches.length) {
+    lines.push("<b>Повторы</b>");
+    for (const row of rewatches) {
+      const title = escapeHtml(row.name || "?");
+      const year = row.year != null ? ` (${escapeHtml(row.year)})` : "";
+      lines.push(`• ${title}${year} — <b>${escapeHtml(fmtNum(row.count))}</b>`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/** Genre-section HTML after TMDB enrichment. */
+export function buildGenreReportHtml(summary, unmatchedFallback = 0) {
+  const s = summary && typeof summary === "object" ? summary : {};
+  const unmatched =
+    s.unmatched != null && Number.isFinite(Number(s.unmatched))
+      ? Number(s.unmatched)
+      : Number(unmatchedFallback) || 0;
+  const lines = ["<b>Жанры (TMDB)</b>"];
+  const top = Array.isArray(s.top_genres) ? s.top_genres.slice(0, 6) : [];
+  if (top.length) {
+    for (const g of top) {
+      const name = escapeHtml(g.name || "?");
+      const count = escapeHtml(fmtNum(g.count));
+      const pct =
+        g.pct != null && Number.isFinite(Number(g.pct)) ? ` · ${escapeHtml(String(g.pct))}%` : "";
+      lines.push(`• <b>${name}</b> — ${count}${pct}`);
+    }
+  } else {
+    lines.push("Топ жанров пуст.");
+  }
+  if (unmatched > 0) {
+    lines.push(`Без жанров TMDB: <b>${escapeHtml(String(unmatched))}</b>`);
+  }
+  return lines.join("\n");
 }
 
 export function mapScriptError(stderr, stdout, status) {
@@ -89,21 +224,55 @@ export function calendarReadyText() {
   return "Календарные графики готовы, сейчас жанры…";
 }
 
-async function sendTelegramText(token, chatId, text) {
+async function sendTelegramText(token, chatId, text, parseMode = "") {
+  const payload = {
+    chat_id: chatId,
+    text,
+    link_preview_options: { is_disabled: true },
+  };
+  if (parseMode) payload.parse_mode = parseMode;
   const res = await fetch(telegramApi(token, "sendMessage"), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, link_preview_options: { is_disabled: true } }),
+    body: JSON.stringify(payload),
   });
-  if (!res.ok) console.error("sendMessage", res.status);
+  if (!res.ok) console.error("sendMessage", res.status, parseMode || "plain");
   return res.ok;
+}
+
+async function sendTelegramHtml(token, chatId, html) {
+  return sendTelegramText(token, chatId, html, "HTML");
+}
+
+async function sendTelegramPhoto(token, chatId, filePath, filename, caption = "") {
+  const bytes = readFileSync(filePath);
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  if (caption) {
+    form.set("caption", caption);
+    form.set("parse_mode", "HTML");
+  }
+  form.set("photo", new Blob([bytes], { type: "image/png" }), filename);
+  const res = await fetch(telegramApi(token, "sendPhoto"), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    console.error("sendPhoto", filename, res.status);
+    // Fallback: document keeps full resolution if photo reject (size/dimensions).
+    return sendTelegramDocument(token, chatId, filePath, filename, caption);
+  }
+  return true;
 }
 
 async function sendTelegramDocument(token, chatId, filePath, filename, caption = "") {
   const bytes = readFileSync(filePath);
   const form = new FormData();
   form.set("chat_id", String(chatId));
-  if (caption) form.set("caption", caption);
+  if (caption) {
+    form.set("caption", caption);
+    form.set("parse_mode", "HTML");
+  }
   form.set("document", new Blob([bytes], { type: "image/png" }), filename);
   const res = await fetch(telegramApi(token, "sendDocument"), {
     method: "POST",
@@ -113,13 +282,11 @@ async function sendTelegramDocument(token, chatId, filePath, filename, caption =
   return res.ok;
 }
 
-async function sendPngBatch(token, chatId, workdir, names, firstCaption = "") {
-  let first = true;
+async function sendCaptionedPhotos(token, chatId, workdir, names, captions) {
   let sent = 0;
   for (const name of names) {
-    const caption = first ? firstCaption : "";
-    first = false;
-    const ok = await sendTelegramDocument(token, chatId, join(workdir, name), name, caption);
+    const caption = captions[name] ? `<i>${escapeHtml(captions[name])}</i>` : "";
+    const ok = await sendTelegramPhoto(token, chatId, join(workdir, name), name, caption);
     if (!ok) {
       await sendTelegramText(token, chatId, `Не удалось отправить ${name}.`);
     } else {
@@ -198,7 +365,7 @@ export async function main() {
     throw err;
   }
 
-  // 1) Light charts first (no TMDB) — send immediately.
+  // 1) Light charts first (no TMDB) — summary + photos.
   const calendar = runPython(CALENDAR_SCRIPT, zipPath, workdir);
   if (calendar.stdout) process.stdout.write(calendar.stdout);
   if (calendar.stderr) process.stderr.write(calendar.stderr);
@@ -212,16 +379,12 @@ export async function main() {
     throw new Error(mapped);
   }
 
-  await sendPngBatch(
-    token,
-    chatId,
-    workdir,
-    calendarPngs,
-    `Letterboxd: календарные графики (${calendarPngs.length} PNG).`,
-  );
+  const diarySummary = readJsonFile(join(workdir, "diary_summary.json"));
+  await sendTelegramHtml(token, chatId, buildCalendarReportHtml(diarySummary || {}));
+  await sendCaptionedPhotos(token, chatId, workdir, calendarPngs, CALENDAR_CAPTIONS);
   await sendTelegramText(token, chatId, calendarReadyText());
 
-  // 2) Slow TMDB genre enrichment — script edits one progress message, then we send genre PNGs.
+  // 2) Slow TMDB genre enrichment — script edits one progress message, then genre report + PNGs.
   const genres = runPython(GENRE_SCRIPT, zipPath, workdir);
   if (genres.stdout) process.stdout.write(genres.stdout);
   if (genres.stderr) process.stderr.write(genres.stderr);
@@ -236,11 +399,9 @@ export async function main() {
   }
 
   const unmatched = unmatchedFromWorkdir(workdir, genres.stdout);
-  const genreCaption =
-    unmatched > 0
-      ? `Letterboxd: жанры (${genrePngs.length} PNG). Без жанров TMDB: ${unmatched}.`
-      : `Letterboxd: жанры (${genrePngs.length} PNG).`;
-  await sendPngBatch(token, chatId, workdir, genrePngs, genreCaption);
+  const genreSummary = readJsonFile(join(workdir, "genre_summary.json"));
+  await sendTelegramHtml(token, chatId, buildGenreReportHtml(genreSummary || {}, unmatched));
+  await sendCaptionedPhotos(token, chatId, workdir, genrePngs, GENRE_CAPTIONS);
 
   console.log("calendar pngs", calendarPngs.join(","));
   console.log("genre pngs", genrePngs.join(","));

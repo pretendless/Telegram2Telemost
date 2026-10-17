@@ -9,7 +9,10 @@ import {
   parseLetterboxdCommand,
 } from "../letterboxd_genres.js";
 import {
+  buildCalendarReportHtml,
+  buildGenreReportHtml,
   calendarReadyText,
+  escapeHtml,
   mapScriptError,
   unmatchedFromWorkdir,
 } from "../../scripts/letterboxd_genres_run.mjs";
@@ -74,4 +77,49 @@ test("unmatchedFromWorkdir reads csv", () => {
 test("calendarReadyText announces genre phase", () => {
   assert.match(calendarReadyText(), /Календарные графики готовы/);
   assert.match(calendarReadyText(), /жанры/);
+});
+
+test("escapeHtml for film titles", () => {
+  assert.equal(escapeHtml('A & B <C> "D"'), "A &amp; B &lt;C&gt; \"D\"");
+});
+
+test("buildCalendarReportHtml uses bold numbers and HTML", () => {
+  const html = buildCalendarReportHtml({
+    entries: 100,
+    unique_films: 80,
+    year_min: 2020,
+    year_max: 2024,
+    peak_year: 2023,
+    peak_year_count: 40,
+    favorite_weekday: "Сб",
+    favorite_weekday_count: 20,
+    favorite_month: "Окт",
+    favorite_month_count: 15,
+    rated_count: 70,
+    rated_share: 0.7,
+    rating_avg: 3.75,
+    rating_mode: 4,
+    rating_mode_count: 25,
+    top_rewatches: [{ name: "Heat & Dust", year: 1995, count: 3 }],
+  });
+  assert.match(html, /<b>Letterboxd<\/b>/);
+  assert.match(html, /<b>100<\/b>/);
+  assert.match(html, /Heat &amp; Dust/);
+  assert.doesNotMatch(html, /parse_mode/);
+});
+
+test("buildGenreReportHtml lists top genres", () => {
+  const html = buildGenreReportHtml(
+    {
+      top_genres: [
+        { name: "Drama", count: 50, pct: 20.5 },
+        { name: "Comedy <x>", count: 10, pct: 4.1 },
+      ],
+      unmatched: 2,
+    },
+    9,
+  );
+  assert.match(html, /<b>Жанры \(TMDB\)<\/b>/);
+  assert.match(html, /Comedy &lt;x&gt;/);
+  assert.match(html, /<b>2<\/b>/);
 });

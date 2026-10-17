@@ -387,10 +387,28 @@ def main():
         fig.tight_layout(rect=[0, 0.03, 1, 1])
         fig.savefig("genre_share_by_viewing_year.png", bbox_inches="tight"); plt.close(fig)
 
+    # Compact genre stats for the Telegram HTML report.
+    genre_total_hits = len(all_genres)
+    top_for_report = []
+    for g, c in Counter(all_genres).most_common(8):
+        pct = round(100.0 * c / genre_total_hits, 1) if genre_total_hits else 0.0
+        top_for_report.append({"name": g, "count": int(c), "pct": pct})
+    genre_summary = {
+        "unique_titles": int(total),
+        "resolved": int(resolved),
+        "unmatched": int(len(unmatched)),
+        "top_genres": top_for_report,
+        "genre_hits": int(genre_total_hits),
+    }
+    Path("genre_summary.json").write_text(
+        json.dumps(genre_summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
     print("\nГотово. Созданы файлы:")
     for f in ["genre_counts_by_viewing_year.png", "average_rating_by_genre.png",
               "genre_by_release_decade.png", "genre_share_by_viewing_year.png",
-              "letterboxd_with_genres.csv", "tmdb_unmatched.csv"]:
+              "letterboxd_with_genres.csv", "tmdb_unmatched.csv", "genre_summary.json"]:
         if Path(f).exists():
             print(" -", f)
     print(f"Фильмов/сочетаний без найденных жанров: {len(unmatched)}")
