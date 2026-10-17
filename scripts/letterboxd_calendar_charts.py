@@ -9,6 +9,7 @@ Writes into the current working directory:
   views_by_year.png
   extra_stats_decade_rating.png
   average_rating_by_year.png
+  average_rating_by_release_decade.png
   top_rewatches.png
   diary_summary.json
 """
@@ -124,6 +125,44 @@ def build_diary_summary(df: pd.DataFrame) -> dict:
                 }
             )
 
+    # Release-year tops (diary Year = film release year, not watch year).
+    top_rated_release_years: list[dict] = []
+    top_release_years_by_count: list[dict] = []
+    with_release = df[df["Year"].notna()].copy()
+    if not with_release.empty:
+        with_release["release_year"] = with_release["Year"].astype(int)
+        # Unique films per release year (Name within that year).
+        film_counts = (
+            with_release[with_release["Name"] != ""]
+            .groupby("release_year")["Name"]
+            .nunique()
+        )
+        rated_by_year = (
+            with_release[with_release["Rating"].notna()]
+            .groupby("release_year")["Rating"]
+            .agg(avg="mean", rated="count")
+        )
+        for year, n_films in film_counts.items():
+            if int(n_films) <= 3:
+                continue
+            if year not in rated_by_year.index:
+                continue
+            avg = float(rated_by_year.loc[year, "avg"])
+            top_rated_release_years.append(
+                {
+                    "year": int(year),
+                    "avg": round(avg, 2),
+                    "films": int(n_films),
+                    "rated": int(rated_by_year.loc[year, "rated"]),
+                }
+            )
+        top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["films"], -r["year"]))
+        top_rated_release_years = top_rated_release_years[:10]
+
+        watch_by_release = with_release.groupby("release_year").size().sort_values(ascending=False)
+        for year, count in watch_by_release.head(10).items():
+            top_release_years_by_count.append({"year": int(year), "count": int(count)})
+
     return {
         "entries": entries,
         "unique_films": unique_films,
@@ -141,6 +180,8 @@ def build_diary_summary(df: pd.DataFrame) -> dict:
         "rating_mode": rating_mode,
         "rating_mode_count": rating_mode_count,
         "top_rewatches": rewatch_rows,
+        "top_rated_release_years": top_rated_release_years,
+        "top_release_years_by_count": top_release_years_by_count,
     }
 
 
@@ -388,6 +429,54 @@ def chart_average_rating_by_year(df: pd.DataFrame, path: Path) -> bool:
     return True
 
 
+def chart_average_rating_by_release_decade(df: pd.DataFrame, path: Path) -> bool:
+    """Mean Letterboxd rating by film release decade (diary Year + Rating)."""
+    work = df[df["Year"].notna() & df["Rating"].notna()].copy()
+    if work.empty:
+        return False
+    work["decade"] = work["Year"].map(release_decade_label)
+    work = work[work["decade"].notna()]
+    if work.empty:
+        return False
+    grouped = work.groupby("decade")["Rating"].agg(["mean", "count"])
+    grouped = grouped[grouped["count"] >= 1].copy()
+    if grouped.empty:
+        return False
+    grouped["_sort"] = grouped.index.map(lambda label: int(str(label).rstrip("s")))
+    grouped = grouped.sort_values("_sort")
+
+    labels = grouped.index.tolist()
+    values = grouped["mean"].astype(float).tolist()
+    counts = grouped["count"].astype(int).tolist()
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    x = np.arange(len(labels))
+    bars = ax.bar(x, values, color="#54A24B", width=0.8)
+    ax.set_ylim(0, 5.2)
+    ax.set_title("Средняя оценка по десятилетию выхода")
+    ax.set_xlabel("Десятилетие выхода")
+    ax.set_ylabel("Средняя оценка (из 5)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    for bar, value, count in zip(bars, values, counts):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            value + 0.08,
+            f"{value:.2f}\n(n={count})",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+        )
+    fig.tight_layout()
+    fig.savefig(path, bbox_inches="tight", dpi=160)
+    plt.close(fig)
+    return True
+
+
 def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 10) -> bool:
     """Horizontal bar of films with the most diary entries (rewatches)."""
     names = df["Name"].fillna("").astype(str).str.strip()
@@ -449,10 +538,14 @@ def main(argv: list[str] | None = None) -> int:
         chart_views_by_year(diary, Path("views_by_year.png"))
         chart_decade_rating(diary, Path("extra_stats_decade_rating.png"))
         made_rating = chart_average_rating_by_year(diary, Path("average_rating_by_year.png"))
+        made_decade_avg = chart_average_rating_by_release_decade(
+            diary, Path("average_rating_by_release_decade.png")
+        )
         made_rewatch = chart_top_rewatches(diary, Path("top_rewatches.png"))
         summary = build_diary_summary(diary)
         summary["charts"] = {
             "average_rating_by_year": bool(made_rating),
+            "average_rating_by_release_decade": bool(made_decade_avg),
             "top_rewatches": bool(made_rewatch),
         }
         Path("diary_summary.json").write_text(
@@ -463,10 +556,13 @@ def main(argv: list[str] | None = None) -> int:
         print(str(err), file=sys.stderr)
         return 2
     extras = []
-    if Path("average_rating_by_year.png").is_file():
-        extras.append("average_rating_by_year.png")
-    if Path("top_rewatches.png").is_file():
-        extras.append("top_rewatches.png")
+    for name in (
+        "average_rating_by_year.png",
+        "average_rating_by_release_decade.png",
+        "top_rewatches.png",
+    ):
+        if Path(name).is_file():
+            extras.append(name)
     extra_s = (", " + ", ".join(extras)) if extras else ""
     print(
         "Готово: views_by_weekday_month.png, views_by_year.png, "

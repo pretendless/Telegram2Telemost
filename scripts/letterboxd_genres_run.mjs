@@ -10,6 +10,7 @@ const GENRE_PNGS = [
   "average_rating_by_genre.png",
   "genre_by_release_decade.png",
   "genre_share_by_viewing_year.png",
+  "watches_by_country.png",
 ];
 
 const CALENDAR_PNGS = [
@@ -17,6 +18,7 @@ const CALENDAR_PNGS = [
   "views_by_year.png",
   "extra_stats_decade_rating.png",
   "average_rating_by_year.png",
+  "average_rating_by_release_decade.png",
   "top_rewatches.png",
 ];
 
@@ -24,7 +26,8 @@ const CALENDAR_CAPTIONS = {
   "views_by_weekday_month.png": "Дни недели и месяцы — стек по годам просмотра",
   "views_by_year.png": "Просмотры по годам",
   "extra_stats_decade_rating.png": "Десятилетия выхода и оценки",
-  "average_rating_by_year.png": "Средняя оценка по годам",
+  "average_rating_by_year.png": "Средняя оценка по годам просмотра",
+  "average_rating_by_release_decade.png": "Средняя оценка по десятилетию выхода",
   "top_rewatches.png": "Чаще всего в дневнике",
 };
 
@@ -33,6 +36,7 @@ const GENRE_CAPTIONS = {
   "average_rating_by_genre.png": "Средняя оценка по жанрам",
   "genre_by_release_decade.png": "Жанры по десятилетию выхода",
   "genre_share_by_viewing_year.png": "Доля жанров по годам",
+  "watches_by_country.png": "Страны производства (TMDB)",
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -136,17 +140,86 @@ export function buildCalendarReportHtml(summary) {
     }
   }
 
+  const ratedYears = Array.isArray(s.top_rated_release_years)
+    ? s.top_rated_release_years.slice(0, 10)
+    : [];
+  if (ratedYears.length) {
+    lines.push("<b>Годы выхода — выше оценка</b> <i>(больше 3 фильмов)</i>");
+    for (const row of ratedYears) {
+      lines.push(
+        `• <b>${escapeHtml(row.year)}</b> — ср. <b>${escapeHtml(fmtRating(row.avg))}</b> (${escapeHtml(fmtNum(row.films))} ф.)`,
+      );
+    }
+  }
+
+  const watchedYears = Array.isArray(s.top_release_years_by_count)
+    ? s.top_release_years_by_count.slice(0, 10)
+    : [];
+  if (watchedYears.length) {
+    lines.push("<b>Годы выхода — больше просмотров</b>");
+    for (const row of watchedYears) {
+      lines.push(
+        `• <b>${escapeHtml(row.year)}</b> — <b>${escapeHtml(fmtNum(row.count))}</b>`,
+      );
+    }
+  }
+
   return lines.join("\n");
 }
 
-/** Genre-section HTML after TMDB enrichment. */
-export function buildGenreReportHtml(summary, unmatchedFallback = 0) {
+const LANG_LABELS = {
+  en: "английский",
+  ru: "русский",
+  fr: "французский",
+  de: "немецкий",
+  it: "итальянский",
+  es: "испанский",
+  ja: "японский",
+  ko: "корейский",
+  zh: "китайский",
+  sv: "шведский",
+  pl: "польский",
+  pt: "португальский",
+  hi: "хинди",
+  tr: "турецкий",
+  uk: "украинский",
+  da: "датский",
+  no: "норвежский",
+  nl: "нидерландский",
+  cs: "чешский",
+  hu: "венгерский",
+};
+
+function displayLang(code) {
+  const key = String(code || "")
+    .trim()
+    .toLowerCase();
+  return LANG_LABELS[key] || key || "?";
+}
+
+function formatNamedRankLine(row, { language = false } = {}) {
+  const raw = row.name || "?";
+  const name = escapeHtml(language ? displayLang(raw) : raw);
+  const count = escapeHtml(fmtNum(row.count));
+  const avg =
+    row.avg != null && Number.isFinite(Number(row.avg))
+      ? ` · ср. ${escapeHtml(fmtRating(row.avg))}`
+      : "";
+  return `• <b>${name}</b> — ${count}${avg}`;
+}
+
+/**
+ * TMDB genre + people/country HTML after enrichment.
+ * Returns one or two messages to stay under Telegram's ~4096 limit.
+ */
+export function buildGenreReportMessages(summary, unmatchedFallback = 0) {
   const s = summary && typeof summary === "object" ? summary : {};
   const unmatched =
     s.unmatched != null && Number.isFinite(Number(s.unmatched))
       ? Number(s.unmatched)
       : Number(unmatchedFallback) || 0;
-  const lines = ["<b>Жанры (TMDB)</b>"];
+
+  const genreLines = ["<b>Жанры (TMDB)</b>"];
   const top = Array.isArray(s.top_genres) ? s.top_genres.slice(0, 6) : [];
   if (top.length) {
     for (const g of top) {
@@ -154,15 +227,63 @@ export function buildGenreReportHtml(summary, unmatchedFallback = 0) {
       const count = escapeHtml(fmtNum(g.count));
       const pct =
         g.pct != null && Number.isFinite(Number(g.pct)) ? ` · ${escapeHtml(String(g.pct))}%` : "";
-      lines.push(`• <b>${name}</b> — ${count}${pct}`);
+      genreLines.push(`• <b>${name}</b> — ${count}${pct}`);
     }
   } else {
-    lines.push("Топ жанров пуст.");
+    genreLines.push("Топ жанров пуст.");
   }
   if (unmatched > 0) {
-    lines.push(`Без жанров TMDB: <b>${escapeHtml(String(unmatched))}</b>`);
+    genreLines.push(`Без жанров TMDB: <b>${escapeHtml(String(unmatched))}</b>`);
   }
-  return lines.join("\n");
+
+  const deepLines = [];
+  const countries = Array.isArray(s.countries) ? s.countries.slice(0, 8) : [];
+  if (countries.length) {
+    deepLines.push("<b>Страны</b>");
+    for (const row of countries) deepLines.push(formatNamedRankLine(row));
+  }
+
+  const directors = Array.isArray(s.directors) ? s.directors.slice(0, 6) : [];
+  if (directors.length) {
+    const min = s.min_person_count != null ? fmtNum(s.min_person_count) : "3";
+    deepLines.push(`<b>Режиссёры</b> <i>(от ${escapeHtml(min)} просмотров)</i>`);
+    for (const row of directors) deepLines.push(formatNamedRankLine(row));
+  }
+
+  const directorsRated = Array.isArray(s.directors_by_rating)
+    ? s.directors_by_rating.slice(0, 5)
+    : [];
+  if (directorsRated.length) {
+    deepLines.push("<b>Режиссёры — выше оценка</b>");
+    for (const row of directorsRated) deepLines.push(formatNamedRankLine(row));
+  }
+
+  const actors = Array.isArray(s.actors) ? s.actors.slice(0, 6) : [];
+  if (actors.length) {
+    deepLines.push("<b>Актёры</b>");
+    for (const row of actors) deepLines.push(formatNamedRankLine(row));
+  }
+
+  const languages = Array.isArray(s.languages) ? s.languages.slice(0, 6) : [];
+  if (languages.length) {
+    deepLines.push("<b>Язык оригинала</b>");
+    for (const row of languages) deepLines.push(formatNamedRankLine(row, { language: true }));
+  }
+
+  const companies = Array.isArray(s.companies) ? s.companies.slice(0, 5) : [];
+  if (companies.length) {
+    deepLines.push("<b>Студии</b>");
+    for (const row of companies) deepLines.push(formatNamedRankLine(row));
+  }
+
+  const messages = [genreLines.join("\n")];
+  if (deepLines.length) messages.push(deepLines.join("\n"));
+  return messages;
+}
+
+/** Genre-section HTML after TMDB enrichment (single string; tests / simple callers). */
+export function buildGenreReportHtml(summary, unmatchedFallback = 0) {
+  return buildGenreReportMessages(summary, unmatchedFallback).join("\n\n");
 }
 
 export function mapScriptError(stderr, stdout, status) {
@@ -400,7 +521,10 @@ export async function main() {
 
   const unmatched = unmatchedFromWorkdir(workdir, genres.stdout);
   const genreSummary = readJsonFile(join(workdir, "genre_summary.json"));
-  await sendTelegramHtml(token, chatId, buildGenreReportHtml(genreSummary || {}, unmatched));
+  const tmdbMessages = buildGenreReportMessages(genreSummary || {}, unmatched);
+  for (const html of tmdbMessages) {
+    await sendTelegramHtml(token, chatId, html);
+  }
   await sendCaptionedPhotos(token, chatId, workdir, genrePngs, GENRE_CAPTIONS);
 
   console.log("calendar pngs", calendarPngs.join(","));
