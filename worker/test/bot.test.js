@@ -936,7 +936,7 @@ test("/start and /stop list that chat's commands, one per line", async () => {
 
   sent.length = 0;
   await handle(packMessage(8502935020, "/start"), env, { sendMessage });
-  assert.match(sent[0].text, /\/stop — прервать ввод\n\/queue — очередь\n\/skip — пропустить пак\n\/restart — перезапустить загрузку\n\/project — задача для агента\n\/ghrun — запустить workflow\n\/login — войти в Яндекс$/);
+  assert.match(sent[0].text, /\/stop — прервать ввод\n\/queue — очередь\n\/skip — пропустить пак\n\/restart — перезапустить загрузку\n\/project — задача для агента\n\/ghrun — запустить workflow\n\/genres — жанры Letterboxd\n\/login — войти в Яндекс$/);
   assert.doesNotMatch(sent[0].text, /\/unstick|\/upload|\/connect/);
   assert.equal((sent[0].text.match(/TG2TM на связи/g) || []).length, 1);
 
@@ -2495,8 +2495,13 @@ test("/ghrun waitUntil defers GitHub dispatch", async () => {
   assert.deepEqual(dispatchCalls[0].body.inputs, { foo: "bar" });
 });
 
-test("ADMIN menu lists ghrun", () => {
+test("ADMIN menu lists ghrun and genres", () => {
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "ghrun").description, "Запустить GitHub workflow");
+  assert.equal(
+    ADMIN_ONLY_COMMANDS.find((item) => item.command === "genres").description,
+    "Графики жанров Letterboxd (доступно всем)",
+  );
+  assert.equal(USER_COMMANDS.some((item) => item.command === "genres"), false);
 });
 
 test("both configured admins see every pack and admin commands; an unrelated chat does not", async () => {
@@ -2825,4 +2830,105 @@ test("background notices reach both admins, edits keep separate cards, and a req
   assert.match(toAdminA[0].text, /38644156549/);
   assert.match(toAdminA[0].text, /ошибка/);
   assert.equal(sent.some((row) => row.chatId === requester || row.chatId === unrelated), false);
+});
+
+function documentRequest(chatId, document) {
+  return new Request("https://tg2tmbot.example/telegram", {
+    method: "POST",
+    headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret", "content-type": "application/json" },
+    body: JSON.stringify({ message: { chat: { id: chatId }, document } }),
+  });
+}
+
+test("/genres is runnable by users, hidden from user menu, waits for ZIP, /stop clears", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = "8502935020";
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  const sent = [];
+  const sendMessage = async (_env, chatId, text) => {
+    sent.push({ chatId, text });
+    return { message_id: sent.length };
+  };
+
+  await handle(telegramRequest(7, "/start"), env, { sendMessage });
+  assert.doesNotMatch(sent[0].text, /\/genres/);
+
+  sent.length = 0;
+  await handle(telegramRequest(8502935020, "/start"), env, { sendMessage });
+  assert.match(sent[0].text, /\/genres — жанры Letterboxd/);
+
+  sent.length = 0;
+  await handle(telegramRequest(7, "/genres"), env, { sendMessage });
+  assert.match(sent[0].text, /ZIP экспорта Letterboxd/);
+  assert.ok(env.BOT_KV.store.get("await:genres:7"));
+
+  sent.length = 0;
+  await handle(telegramRequest(7, "не zip"), env, { sendMessage });
+  assert.match(sent[0].text, /Нужен файл \.zip/);
+
+  sent.length = 0;
+  await handle(
+    documentRequest(7, { file_name: "notes.txt", mime_type: "text/plain", file_id: "BQACAgIAAxkBAAI1234567890" }),
+    env,
+    { sendMessage },
+  );
+  assert.match(sent[0].text, /не ZIP/);
+  assert.ok(env.BOT_KV.store.get("await:genres:7"));
+
+  sent.length = 0;
+  await handle(telegramRequest(7, "/stop"), env, { sendMessage });
+  assert.match(sent[0].text, /ожидание ZIP Letterboxd сброшено/);
+  assert.equal(env.BOT_KV.store.get("await:genres:7"), undefined);
+});
+
+test("/genres ZIP dispatches letterboxd-genres for any chat", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = "8502935020";
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  const sent = [];
+  const calls = [];
+  const sendMessage = async (_env, chatId, text) => {
+    sent.push({ chatId, text });
+    return { message_id: sent.length };
+  };
+  const fetch = async (url, init = {}) => {
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ url: String(url), body });
+    if (String(url).includes("/actions/runs")) {
+      return {
+        status: 200,
+        json: async () => ({
+          workflow_runs: [
+            {
+              id: 99,
+              created_at: new Date().toISOString(),
+              html_url: "https://github.com/pretendless/tg2tm/actions/runs/99",
+            },
+          ],
+        }),
+      };
+    }
+    return new Response(null, { status: 204 });
+  };
+
+  await handle(telegramRequest(111, "/genres"), env, { sendMessage, fetch });
+  sent.length = 0;
+  await handle(
+    documentRequest(111, {
+      file_name: "letterboxd-2026.zip",
+      mime_type: "application/zip",
+      file_id: "BQACAgIAAxkBAAI1234567890abcd",
+    }),
+    env,
+    { sendMessage, fetch },
+  );
+  assert.match(sent.map((row) => row.text).join("\n"), /ZIP принят/);
+  assert.equal(env.BOT_KV.store.get("await:genres:111"), undefined);
+  const dispatch = calls.find((call) => String(call.url).includes("letterboxd-genres.yml/dispatches"));
+  assert.ok(dispatch);
+  assert.equal(dispatch.body.inputs.chat_id, "111");
+  assert.equal(dispatch.body.inputs.file_id, "BQACAgIAAxkBAAI1234567890abcd");
+  assert.match(dispatch.body.inputs.job_id, /^lb-/);
+  // Regular user must not get github.com run link.
+  assert.doesNotMatch(sent.map((row) => row.text).join("\n"), /github\.com/i);
 });
