@@ -1,9 +1,13 @@
 """Latest Letterboxd Rating per unique film (rewatch-safe averages).
 
-Identity: Letterboxd URI when present, else Name + Year.
+Identity (within diary): Letterboxd URI when present, else Name + Year.
 Among diary rows for a film, keep the latest Watched Date that has a
 non-empty Rating («последняя оценка»). Watch-count metrics should still
 use the full diary; only mean ratings and rating tops use this frame.
+
+For diary ∪ watched catalog ratings (watched-only films, Name+Year match
+across files), use letterboxd_export.latest_rated_union — diary entry URIs
+do not match watched film URIs.
 """
 
 from __future__ import annotations
@@ -51,6 +55,7 @@ def latest_rated_per_film(df: pd.DataFrame) -> pd.DataFrame:
         work["_film_key"] = film_identity_series(work)
         return work.groupby("_film_key", dropna=False, as_index=False).head(1).drop(columns=["_film_key"])
 
+    # Diary path: only rows with a real Watched Date (no fake dates from watched.csv).
     work = work[work["Watched Date"].notna()].copy()
     if work.empty:
         return work

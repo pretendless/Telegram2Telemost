@@ -22,7 +22,7 @@ Creates:
 
 TMDB attribution is included in chart footers. Use of TMDB data is subject to its terms.
 """
-import os, sys, json, time, zipfile, urllib.parse, urllib.request, urllib.error
+import os, sys, json, time, urllib.parse, urllib.request, urllib.error
 from pathlib import Path
 from collections import Counter, defaultdict
 
@@ -34,6 +34,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
+from letterboxd_export import (  # noqa: E402
+    latest_rated_union,
+    load_export,
+)
 from letterboxd_palette import (  # noqa: E402
     FG,
     GRID,
@@ -42,8 +46,6 @@ from letterboxd_palette import (  # noqa: E402
     style_axes,
     watch_year_palette,
 )
-from letterboxd_ratings import latest_rated_per_film  # noqa: E402
-
 apply_dark_chart_theme()
 
 BASE = "https://api.themoviedb.org/3"
@@ -202,26 +204,6 @@ def request_json(url):
         except (urllib.error.URLError, TimeoutError):
             time.sleep(2 + attempt * 2)
     raise RuntimeError("TMDB request failed after retries: " + url)
-
-def load_diary(zip_path):
-    with zipfile.ZipFile(zip_path) as zf:
-        names = zf.namelist()
-        diary_name = next((n for n in names if n.lower().endswith("diary.csv")), None)
-        if not diary_name:
-            raise RuntimeError("В ZIP не найден diary.csv")
-        with zf.open(diary_name) as f:
-            df = pd.read_csv(f)
-    required = {"Name", "Year", "Watched Date"}
-    if not required.issubset(df.columns):
-        raise RuntimeError(f"В diary.csv не хватает колонок: {required - set(df.columns)}")
-    df["Name"] = df["Name"].fillna("").astype(str).str.strip()
-    df["Year"] = pd.to_numeric(df["Year"], errors="coerce")
-    df["Watched Date"] = pd.to_datetime(df["Watched Date"], errors="coerce")
-    if "Rating" in df.columns:
-        df["Rating"] = pd.to_numeric(df["Rating"], errors="coerce")
-    else:
-        df["Rating"] = np.nan
-    return df
 
 def year_of_release(result):
     date = result.get("release_date", "")
@@ -412,8 +394,8 @@ def _cache_key(row):
     return f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
 
 
-def aggregate_person_stats(diary, cache):
-    """Watch counts from every diary row; rating avgs from latest rating per film."""
+def aggregate_person_stats(catalog, cache, diary=None, watched_only=None):
+    """Catalog counts (diary rows + watched-only); ratings via latest_rated_union."""
     countries = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     directors = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     actors = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
@@ -453,8 +435,8 @@ def aggregate_person_stats(diary, cache):
         if lang:
             buckets_fn(languages, lang, row)
 
-    # Watch counts: every diary viewing.
-    for _, row in diary.iterrows():
+    # Counts: diary viewings + watched-only films (catalog).
+    for _, row in catalog.iterrows():
         meta = cache.get(_cache_key(row)) or {}
 
         def count_only(bucket, name, _row):
@@ -462,8 +444,9 @@ def aggregate_person_stats(diary, cache):
 
         apply_meta(count_only, row, meta)
 
-    # Ratings: one latest rated entry per film.
-    for _, row in latest_rated_per_film(diary).iterrows():
+    diary_df = diary if diary is not None else catalog
+    only_df = watched_only if watched_only is not None else catalog.iloc[0:0].copy()
+    for _, row in latest_rated_union(diary_df, only_df).iterrows():
         meta = cache.get(_cache_key(row)) or {}
         rating = row.get("Rating")
 
@@ -499,14 +482,16 @@ def aggregate_person_stats(diary, cache):
     }
 
 
-def rank_genres(diary, limit_count=8, limit_rating=8):
-    """Genre tops: watch hits from all rows; avg from latest rating per film."""
+def rank_genres(catalog, diary=None, watched_only=None, limit_count=8, limit_rating=8):
+    """Genre tops: catalog hits; avg from diary∪watched-only latest ratings."""
     stats = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
-    for _, row in diary.iterrows():
+    for _, row in catalog.iterrows():
         for g in row.get("Genre list") or []:
             if g:
                 stats[g]["count"] += 1
-    for _, row in latest_rated_per_film(diary).iterrows():
+    diary_df = diary if diary is not None else catalog
+    only_df = watched_only if watched_only is not None else catalog.iloc[0:0].copy()
+    for _, row in latest_rated_union(diary_df, only_df).iterrows():
         rating = row.get("Rating")
         try:
             r = float(rating)
@@ -602,6 +587,23 @@ def chart_watches_by_country(diary, cache, path: Path, top_n: int = 12) -> bool:
     plt.close(fig)
     return True
 
+def _attach_tmdb_columns(frame, cache):
+    """Add Genre list / countries / directors from TMDB cache onto a frame."""
+    out = frame.copy()
+
+    def get_meta(row):
+        key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
+        return cache.get(key, empty_tmdb_entry())
+
+    metadata = out.apply(get_meta, axis=1)
+    out["TMDB ID"] = metadata.apply(lambda x: x.get("tmdb_id"))
+    out["TMDB genres"] = metadata.apply(lambda x: ", ".join(x.get("genres", [])))
+    out["Genre list"] = metadata.apply(lambda x: x.get("genres", []))
+    out["Countries"] = metadata.apply(lambda x: x.get("countries", []))
+    out["Directors"] = metadata.apply(lambda x: x.get("directors", []))
+    return out
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python letterboxd_genre_charts.py path/to/letterboxd-export.zip")
@@ -610,12 +612,16 @@ def main():
         print("Не задан TMDB_BEARER_TOKEN. Получите Read Access Token в Settings → API на TMDB и задайте переменную окружения.")
         sys.exit(2)
 
-    diary = load_diary(sys.argv[1])
+    diary, catalog, watched_only = load_export(sys.argv[1])
     cache = json.loads(CACHE_PATH.read_text(encoding="utf-8")) if CACHE_PATH.exists() else {}
-    films = diary[["Name", "Year"]].drop_duplicates().reset_index(drop=True)
+    # Enrich unique titles across diary ∪ watched.
+    films = catalog[["Name", "Year"]].drop_duplicates().reset_index(drop=True)
     total = len(films)
     progress = TelegramProgress(TG_TOKEN, TG_CHAT)
-    print(f"Обогащаю TMDB {total} уникальных сочетаний «название + год»…")
+    print(
+        f"Обогащаю TMDB {total} уникальных сочетаний «название + год»…"
+        f" (watched-only: {len(watched_only)})"
+    )
     progress.update(0, total, force=True)
     done = 0
     resolved = 0
@@ -643,29 +649,23 @@ def main():
     save_cache(cache)
     progress.update(done, total, force=True)
 
-    def get_meta(row):
-        key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
-        return cache.get(key, empty_tmdb_entry())
-    metadata = diary.apply(get_meta, axis=1)
-    diary["TMDB ID"] = metadata.apply(lambda x: x.get("tmdb_id"))
-    diary["TMDB genres"] = metadata.apply(lambda x: ", ".join(x.get("genres", [])))
-    diary["Genre list"] = metadata.apply(lambda x: x.get("genres", []))
-    diary["Countries"] = metadata.apply(lambda x: x.get("countries", []))
-    diary["Directors"] = metadata.apply(lambda x: x.get("directors", []))
-    diary.to_csv("letterboxd_with_genres.csv", index=False)
+    diary = _attach_tmdb_columns(diary, cache)
+    catalog = _attach_tmdb_columns(catalog, cache)
+    watched_only = _attach_tmdb_columns(watched_only, cache) if len(watched_only) else watched_only
+    catalog.to_csv("letterboxd_with_genres.csv", index=False)
 
-    unmatched = diary[diary["Genre list"].apply(len) == 0][["Name", "Year"]].drop_duplicates()
+    unmatched = catalog[catalog["Genre list"].apply(len) == 0][["Name", "Year"]].drop_duplicates()
     unmatched.to_csv("tmdb_unmatched.csv", index=False)
 
     progress.finish(f"TMDB: {resolved}/{total}. Строю графики…")
 
     # Dark theme already applied via apply_dark_chart_theme().
-    footer = "Source: Letterboxd diary + TMDB metadata"
+    footer = "Source: Letterboxd diary/watched + TMDB metadata"
     years = sorted(diary["Watched Date"].dt.year.dropna().astype(int).unique())
 
-    # 1) Stacked yearly counts for the 12 most common genres
-    all_genres = [g for genres in diary["Genre list"] for g in genres]
-    top_genres = [g for g, _ in Counter(all_genres).most_common(12)]
+    # 1) Stacked yearly counts — diary only (need watch year).
+    all_genres_diary = [g for genres in diary["Genre list"] for g in genres]
+    top_genres = [g for g, _ in Counter(all_genres_diary).most_common(12)]
     yearly = {}
     for y in years:
         subset = diary[diary["Watched Date"].dt.year == y]
@@ -694,11 +694,15 @@ def main():
     save_dark_figure(fig, "genre_counts_by_viewing_year.png")
     plt.close(fig)
 
-    # 2) Mean personal rating per genre (latest rating per film)
-    rated = latest_rated_per_film(diary)
+    # 2) Mean personal rating per genre — catalog ratings (diary ∪ watched-only).
+    rated = latest_rated_union(diary, watched_only)
+    # Attach Genre list onto rated rows via cache key.
+    if not rated.empty and "Genre list" not in rated.columns:
+        rated = _attach_tmdb_columns(rated, cache)
+    all_genres_catalog = [g for genres in catalog["Genre list"] for g in genres]
     rows = []
-    for genre in sorted(set(g for gs in diary["Genre list"] for g in gs)):
-        vals = rated[rated["Genre list"].apply(lambda gs: genre in gs)]["Rating"]
+    for genre in sorted(set(all_genres_catalog)):
+        vals = rated[rated["Genre list"].apply(lambda gs: genre in (gs or []))]["Rating"]
         if len(vals) >= 5:
             rows.append((genre, float(vals.mean()), int(len(vals))))
     avg = pd.DataFrame(rows, columns=["Genre", "Average rating", "Rated films"])
@@ -723,9 +727,9 @@ def main():
     save_dark_figure(fig, "average_rating_by_genre.png")
     plt.close(fig)
 
-    # 3) Counts by release decade
+    # 3) Counts by release decade — catalog (no watch-year stack).
     release_decades = {}
-    for _, row in diary.iterrows():
+    for _, row in catalog.iterrows():
         meta = cache.get(f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}", {})
         ry = meta.get("tmdb_release_year")
         if ry and meta.get("genres"):
@@ -756,8 +760,8 @@ def main():
         save_dark_figure(fig, "genre_by_release_decade.png")
         plt.close(fig)
 
-    # 4) Genre share within each viewing year (top 10 genres)
-    top10 = [g for g, _ in Counter(all_genres).most_common(10)]
+    # 4) Genre share within each viewing year — diary only.
+    top10 = [g for g, _ in Counter(all_genres_diary).most_common(10)]
     matrix = []
     for y in years:
         subset = diary[diary["Watched Date"].dt.year == y]
@@ -780,19 +784,23 @@ def main():
         save_dark_figure(fig, "genre_share_by_viewing_year.png")
         plt.close(fig)
 
-    # Compact genre + people/country stats for the Telegram HTML report.
-    top_for_report, genres_by_rating = rank_genres(diary, limit_count=8, limit_rating=8)
+    # HTML tops: catalog counts + union ratings.
+    top_for_report, genres_by_rating = rank_genres(
+        catalog, diary=diary, watched_only=watched_only, limit_count=8, limit_rating=8
+    )
 
-    deep = aggregate_person_stats(diary, cache)
+    deep = aggregate_person_stats(catalog, cache, diary=diary, watched_only=watched_only)
+    # Country chart stacks by watch year → diary only.
     made_country = chart_watches_by_country(diary, cache, Path("watches_by_country.png"))
 
     genre_summary = {
         "unique_titles": int(total),
+        "watched_only_films": int(len(watched_only)),
         "resolved": int(resolved),
         "unmatched": int(len(unmatched)),
         "top_genres": top_for_report,
         "top_genres_by_rating": genres_by_rating,
-        "genre_hits": int(len(all_genres)),
+        "genre_hits": int(len(all_genres_catalog)),
         "countries": deep.get("countries") or [],
         "countries_by_rating": deep.get("countries_by_rating") or [],
         "directors": deep.get("directors") or [],
@@ -826,6 +834,7 @@ def main():
         if Path(f).exists():
             print(" -", f)
     print(f"Фильмов/сочетаний без найденных жанров: {len(unmatched)}")
+    print(f"Watched-only (не в diary): {len(watched_only)}")
     print("TMDB data attribution: https://www.themoviedb.org/")
     progress.finish("Готово, шлю графики.")
 
