@@ -8,7 +8,7 @@ Usage:
   3) Run: python letterboxd_genre_charts.py path/to/letterboxd-export.zip
 
 Optional Telegram progress (Actions /letterboxd): TG2TMBOT_TOKEN + CHAT_ID.
-Edits one message «Жанры: N/total…» during enrichment; does not print tokens.
+Edits one message «Подгружаю подробности из TMDB: N/total…» during enrichment; does not print tokens.
 
 Creates:
   genre_counts_by_viewing_year.png
@@ -25,9 +25,25 @@ TMDB attribution is included in chart footers. Use of TMDB data is subject to it
 import os, sys, json, time, zipfile, urllib.parse, urllib.request, urllib.error
 from pathlib import Path
 from collections import Counter, defaultdict
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+
+from letterboxd_palette import (  # noqa: E402
+    FG,
+    GRID,
+    apply_dark_chart_theme,
+    save_dark_figure,
+    style_axes,
+    watch_year_palette,
+)
+
+apply_dark_chart_theme()
 
 BASE = "https://api.themoviedb.org/3"
 CACHE_PATH = Path("tmdb_genre_cache.json")
@@ -37,17 +53,19 @@ TG_TOKEN = (os.getenv("TG2TMBOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
 TG_CHAT = (os.getenv("CHAT_ID") or os.getenv("LETTERBOXD_CHAT_ID") or "").strip()
 PROGRESS_EVERY = max(1, int(os.getenv("LETTERBOXD_PROGRESS_EVERY", "25") or "25"))
 PROGRESS_MIN_SEC = max(5.0, float(os.getenv("LETTERBOXD_PROGRESS_MIN_SEC", "45") or "45"))
-# Min diary hits before a person/company appears in ranked HTML lists.
+# Min diary hits before a person/company appears in ranked HTML count lists.
 MIN_PERSON_COUNT = max(2, int(os.getenv("LETTERBOXD_MIN_PERSON_COUNT", "3") or "3"))
 MIN_COMPANY_COUNT = max(2, int(os.getenv("LETTERBOXD_MIN_COMPANY_COUNT", "3") or "3"))
 CAST_TOP_BILLED = max(1, int(os.getenv("LETTERBOXD_CAST_TOP", "5") or "5"))
+# Rating tops: strictly more than this many non-empty Letterboxd ratings.
+MIN_RATED_FOR_TOP = 3
 
 
 def format_genre_progress(done, total):
-    """User-facing progress: unique titles processed so far / total unique titles."""
+    """User-facing progress: unique titles enriched so far / total (genres, countries, people…)."""
     d = max(0, int(done))
     t = max(0, int(total))
-    return f"Жанры: {d}/{t}…"
+    return f"Подгружаю подробности из TMDB: {d}/{t}…"
 
 
 class TelegramProgress:
@@ -348,21 +366,45 @@ def save_cache(cache):
     CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _rank_named(stats, min_count, limit=8, by_avg=False):
-    """stats: name -> {count, rating_sum, rated}. Return sorted list of dicts."""
+def _rank_named(stats, min_count=1, limit=8, by_avg=False, min_rated=None):
+    """stats: name -> {count, rating_sum, rated}.
+
+    Count tops use min_count on watch hits.
+    Rating tops require rated > min_rated (strict); omit entities that fail.
+    """
     rows = []
     for name, st in stats.items():
         count = int(st.get("count") or 0)
-        if count < min_count:
-            continue
         rated = int(st.get("rated") or 0)
+        if by_avg:
+            if min_rated is None or rated <= min_rated:
+                continue
+        elif count < min_count:
+            continue
         avg = round(st["rating_sum"] / rated, 2) if rated else None
         rows.append({"name": name, "count": count, "avg": avg, "rated": rated})
     if by_avg:
-        rows.sort(key=lambda r: (-(r["avg"] if r["avg"] is not None else -1), -r["count"], r["name"]))
+        rows.sort(
+            key=lambda r: (-(r["avg"] if r["avg"] is not None else -1), -r["rated"], r["name"])
+        )
     else:
-        rows.sort(key=lambda r: (-r["count"], -(r["avg"] if r["avg"] is not None else -1), r["name"]))
+        rows.sort(
+            key=lambda r: (-r["count"], -(r["avg"] if r["avg"] is not None else -1), r["name"])
+        )
     return rows[:limit]
+
+
+def _paired_ranks(stats, min_count, limit_count=8, limit_rating=8):
+    """Count top + rating top (rated > MIN_RATED_FOR_TOP only)."""
+    by_count = _rank_named(stats, min_count=min_count, limit=limit_count, by_avg=False)
+    by_rating = _rank_named(
+        stats,
+        min_count=1,
+        limit=limit_rating,
+        by_avg=True,
+        min_rated=MIN_RATED_FOR_TOP,
+    )
+    return by_count, by_rating
 
 
 def aggregate_person_stats(diary, cache):
@@ -403,44 +445,132 @@ def aggregate_person_stats(diary, cache):
         if lang:
             bump(languages, lang, rating)
 
+    countries_c, countries_r = _paired_ranks(countries, min_count=1, limit_count=10, limit_rating=8)
+    directors_c, directors_r = _paired_ranks(
+        directors, min_count=MIN_PERSON_COUNT, limit_count=8, limit_rating=8
+    )
+    actors_c, actors_r = _paired_ranks(
+        actors, min_count=MIN_PERSON_COUNT, limit_count=8, limit_rating=8
+    )
+    languages_c, languages_r = _paired_ranks(
+        languages, min_count=1, limit_count=8, limit_rating=8
+    )
+    companies_c, companies_r = _paired_ranks(
+        companies, min_count=MIN_COMPANY_COUNT, limit_count=6, limit_rating=6
+    )
     return {
-        "countries": _rank_named(countries, min_count=1, limit=10),
-        "directors": _rank_named(directors, min_count=MIN_PERSON_COUNT, limit=8),
-        "directors_by_rating": _rank_named(
-            directors, min_count=MIN_PERSON_COUNT, limit=5, by_avg=True
-        ),
-        "actors": _rank_named(actors, min_count=MIN_PERSON_COUNT, limit=8),
-        "languages": _rank_named(languages, min_count=1, limit=8),
-        "companies": _rank_named(companies, min_count=MIN_COMPANY_COUNT, limit=6),
+        "countries": countries_c,
+        "countries_by_rating": countries_r,
+        "directors": directors_c,
+        "directors_by_rating": directors_r,
+        "actors": actors_c,
+        "actors_by_rating": actors_r,
+        "languages": languages_c,
+        "languages_by_rating": languages_r,
+        "companies": companies_c,
+        "companies_by_rating": companies_r,
     }
 
 
-def chart_watches_by_country(country_rows, path: Path) -> bool:
-    """Horizontal bar of top production countries by diary watches."""
-    rows = [r for r in (country_rows or []) if r.get("count")]
-    if not rows:
+def rank_genres(diary, limit_count=8, limit_rating=8):
+    """Genre tops by watch hits and by avg rating (rated > MIN_RATED_FOR_TOP)."""
+    stats = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
+    for _, row in diary.iterrows():
+        genres = row.get("Genre list") or []
+        rating = row.get("Rating")
+        for g in genres:
+            if not g:
+                continue
+            st = stats[g]
+            st["count"] += 1
+            if rating is not None and not (isinstance(rating, float) and np.isnan(rating)):
+                try:
+                    r = float(rating)
+                except (TypeError, ValueError):
+                    continue
+                if r > 0:
+                    st["rating_sum"] += r
+                    st["rated"] += 1
+    by_count, by_rating = _paired_ranks(
+        stats, min_count=1, limit_count=limit_count, limit_rating=limit_rating
+    )
+    # Preserve pct on count list for HTML.
+    total_hits = sum(int(st["count"]) for st in stats.values()) or 1
+    for row in by_count:
+        row["pct"] = round(100.0 * row["count"] / total_hits, 1)
+    return by_count, by_rating
+
+
+def chart_watches_by_country(diary, cache, path: Path, top_n: int = 12) -> bool:
+    """Stacked horizontal bars: top countries by watches, color = watch year."""
+    work = diary.copy()
+    work["watch_year"] = work["Watched Date"].dt.year
+    work = work[work["watch_year"].notna()].copy()
+    if work.empty:
         return False
-    rows = list(reversed(rows[:12]))
-    labels = [str(r["name"]) for r in rows]
-    values = [int(r["count"]) for r in rows]
-    fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.4)))
-    y = np.arange(len(labels))
-    ax.barh(y, values, color="#4C78A8", height=0.72)
+    work["watch_year"] = work["watch_year"].astype(int)
+
+    country_totals = Counter()
+    for _, row in work.iterrows():
+        key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
+        for c in (cache.get(key) or {}).get("countries") or []:
+            if c:
+                country_totals[c] += 1
+    if not country_totals:
+        return False
+    top_countries = [name for name, _ in country_totals.most_common(top_n)]
+    # Bottom-to-top for barh (smallest at bottom among top-N shown ascending).
+    top_countries = list(reversed(top_countries))
+
+    all_years = sorted(work["watch_year"].unique().tolist())
+    palette = watch_year_palette(all_years)
+    years = all_years
+    year_index = {y: i for i, y in enumerate(years)}
+    country_index = {c: i for i, c in enumerate(top_countries)}
+    matrix = np.zeros((len(years), len(top_countries)), dtype=float)
+    for _, row in work.iterrows():
+        key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
+        wy = int(row["watch_year"])
+        for c in (cache.get(key) or {}).get("countries") or []:
+            if c not in country_index:
+                continue
+            matrix[year_index[wy], country_index[c]] += 1
+
+    fig, ax = plt.subplots(figsize=(10, max(4, len(top_countries) * 0.4)))
+    y = np.arange(len(top_countries))
+    left = np.zeros(len(top_countries))
+    for yi, year in enumerate(years):
+        vals = matrix[yi]
+        ax.barh(y, vals, left=left, color=palette[year], height=0.72, edgecolor="none")
+        left += vals
     ax.set_yticks(y)
-    ax.set_yticklabels(labels)
+    ax.set_yticklabels(top_countries)
     ax.set_xlabel("Просмотры")
-    ax.set_title("Страны производства (TMDB)")
-    ax.xaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.set_title("Страны производства — цвет = год просмотра")
+    ax.xaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    xmax = max(values) if values else 1
-    ax.set_xlim(0, xmax * 1.15)
-    for yi, value in zip(y, values):
-        ax.text(value + xmax * 0.02, yi, str(value), va="center", fontsize=9)
-    fig.text(0.01, 0.01, "Source: Letterboxd diary + TMDB metadata", fontsize=7)
-    fig.tight_layout(rect=[0, 0.03, 1, 1])
-    fig.savefig(path, bbox_inches="tight")
+    style_axes(ax)
+    xmax = float(left.max()) if len(left) else 1.0
+    ax.set_xlim(0, xmax * 1.18)
+    for yi, total in enumerate(left):
+        ax.text(total + xmax * 0.02, yi, str(int(total)), va="center", fontsize=9, color=FG)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=palette[y]) for y in years]
+    leg = fig.legend(
+        handles,
+        [str(y) for y in years],
+        title="Год просмотра",
+        loc="center left",
+        bbox_to_anchor=(0.92, 0.5),
+        frameon=False,
+        fontsize=8,
+        title_fontsize=9,
+        labelcolor=FG,
+    )
+    if leg is not None and leg.get_title() is not None:
+        leg.get_title().set_color(FG)
+    fig.text(0.01, 0.01, "Source: Letterboxd diary + TMDB metadata", fontsize=7, color=FG)
+    fig.tight_layout(rect=[0, 0.03, 0.88, 1])
+    save_dark_figure(fig, path)
     plt.close(fig)
     return True
 
@@ -499,10 +629,9 @@ def main():
     unmatched = diary[diary["Genre list"].apply(len) == 0][["Name", "Year"]].drop_duplicates()
     unmatched.to_csv("tmdb_unmatched.csv", index=False)
 
-    progress.finish(f"Жанры: {resolved}/{total}. Строю графики…")
+    progress.finish(f"TMDB: {resolved}/{total}. Строю графики…")
 
-    # Plot defaults
-    plt.rcParams.update({"figure.dpi": 150, "savefig.dpi": 180, "font.size": 9})
+    # Dark theme already applied via apply_dark_chart_theme().
     footer = "Source: Letterboxd diary + TMDB metadata"
     years = sorted(diary["Watched Date"].dt.year.dropna().astype(int).unique())
 
@@ -523,10 +652,19 @@ def main():
     ax.set_title("Количество просмотров по жанрам и годам")
     ax.set_xlabel("Год просмотра"); ax.set_ylabel("Просмотры (жанры суммируются)")
     ax.set_xticks(years); ax.tick_params(axis="x", rotation=45)
-    ax.legend(title="12 самых частых жанров", bbox_to_anchor=(1.02, 1), loc="upper left")
-    fig.text(0.01, 0.01, footer, fontsize=7)
+    leg = ax.legend(
+        title="12 самых частых жанров",
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        labelcolor=FG,
+    )
+    if leg is not None and leg.get_title() is not None:
+        leg.get_title().set_color(FG)
+    style_axes(ax)
+    fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
     fig.tight_layout(rect=[0, 0.03, 0.84, 1])
-    fig.savefig("genre_counts_by_viewing_year.png", bbox_inches="tight"); plt.close(fig)
+    save_dark_figure(fig, "genre_counts_by_viewing_year.png")
+    plt.close(fig)
 
     # 2) Mean personal rating per genre (rating is counted once per diary viewing)
     rated = diary[diary["Rating"].notna()]
@@ -543,11 +681,19 @@ def main():
         ax.set_xlim(0, 5); ax.set_xlabel("Средняя личная оценка (из 5)")
         ax.set_title("Средняя оценка по жанрам (минимум 5 оценённых просмотров)")
         for bar, (_, r) in zip(bars, avg.iterrows()):
-            ax.text(r["Average rating"] + 0.04, bar.get_y() + bar.get_height()/2,
-                    f'{r["Average rating"]:.2f}  (n={int(r["Rated viewings"])})', va="center", fontsize=8)
-    fig.text(0.01, 0.01, footer, fontsize=7)
+            ax.text(
+                r["Average rating"] + 0.04,
+                bar.get_y() + bar.get_height() / 2,
+                f'{r["Average rating"]:.2f}  (n={int(r["Rated viewings"])})',
+                va="center",
+                fontsize=8,
+                color=FG,
+            )
+    style_axes(ax)
+    fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
     fig.tight_layout(rect=[0, 0.03, 1, 1])
-    fig.savefig("average_rating_by_genre.png", bbox_inches="tight"); plt.close(fig)
+    save_dark_figure(fig, "average_rating_by_genre.png")
+    plt.close(fig)
 
     # 3) Counts by release decade
     release_decades = {}
@@ -568,10 +714,19 @@ def main():
         p.plot(kind="bar", stacked=True, ax=ax, colormap="turbo", width=0.82)
         ax.set_title("Просмотры по десятилетию выхода фильма и жанру")
         ax.set_xlabel("Десятилетие выхода"); ax.set_ylabel("Количество просмотров")
-        ax.legend(title="10 самых частых жанров", bbox_to_anchor=(1.02, 1), loc="upper left")
-        fig.text(0.01, 0.01, footer, fontsize=7)
+        leg = ax.legend(
+            title="10 самых частых жанров",
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            labelcolor=FG,
+        )
+        if leg is not None and leg.get_title() is not None:
+            leg.get_title().set_color(FG)
+        style_axes(ax)
+        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
         fig.tight_layout(rect=[0, 0.03, 0.83, 1])
-        fig.savefig("genre_by_release_decade.png", bbox_inches="tight"); plt.close(fig)
+        save_dark_figure(fig, "genre_by_release_decade.png")
+        plt.close(fig)
 
     # 4) Genre share within each viewing year (top 10 genres)
     top10 = [g for g, _ in Counter(all_genres).most_common(10)]
@@ -587,34 +742,41 @@ def main():
         ax.set_xticks(range(len(years))); ax.set_xticklabels(years, rotation=45)
         ax.set_title("Доля просмотров каждого жанра по годам (%)")
         ax.set_xlabel("Год просмотра")
-        cb = fig.colorbar(im, ax=ax); cb.set_label("% просмотров за год с этим жанром")
-        fig.text(0.01, 0.01, footer, fontsize=7)
+        cb = fig.colorbar(im, ax=ax)
+        cb.set_label("% просмотров за год с этим жанром", color=FG)
+        cb.ax.yaxis.set_tick_params(color=FG)
+        plt.setp(plt.getp(cb.ax.axes, "yticklabels"), color=FG)
+        style_axes(ax)
+        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
         fig.tight_layout(rect=[0, 0.03, 1, 1])
-        fig.savefig("genre_share_by_viewing_year.png", bbox_inches="tight"); plt.close(fig)
+        save_dark_figure(fig, "genre_share_by_viewing_year.png")
+        plt.close(fig)
 
     # Compact genre + people/country stats for the Telegram HTML report.
-    genre_total_hits = len(all_genres)
-    top_for_report = []
-    for g, c in Counter(all_genres).most_common(8):
-        pct = round(100.0 * c / genre_total_hits, 1) if genre_total_hits else 0.0
-        top_for_report.append({"name": g, "count": int(c), "pct": pct})
+    top_for_report, genres_by_rating = rank_genres(diary, limit_count=8, limit_rating=8)
 
     deep = aggregate_person_stats(diary, cache)
-    made_country = chart_watches_by_country(deep.get("countries"), Path("watches_by_country.png"))
+    made_country = chart_watches_by_country(diary, cache, Path("watches_by_country.png"))
 
     genre_summary = {
         "unique_titles": int(total),
         "resolved": int(resolved),
         "unmatched": int(len(unmatched)),
         "top_genres": top_for_report,
-        "genre_hits": int(genre_total_hits),
+        "top_genres_by_rating": genres_by_rating,
+        "genre_hits": int(len(all_genres)),
         "countries": deep.get("countries") or [],
+        "countries_by_rating": deep.get("countries_by_rating") or [],
         "directors": deep.get("directors") or [],
         "directors_by_rating": deep.get("directors_by_rating") or [],
         "actors": deep.get("actors") or [],
+        "actors_by_rating": deep.get("actors_by_rating") or [],
         "languages": deep.get("languages") or [],
+        "languages_by_rating": deep.get("languages_by_rating") or [],
         "companies": deep.get("companies") or [],
+        "companies_by_rating": deep.get("companies_by_rating") or [],
         "min_person_count": int(MIN_PERSON_COUNT),
+        "min_rated_for_top": int(MIN_RATED_FOR_TOP),
         "charts": {"watches_by_country": bool(made_country)},
     }
     Path("genre_summary.json").write_text(

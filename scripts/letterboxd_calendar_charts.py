@@ -21,6 +21,10 @@ import sys
 import zipfile
 from pathlib import Path
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -28,9 +32,22 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+from letterboxd_palette import (  # noqa: E402
+    FG,
+    GRID,
+    apply_dark_chart_theme,
+    save_dark_figure,
+    style_axes,
+    watch_year_palette,
+)
+
+apply_dark_chart_theme()
+
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
 RATING_BINS = [round(x * 0.5, 1) for x in range(1, 11)]  # 0.5 … 5.0
+# Rating tops require strictly more than this many non-empty Letterboxd ratings.
+MIN_RATED_FOR_TOP = 3
 
 
 def load_diary(zip_path: Path) -> pd.DataFrame:
@@ -131,7 +148,6 @@ def build_diary_summary(df: pd.DataFrame) -> dict:
     with_release = df[df["Year"].notna()].copy()
     if not with_release.empty:
         with_release["release_year"] = with_release["Year"].astype(int)
-        # Unique films per release year (Name within that year).
         film_counts = (
             with_release[with_release["Name"] != ""]
             .groupby("release_year")["Name"]
@@ -142,21 +158,20 @@ def build_diary_summary(df: pd.DataFrame) -> dict:
             .groupby("release_year")["Rating"]
             .agg(avg="mean", rated="count")
         )
-        for year, n_films in film_counts.items():
-            if int(n_films) <= 3:
+        # Rating top: only years with rated count > 3 (non-empty Letterboxd Rating).
+        for year, row in rated_by_year.iterrows():
+            rated_n = int(row["rated"])
+            if rated_n <= MIN_RATED_FOR_TOP:
                 continue
-            if year not in rated_by_year.index:
-                continue
-            avg = float(rated_by_year.loc[year, "avg"])
             top_rated_release_years.append(
                 {
                     "year": int(year),
-                    "avg": round(avg, 2),
-                    "films": int(n_films),
-                    "rated": int(rated_by_year.loc[year, "rated"]),
+                    "avg": round(float(row["avg"]), 2),
+                    "films": int(film_counts.get(year, 0)),
+                    "rated": rated_n,
                 }
             )
-        top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["films"], -r["year"]))
+        top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["rated"], -r["year"]))
         top_rated_release_years = top_rated_release_years[:10]
 
         watch_by_release = with_release.groupby("release_year").size().sort_values(ascending=False)
@@ -182,16 +197,15 @@ def build_diary_summary(df: pd.DataFrame) -> dict:
         "top_rewatches": rewatch_rows,
         "top_rated_release_years": top_rated_release_years,
         "top_release_years_by_count": top_release_years_by_count,
+        "min_rated_for_top": MIN_RATED_FOR_TOP,
     }
 
 
-def year_colors(years: list[int]):
-    if not years:
-        return {}
-    cmap = plt.cm.turbo
-    if len(years) == 1:
-        return {years[0]: cmap(0.55)}
-    return {y: cmap(i / (len(years) - 1)) for i, y in enumerate(years)}
+def year_colors(years: list[int], palette_years: list[int] | None = None):
+    """Watch-year colors; palette_years sets the full turbo span when provided."""
+    scale = sorted(set(int(y) for y in (palette_years if palette_years is not None else years)))
+    full = watch_year_palette(scale)
+    return {int(y): full[int(y)] for y in years if int(y) in full}
 
 
 def stacked_counts(ax, categories: list[str], years: list[int], matrix: np.ndarray, colors: dict, ylabel: str):
@@ -205,15 +219,14 @@ def stacked_counts(ax, categories: list[str], years: list[int], matrix: np.ndarr
     ax.set_xticks(x)
     ax.set_xticklabels(categories, rotation=45 if len(categories) > 8 else 0, ha="right" if len(categories) > 8 else "center")
     ax.set_ylabel(ylabel)
-    ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
 
 
 def add_watch_year_legend(fig, years: list[int], colors: dict, title: str = "Год"):
     handles = [plt.Rectangle((0, 0), 1, 1, color=colors[y]) for y in years]
-    fig.legend(
+    leg = fig.legend(
         handles,
         [str(y) for y in years],
         title=title,
@@ -222,7 +235,10 @@ def add_watch_year_legend(fig, years: list[int], colors: dict, title: str = "Г�
         frameon=False,
         fontsize=8,
         title_fontsize=9,
+        labelcolor=FG,
     )
+    if leg is not None and leg.get_title() is not None:
+        leg.get_title().set_color(FG)
 
 
 def chart_weekday_month(df: pd.DataFrame, path: Path) -> None:
@@ -257,7 +273,7 @@ def chart_weekday_month(df: pd.DataFrame, path: Path) -> None:
 
     add_watch_year_legend(fig, years, colors, title="Год")
     fig.tight_layout(rect=[0, 0, 0.9, 0.96])
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
 
 
@@ -266,19 +282,20 @@ def chart_views_by_year(df: pd.DataFrame, path: Path) -> None:
     counts = years.value_counts().sort_index()
     labels = counts.index.tolist()
     values = counts.values.astype(int)
+    colors = year_colors(labels, palette_years=labels)
+    bar_colors = [colors.get(y, "#4C78A8") for y in labels]
 
     fig, ax = plt.subplots(figsize=(12, 6))
     x = np.arange(len(labels))
-    bars = ax.bar(x, values, color="#4C78A8", width=0.8)
+    bars = ax.bar(x, values, color=bar_colors, width=0.8)
     ax.set_title("Количество просмотров фильмов по годам")
     ax.set_xlabel("Год просмотра")
     ax.set_ylabel("Количество записей о просмотрах")
     ax.set_xticks(x)
     ax.set_xticklabels([str(y) for y in labels], rotation=45, ha="right")
-    ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
     ymax = max(values) if len(values) else 1
     ax.set_ylim(0, ymax * 1.12)
     for bar, value in zip(bars, values):
@@ -289,9 +306,10 @@ def chart_views_by_year(df: pd.DataFrame, path: Path) -> None:
             ha="center",
             va="bottom",
             fontsize=8,
+            color=FG,
         )
     fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
 
 
@@ -389,12 +407,12 @@ def chart_decade_rating(df: pd.DataFrame, path: Path) -> None:
 
     add_watch_year_legend(fig, years, colors, title="Год просмотра")
     fig.tight_layout(rect=[0, 0, 0.9, 0.96])
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
 
 
 def chart_average_rating_by_year(df: pd.DataFrame, path: Path) -> bool:
-    """Mean Letterboxd rating per watch year. Returns False if nothing to plot."""
+    """Mean Letterboxd rating per watch year. Marker colors follow watch-year palette."""
     rated = df[df["Rating"].notna()].copy()
     if rated.empty:
         return False
@@ -407,78 +425,96 @@ def chart_average_rating_by_year(df: pd.DataFrame, path: Path) -> bool:
     labels = grouped.index.tolist()
     values = grouped["mean"].astype(float).tolist()
     counts = grouped["count"].astype(int).tolist()
+    all_years = sorted(df["Watched Date"].dt.year.dropna().astype(int).unique().tolist())
+    colors = year_colors(labels, palette_years=all_years)
+    point_colors = [colors.get(y, "#4C78A8") for y in labels]
 
     fig, ax = plt.subplots(figsize=(12, 6))
     x = np.arange(len(labels))
-    ax.plot(x, values, color="#4C78A8", marker="o", linewidth=2, markersize=6)
+    ax.plot(x, values, color="#888888", linewidth=1.5, zorder=1)
+    ax.scatter(x, values, c=point_colors, s=64, zorder=2, edgecolors="#111111", linewidths=0.6)
     ax.set_ylim(0, 5.2)
     ax.set_title("Средняя оценка по годам просмотра")
     ax.set_xlabel("Год просмотра")
     ax.set_ylabel("Средняя оценка (из 5)")
     ax.set_xticks(x)
     ax.set_xticklabels([str(y) for y in labels], rotation=45, ha="right")
-    ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
     for xi, value, count in zip(x, values, counts):
-        ax.text(xi, value + 0.08, f"{value:.2f}\n(n={count})", ha="center", va="bottom", fontsize=7)
-    fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight", dpi=160)
-    plt.close(fig)
-    return True
-
-
-def chart_average_rating_by_release_decade(df: pd.DataFrame, path: Path) -> bool:
-    """Mean Letterboxd rating by film release decade (diary Year + Rating)."""
-    work = df[df["Year"].notna() & df["Rating"].notna()].copy()
-    if work.empty:
-        return False
-    work["decade"] = work["Year"].map(release_decade_label)
-    work = work[work["decade"].notna()]
-    if work.empty:
-        return False
-    grouped = work.groupby("decade")["Rating"].agg(["mean", "count"])
-    grouped = grouped[grouped["count"] >= 1].copy()
-    if grouped.empty:
-        return False
-    grouped["_sort"] = grouped.index.map(lambda label: int(str(label).rstrip("s")))
-    grouped = grouped.sort_values("_sort")
-
-    labels = grouped.index.tolist()
-    values = grouped["mean"].astype(float).tolist()
-    counts = grouped["count"].astype(int).tolist()
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    x = np.arange(len(labels))
-    bars = ax.bar(x, values, color="#54A24B", width=0.8)
-    ax.set_ylim(0, 5.2)
-    ax.set_title("Средняя оценка по десятилетию выхода")
-    ax.set_xlabel("Десятилетие выхода")
-    ax.set_ylabel("Средняя оценка (из 5)")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
-    ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    for bar, value, count in zip(bars, values, counts):
         ax.text(
-            bar.get_x() + bar.get_width() / 2,
+            xi,
             value + 0.08,
             f"{value:.2f}\n(n={count})",
             ha="center",
             va="bottom",
             fontsize=7,
+            color=FG,
         )
     fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    save_dark_figure(fig, path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def chart_average_rating_by_release_decade(df: pd.DataFrame, path: Path) -> bool:
+    """Rated views by release decade, stacked by watch year; avg rating labeled on top."""
+    work = df[df["Year"].notna() & df["Rating"].notna()].copy()
+    if work.empty:
+        return False
+    work["decade"] = work["Year"].map(release_decade_label)
+    work["watch_year"] = work["Watched Date"].dt.year.astype(int)
+    work = work[work["decade"].notna()]
+    if work.empty:
+        return False
+
+    decades = sorted(
+        {d for d in work["decade"].unique().tolist()},
+        key=lambda label: int(str(label).rstrip("s")),
+    )
+    all_years = sorted(df["Watched Date"].dt.year.dropna().astype(int).unique().tolist())
+    years = sorted(work["watch_year"].unique().tolist())
+    colors = year_colors(years, palette_years=all_years)
+    year_index = {y: i for i, y in enumerate(years)}
+    decade_index = {d: i for i, d in enumerate(decades)}
+    matrix = np.zeros((len(years), len(decades)), dtype=float)
+    for _, row in work.iterrows():
+        matrix[year_index[int(row["watch_year"])], decade_index[row["decade"]]] += 1
+
+    avg_by_decade = work.groupby("decade")["Rating"].agg(["mean", "count"])
+    totals = matrix.sum(axis=0)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    stacked_counts(ax, decades, years, matrix, colors, "Оценённые просмотры")
+    ax.set_title("Оценки по десятилетию выхода — цвет = год просмотра")
+    ax.set_xlabel("Десятилетие выхода")
+    ymax = float(totals.max()) if len(totals) else 1.0
+    ax.set_ylim(0, ymax * 1.22)
+    for di, decade in enumerate(decades):
+        if decade not in avg_by_decade.index:
+            continue
+        avg = float(avg_by_decade.loc[decade, "mean"])
+        n = int(avg_by_decade.loc[decade, "count"])
+        top = float(totals[di])
+        ax.text(
+            di,
+            top + ymax * 0.03,
+            f"ср. {avg:.2f}\n(n={n})",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color=FG,
+        )
+    add_watch_year_legend(fig, years, colors, title="Год просмотра")
+    fig.tight_layout(rect=[0, 0, 0.9, 1])
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
 
 
 def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 10) -> bool:
-    """Horizontal bar of films with the most diary entries (rewatches)."""
+    """Horizontal stacked bars of rewatched films, colored by watch year."""
     names = df["Name"].fillna("").astype(str).str.strip()
     years_release = df["Year"] if "Year" in df.columns else pd.Series(dtype=float)
     key = names + "|||" + years_release.map(lambda y: str(int(y)) if pd.notna(y) else "")
@@ -486,6 +522,7 @@ def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 10) -> bool:
     if work.empty:
         return False
     work["_key"] = key[names != ""]
+    work["watch_year"] = work["Watched Date"].dt.year.astype(int)
     grouped = work.groupby("_key", dropna=False).agg(
         count=("Name", "size"),
         Name=("Name", "first"),
@@ -495,33 +532,48 @@ def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 10) -> bool:
     if multi.empty:
         return False
 
+    keys = multi.index.tolist()
+    all_years = sorted(df["Watched Date"].dt.year.dropna().astype(int).unique().tolist())
+    years = sorted(work.loc[work["_key"].isin(keys), "watch_year"].unique().tolist())
+    colors = year_colors(years, palette_years=all_years)
+
     labels = []
-    for _, row in multi.iterrows():
+    for key_id in keys:
+        row = multi.loc[key_id]
         year_val = row["Year"]
         year_s = f" ({int(year_val)})" if pd.notna(year_val) else ""
         title = str(row["Name"])
         if len(title) > 42:
             title = title[:40] + "…"
         labels.append(f"{title}{year_s}")
-    values = multi["count"].astype(int).tolist()
+
+    matrix = np.zeros((len(years), len(keys)), dtype=float)
+    year_index = {y: i for i, y in enumerate(years)}
+    key_index = {k: i for i, k in enumerate(keys)}
+    for _, row in work[work["_key"].isin(keys)].iterrows():
+        matrix[year_index[int(row["watch_year"])], key_index[row["_key"]]] += 1
 
     fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.42)))
     y = np.arange(len(labels))
-    ax.barh(y, values, color="#F58518", height=0.72)
+    left = np.zeros(len(labels))
+    for yi, year in enumerate(years):
+        vals = matrix[yi]
+        ax.barh(y, vals, left=left, color=colors[year], height=0.72, edgecolor="none")
+        left += vals
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
     ax.set_xlabel("Записей в дневнике")
-    ax.set_title("Чаще всего в дневнике (повторные просмотры)")
-    ax.xaxis.grid(True, color="#dddddd", linewidth=0.8)
+    ax.set_title("Чаще всего в дневнике — цвет = год просмотра")
+    ax.xaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    xmax = max(values) if values else 1
+    style_axes(ax)
+    xmax = float(left.max()) if len(left) else 1.0
     ax.set_xlim(0, xmax * 1.15)
-    for yi, value in zip(y, values):
-        ax.text(value + xmax * 0.02, yi, str(value), va="center", fontsize=9)
-    fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight", dpi=160)
+    for yi, total in enumerate(left):
+        ax.text(total + xmax * 0.02, yi, str(int(total)), va="center", fontsize=9, color=FG)
+    add_watch_year_legend(fig, years, colors, title="Год просмотра")
+    fig.tight_layout(rect=[0, 0, 0.88, 1])
+    save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
 

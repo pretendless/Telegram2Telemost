@@ -75,9 +75,10 @@ test("unmatchedFromWorkdir reads csv", () => {
   assert.equal(unmatchedFromWorkdir(dir), 2);
 });
 
-test("calendarReadyText announces genre phase", () => {
+test("calendarReadyText announces TMDB details phase", () => {
   assert.match(calendarReadyText(), /Календарные графики готовы/);
-  assert.match(calendarReadyText(), /жанры/);
+  assert.match(calendarReadyText(), /TMDB/);
+  assert.match(calendarReadyText(), /режиссёры/);
 });
 
 test("escapeHtml for film titles", () => {
@@ -109,6 +110,7 @@ test("buildCalendarReportHtml uses bold numbers and HTML", () => {
   assert.match(html, /<b>100<\/b>/);
   assert.match(html, /Heat &amp; Dust/);
   assert.match(html, /Годы выхода — выше оценка/);
+  assert.match(html, /больше 3 оценок/);
   assert.match(html, /<b>1999<\/b>/);
   assert.match(html, /Годы выхода — больше просмотров/);
   assert.doesNotMatch(html, /parse_mode/);
@@ -128,26 +130,36 @@ test("buildGenreReportHtml lists top genres", () => {
   assert.match(html, /<b>Жанры \(TMDB\)<\/b>/);
   assert.match(html, /Comedy &lt;x&gt;/);
   assert.match(html, /<b>2<\/b>/);
+  assert.doesNotMatch(html, /выше оценка/);
 });
 
 test("buildGenreReportMessages splits genres and people/countries", () => {
   const msgs = buildGenreReportMessages({
     top_genres: [{ name: "Drama", count: 50, pct: 20 }],
+    top_genres_by_rating: [{ name: "Drama", count: 50, avg: 4.1, rated: 40 }],
     unmatched: 1,
     countries: [{ name: "United States of America", count: 40, avg: 3.8 }],
+    countries_by_rating: [{ name: "France", count: 10, avg: 4.5, rated: 8 }],
     directors: [{ name: "Nolan & Co", count: 5, avg: 4.2 }],
-    directors_by_rating: [{ name: "Nolan & Co", count: 5, avg: 4.2 }],
+    directors_by_rating: [{ name: "Nolan & Co", count: 5, avg: 4.2, rated: 5 }],
     actors: [{ name: "Actor <X>", count: 4, avg: 3.5 }],
+    actors_by_rating: [],
     languages: [{ name: "en", count: 30 }],
+    languages_by_rating: [{ name: "en", count: 30, avg: 3.9, rated: 20 }],
     companies: [{ name: "A24", count: 6, avg: 4.0 }],
+    companies_by_rating: [{ name: "A24", count: 6, avg: 4.0, rated: 6 }],
     min_person_count: 3,
   });
   assert.equal(msgs.length, 2);
   assert.match(msgs[0], /Жанры \(TMDB\)/);
+  assert.match(msgs[0], /Жанры \(TMDB\) — выше оценка/);
   assert.match(msgs[1], /Страны/);
+  assert.match(msgs[1], /Страны — выше оценка/);
   assert.match(msgs[1], /Режиссёры/);
   assert.match(msgs[1], /Nolan &amp; Co/);
   assert.match(msgs[1], /Actor &lt;X&gt;/);
+  assert.doesNotMatch(msgs[1], /Актёры — выше оценка/);
   assert.match(msgs[1], /английский/);
-  assert.match(msgs[1], /Студии/);
+  assert.match(msgs[1], /Студии — выше оценка/);
+  assert.match(msgs[1], /больше 3 оценок/);
 });
