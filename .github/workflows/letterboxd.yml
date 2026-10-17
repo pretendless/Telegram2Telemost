@@ -1,6 +1,6 @@
-# Telegram /genres → Letterboxd ZIP from Telegram file_id → Python charts → send PNGs.
+# Telegram /letterboxd → Letterboxd ZIP from Telegram file_id → Python charts → send PNGs.
 # Secrets: TG2TMBOT_TOKEN, TMDB_BEARER_TOKEN (Read Access Token). Do not print tokens.
-name: Letterboxd genres
+name: Letterboxd
 
 on:
   workflow_dispatch:

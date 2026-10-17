@@ -325,7 +325,7 @@ export const NEED_CREATE =
   "Сначала /create. Спрошу название, затем стикер из набора или ссылки t.me/addstickers/…. /done ставит в очередь.\n\nПодробнее — /format.";
 
 const STOP_CLEARED_HEAD = "Ввод прерван, незаконченный /create сброшен.";
-const STOP_GENRES_CLEARED_HEAD = "Ввод прерван, ожидание ZIP Letterboxd сброшено.";
+const STOP_LETTERBOXD_CLEARED_HEAD = "Ввод прерван, ожидание ZIP Letterboxd сброшено.";
 const STOP_IDLE_HEAD = "Линия свободна: сейчас нечего прерывать.";
 
 export const AWAIT_CREATE_PREFIX = "await:";
@@ -349,7 +349,7 @@ export const ADMIN_ONLY_COMMANDS = [
   { command: "restart", description: "Перезапустить загрузку" },
   { command: "project", description: "Вопрос или задача для Cursor Cloud Agent" },
   { command: "ghrun", description: "Запустить GitHub workflow" },
-  { command: "genres", description: "Графики жанров Letterboxd (доступно всем)" },
+  { command: "letterboxd", description: "Графики Letterboxd (доступно всем)" },
   { command: "login", description: "Войти в Яндекс" },
 ];
 
@@ -368,7 +368,7 @@ const COMMAND_LABELS = {
   restart: "перезапустить загрузку",
   project: "задача для агента",
   ghrun: "запустить workflow",
-  genres: "жанры Letterboxd",
+  letterboxd: "Letterboxd",
   login: "войти в Яндекс",
 };
 
@@ -385,12 +385,12 @@ export function startText(admin) {
 
 /** @param {boolean} cleared
  *  @param {boolean} admin
- *  @param {"create"|"genres"|""} [kind]
+ *  @param {"create"|"letterboxd"|""} [kind]
  */
 export function stopReply(cleared, admin, kind = "create") {
   let head = STOP_IDLE_HEAD;
   if (cleared) {
-    head = kind === "genres" ? STOP_GENRES_CLEARED_HEAD : STOP_CLEARED_HEAD;
+    head = kind === "letterboxd" ? STOP_LETTERBOXD_CLEARED_HEAD : STOP_CLEARED_HEAD;
   }
   return `${head}\n\n${commandList(admin)}`;
 }

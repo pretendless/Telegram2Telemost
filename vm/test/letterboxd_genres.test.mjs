@@ -1,30 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildGenresDispatch,
-  decodeAwaitGenres,
-  encodeAwaitGenres,
+  buildLetterboxdDispatch,
+  decodeAwaitLetterboxd,
+  encodeAwaitLetterboxd,
   isZipDocument,
   normalizeTelegramFileId,
-  parseGenresCommand,
+  parseLetterboxdCommand,
 } from "../letterboxd_genres.js";
 import { mapScriptError, unmatchedFromWorkdir } from "../../scripts/letterboxd_genres_run.mjs";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-test("parseGenresCommand", () => {
-  assert.equal(parseGenresCommand("/start"), null);
-  assert.deepEqual(parseGenresCommand("/genres"), { ok: true });
-  assert.deepEqual(parseGenresCommand("/genres@tg2tmbot"), { ok: true });
-  assert.deepEqual(parseGenresCommand("/genres extra"), { error: "usage" });
+test("parseLetterboxdCommand", () => {
+  assert.equal(parseLetterboxdCommand("/start"), null);
+  assert.equal(parseLetterboxdCommand("/genres"), null);
+  assert.deepEqual(parseLetterboxdCommand("/letterboxd"), { ok: true });
+  assert.deepEqual(parseLetterboxdCommand("/letterboxd@tg2tmbot"), { ok: true });
+  assert.deepEqual(parseLetterboxdCommand("/letterboxd extra"), { error: "usage" });
 });
 
-test("await genres encode/decode", () => {
-  const raw = encodeAwaitGenres({ since: "2026-10-17T00:00:00.000Z" });
-  assert.deepEqual(decodeAwaitGenres(raw), { kind: "genres", since: "2026-10-17T00:00:00.000Z" });
-  assert.equal(decodeAwaitGenres(""), null);
-  assert.equal(decodeAwaitGenres('{"step":"name"}'), null);
+test("await letterboxd encode/decode", () => {
+  const raw = encodeAwaitLetterboxd({ since: "2026-10-17T00:00:00.000Z" });
+  assert.deepEqual(decodeAwaitLetterboxd(raw), { kind: "letterboxd", since: "2026-10-17T00:00:00.000Z" });
+  assert.deepEqual(decodeAwaitLetterboxd('{"kind":"genres","since":"x"}'), { kind: "letterboxd", since: "x" });
+  assert.equal(decodeAwaitLetterboxd(""), null);
+  assert.equal(decodeAwaitLetterboxd('{"step":"name"}'), null);
 });
 
 test("isZipDocument and file_id", () => {
@@ -35,10 +37,10 @@ test("isZipDocument and file_id", () => {
   assert.equal(normalizeTelegramFileId("../x"), "");
 });
 
-test("buildGenresDispatch", () => {
-  const built = buildGenresDispatch({
+test("buildLetterboxdDispatch", () => {
+  const built = buildLetterboxdDispatch({
     repo: "pretendless/tg2tm",
-    workflow: "letterboxd-genres.yml",
+    workflow: "letterboxd.yml",
     ref: "main",
     jobId: "lb-1",
     chatId: "7",
@@ -46,7 +48,7 @@ test("buildGenresDispatch", () => {
   });
   assert.equal(
     built.url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/letterboxd-genres.yml/dispatches",
+    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/letterboxd.yml/dispatches",
   );
   assert.deepEqual(built.body, {
     ref: "main",

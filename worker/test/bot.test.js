@@ -936,7 +936,7 @@ test("/start and /stop list that chat's commands, one per line", async () => {
 
   sent.length = 0;
   await handle(packMessage(8502935020, "/start"), env, { sendMessage });
-  assert.match(sent[0].text, /\/stop — прервать ввод\n\/queue — очередь\n\/skip — пропустить пак\n\/restart — перезапустить загрузку\n\/project — задача для агента\n\/ghrun — запустить workflow\n\/genres — жанры Letterboxd\n\/login — войти в Яндекс$/);
+  assert.match(sent[0].text, /\/stop — прервать ввод\n\/queue — очередь\n\/skip — пропустить пак\n\/restart — перезапустить загрузку\n\/project — задача для агента\n\/ghrun — запустить workflow\n\/letterboxd — Letterboxd\n\/login — войти в Яндекс$/);
   assert.doesNotMatch(sent[0].text, /\/unstick|\/upload|\/connect/);
   assert.equal((sent[0].text.match(/TG2TM на связи/g) || []).length, 1);
 
@@ -2495,12 +2495,13 @@ test("/ghrun waitUntil defers GitHub dispatch", async () => {
   assert.deepEqual(dispatchCalls[0].body.inputs, { foo: "bar" });
 });
 
-test("ADMIN menu lists ghrun and genres", () => {
+test("ADMIN menu lists ghrun and letterboxd", () => {
   assert.equal(ADMIN_ONLY_COMMANDS.find((item) => item.command === "ghrun").description, "Запустить GitHub workflow");
   assert.equal(
-    ADMIN_ONLY_COMMANDS.find((item) => item.command === "genres").description,
-    "Графики жанров Letterboxd (доступно всем)",
+    ADMIN_ONLY_COMMANDS.find((item) => item.command === "letterboxd").description,
+    "Графики Letterboxd (доступно всем)",
   );
+  assert.equal(USER_COMMANDS.some((item) => item.command === "letterboxd"), false);
   assert.equal(USER_COMMANDS.some((item) => item.command === "genres"), false);
 });
 
@@ -2840,7 +2841,7 @@ function documentRequest(chatId, document) {
   });
 }
 
-test("/genres is runnable by users, hidden from user menu, waits for ZIP, /stop clears", async () => {
+test("/letterboxd is runnable by users, hidden from user menu, waits for ZIP, /stop clears", async () => {
   const env = envWith();
   env.LOGIN_CHAT_IDS = "8502935020";
   env.GH_DISPATCH_TOKEN = "dispatch-token";
@@ -2851,16 +2852,17 @@ test("/genres is runnable by users, hidden from user menu, waits for ZIP, /stop 
   };
 
   await handle(telegramRequest(7, "/start"), env, { sendMessage });
-  assert.doesNotMatch(sent[0].text, /\/genres/);
+  assert.doesNotMatch(sent[0].text, /\/letterboxd|\/genres/);
 
   sent.length = 0;
   await handle(telegramRequest(8502935020, "/start"), env, { sendMessage });
-  assert.match(sent[0].text, /\/genres — жанры Letterboxd/);
+  assert.match(sent[0].text, /\/letterboxd — Letterboxd/);
+  assert.doesNotMatch(sent[0].text, /\/genres/);
 
   sent.length = 0;
-  await handle(telegramRequest(7, "/genres"), env, { sendMessage });
+  await handle(telegramRequest(7, "/letterboxd"), env, { sendMessage });
   assert.match(sent[0].text, /ZIP экспорта Letterboxd/);
-  assert.ok(env.BOT_KV.store.get("await:genres:7"));
+  assert.ok(env.BOT_KV.store.get("await:letterboxd:7"));
 
   sent.length = 0;
   await handle(telegramRequest(7, "не zip"), env, { sendMessage });
@@ -2873,15 +2875,15 @@ test("/genres is runnable by users, hidden from user menu, waits for ZIP, /stop 
     { sendMessage },
   );
   assert.match(sent[0].text, /не ZIP/);
-  assert.ok(env.BOT_KV.store.get("await:genres:7"));
+  assert.ok(env.BOT_KV.store.get("await:letterboxd:7"));
 
   sent.length = 0;
   await handle(telegramRequest(7, "/stop"), env, { sendMessage });
   assert.match(sent[0].text, /ожидание ZIP Letterboxd сброшено/);
-  assert.equal(env.BOT_KV.store.get("await:genres:7"), undefined);
+  assert.equal(env.BOT_KV.store.get("await:letterboxd:7"), undefined);
 });
 
-test("/genres ZIP dispatches letterboxd-genres for any chat", async () => {
+test("/letterboxd ZIP dispatches letterboxd.yml for any chat", async () => {
   const env = envWith();
   env.LOGIN_CHAT_IDS = "8502935020";
   env.GH_DISPATCH_TOKEN = "dispatch-token";
@@ -2911,7 +2913,7 @@ test("/genres ZIP dispatches letterboxd-genres for any chat", async () => {
     return new Response(null, { status: 204 });
   };
 
-  await handle(telegramRequest(111, "/genres"), env, { sendMessage, fetch });
+  await handle(telegramRequest(111, "/letterboxd"), env, { sendMessage, fetch });
   sent.length = 0;
   await handle(
     documentRequest(111, {
@@ -2923,8 +2925,8 @@ test("/genres ZIP dispatches letterboxd-genres for any chat", async () => {
     { sendMessage, fetch },
   );
   assert.match(sent.map((row) => row.text).join("\n"), /ZIP принят/);
-  assert.equal(env.BOT_KV.store.get("await:genres:111"), undefined);
-  const dispatch = calls.find((call) => String(call.url).includes("letterboxd-genres.yml/dispatches"));
+  assert.equal(env.BOT_KV.store.get("await:letterboxd:111"), undefined);
+  const dispatch = calls.find((call) => String(call.url).includes("letterboxd.yml/dispatches"));
   assert.ok(dispatch);
   assert.equal(dispatch.body.inputs.chat_id, "111");
   assert.equal(dispatch.body.inputs.file_id, "BQACAgIAAxkBAAI1234567890abcd");

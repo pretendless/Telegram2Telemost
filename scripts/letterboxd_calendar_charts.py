@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extra Letterboxd diary charts (no TMDB): weekday/month stacks + views by year.
+"""Extra Letterboxd diary charts (no TMDB).
 
 Usage:
   python letterboxd_calendar_charts.py path/to/letterboxd-export.zip
@@ -7,6 +7,7 @@ Usage:
 Writes into the current working directory:
   views_by_weekday_month.png
   views_by_year.png
+  extra_stats_decade_rating.png
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import pandas as pd  # noqa: E402
 
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
+RATING_BINS = [round(x * 0.5, 1) for x in range(1, 11)]  # 0.5 … 5.0
 
 
 def load_diary(zip_path: Path) -> pd.DataFrame:
@@ -45,6 +47,14 @@ def load_diary(zip_path: Path) -> pd.DataFrame:
     df = df[df["Watched Date"].notna()].copy()
     if df.empty:
         raise RuntimeError("diary.csv не содержит дат просмотра.")
+    if "Year" in df.columns:
+        df["Year"] = pd.to_numeric(df["Year"], errors="coerce")
+    else:
+        df["Year"] = np.nan
+    if "Rating" in df.columns:
+        df["Rating"] = pd.to_numeric(df["Rating"], errors="coerce")
+    else:
+        df["Rating"] = np.nan
     return df
 
 
@@ -57,7 +67,7 @@ def year_colors(years: list[int]):
     return {y: cmap(i / (len(years) - 1)) for i, y in enumerate(years)}
 
 
-def stacked_counts(ax, categories: list[str], years: list[int], matrix: np.ndarray, colors: dict):
+def stacked_counts(ax, categories: list[str], years: list[int], matrix: np.ndarray, colors: dict, ylabel: str):
     """matrix shape: (len(years), len(categories))"""
     bottom = np.zeros(len(categories))
     x = np.arange(len(categories))
@@ -66,29 +76,42 @@ def stacked_counts(ax, categories: list[str], years: list[int], matrix: np.ndarr
         ax.bar(x, vals, bottom=bottom, color=colors[year], width=0.82, edgecolor="none")
         bottom += vals
     ax.set_xticks(x)
-    ax.set_xticklabels(categories)
-    ax.set_ylabel("Количество записей о просмотрах")
+    ax.set_xticklabels(categories, rotation=45 if len(categories) > 8 else 0, ha="right" if len(categories) > 8 else "center")
+    ax.set_ylabel(ylabel)
     ax.yaxis.grid(True, color="#dddddd", linewidth=0.8)
     ax.set_axisbelow(True)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
 
+def add_watch_year_legend(fig, years: list[int], colors: dict, title: str = "Год"):
+    handles = [plt.Rectangle((0, 0), 1, 1, color=colors[y]) for y in years]
+    fig.legend(
+        handles,
+        [str(y) for y in years],
+        title=title,
+        loc="center left",
+        bbox_to_anchor=(0.92, 0.5),
+        frameon=False,
+        fontsize=8,
+        title_fontsize=9,
+    )
+
+
 def chart_weekday_month(df: pd.DataFrame, path: Path) -> None:
     df = df.copy()
-    df["year"] = df["Watched Date"].dt.year.astype(int)
-    # pandas: Monday=0 … Sunday=6 — matches Пн…Вс
+    df["watch_year"] = df["Watched Date"].dt.year.astype(int)
     df["weekday"] = df["Watched Date"].dt.weekday
-    df["month"] = df["Watched Date"].dt.month  # 1..12
+    df["month"] = df["Watched Date"].dt.month
 
-    years = sorted(df["year"].unique().tolist())
+    years = sorted(df["watch_year"].unique().tolist())
     colors = year_colors(years)
 
     week = np.zeros((len(years), 7), dtype=float)
     month = np.zeros((len(years), 12), dtype=float)
     year_index = {y: i for i, y in enumerate(years)}
     for _, row in df.iterrows():
-        yi = year_index[int(row["year"])]
+        yi = year_index[int(row["watch_year"])]
         week[yi, int(row["weekday"])] += 1
         month[yi, int(row["month"]) - 1] += 1
 
@@ -99,25 +122,13 @@ def chart_weekday_month(df: pd.DataFrame, path: Path) -> None:
         y=0.98,
     )
 
-    stacked_counts(axes[0], WEEKDAYS, years, week, colors)
+    stacked_counts(axes[0], WEEKDAYS, years, week, colors, "Количество записей о просмотрах")
     axes[0].set_title("Просмотры по дням недели — состав по годам")
 
-    stacked_counts(axes[1], MONTHS, years, month, colors)
+    stacked_counts(axes[1], MONTHS, years, month, colors, "Количество записей о просмотрах")
     axes[1].set_title("Просмотры по месяцам — состав по годам")
 
-    handles = [
-        plt.Rectangle((0, 0), 1, 1, color=colors[y]) for y in years
-    ]
-    fig.legend(
-        handles,
-        [str(y) for y in years],
-        title="Год",
-        loc="center left",
-        bbox_to_anchor=(0.92, 0.5),
-        frameon=False,
-        fontsize=8,
-        title_fontsize=9,
-    )
+    add_watch_year_legend(fig, years, colors, title="Год")
     fig.tight_layout(rect=[0, 0, 0.9, 0.96])
     fig.savefig(path, bbox_inches="tight", dpi=160)
     plt.close(fig)
@@ -157,6 +168,104 @@ def chart_views_by_year(df: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
+def release_decade_label(year) -> str | None:
+    if pd.isna(year):
+        return None
+    try:
+        y = int(year)
+    except (TypeError, ValueError):
+        return None
+    if y < 1000 or y > 2100:
+        return None
+    decade = (y // 10) * 10
+    return f"{decade}s"
+
+
+def round_rating(value) -> float | None:
+    if pd.isna(value):
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v <= 0 or v > 5:
+        return None
+    # Nearest half-star (Letterboxd scale).
+    rounded = round(v * 2) / 2
+    if rounded < 0.5:
+        rounded = 0.5
+    if rounded > 5.0:
+        rounded = 5.0
+    return rounded
+
+
+def chart_decade_rating(df: pd.DataFrame, path: Path) -> None:
+    df = df.copy()
+    df["watch_year"] = df["Watched Date"].dt.year.astype(int)
+    df["decade"] = df["Year"].map(release_decade_label)
+    df["rating_bin"] = df["Rating"].map(round_rating)
+
+    years = sorted(df["watch_year"].unique().tolist())
+    colors = year_colors(years)
+    year_index = {y: i for i, y in enumerate(years)}
+
+    decades = sorted(
+        {d for d in df["decade"].dropna().unique().tolist()},
+        key=lambda label: int(str(label).rstrip("s")),
+    )
+    if not decades:
+        # Still emit a chart so the bot always gets this PNG when diary parses.
+        decades = ["2020s"]
+
+    decade_matrix = np.zeros((len(years), len(decades)), dtype=float)
+    decade_index = {d: i for i, d in enumerate(decades)}
+    for _, row in df.iterrows():
+        decade = row["decade"]
+        if decade not in decade_index:
+            continue
+        yi = year_index[int(row["watch_year"])]
+        decade_matrix[yi, decade_index[decade]] += 1
+
+    rating_matrix = np.zeros((len(years), len(RATING_BINS)), dtype=float)
+    rating_index = {r: i for i, r in enumerate(RATING_BINS)}
+    for _, row in df.iterrows():
+        rating = row["rating_bin"]
+        if rating not in rating_index:
+            continue
+        yi = year_index[int(row["watch_year"])]
+        rating_matrix[yi, rating_index[rating]] += 1
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10), sharey=False)
+    fig.suptitle("Дополнительная статистика Letterboxd", fontsize=14, y=0.98)
+
+    stacked_counts(
+        axes[0],
+        decades,
+        years,
+        decade_matrix,
+        colors,
+        "Количество записей о просмотрах",
+    )
+    axes[0].set_title("Просмотренные фильмы по десятилетию выхода — цвет обозначает год просмотра")
+
+    rating_labels = [f"{r:g}" for r in RATING_BINS]
+    stacked_counts(
+        axes[1],
+        rating_labels,
+        years,
+        rating_matrix,
+        colors,
+        "Количество записей с оценкой",
+    )
+    axes[1].set_title("Распределение оценок — цвет обозначает год просмотра")
+    axes[1].set_xlabel("Оценка Letterboxd")
+
+    add_watch_year_legend(fig, years, colors, title="Год просмотра")
+    fig.tight_layout(rect=[0, 0, 0.9, 0.96])
+    fig.savefig(path, bbox_inches="tight", dpi=160)
+    plt.close(fig)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) < 1:
@@ -167,10 +276,13 @@ def main(argv: list[str] | None = None) -> int:
         diary = load_diary(zip_path)
         chart_weekday_month(diary, Path("views_by_weekday_month.png"))
         chart_views_by_year(diary, Path("views_by_year.png"))
+        chart_decade_rating(diary, Path("extra_stats_decade_rating.png"))
     except RuntimeError as err:
         print(str(err), file=sys.stderr)
         return 2
-    print("Готово: views_by_weekday_month.png, views_by_year.png")
+    print(
+        "Готово: views_by_weekday_month.png, views_by_year.png, extra_stats_decade_rating.png"
+    )
     return 0
 
 

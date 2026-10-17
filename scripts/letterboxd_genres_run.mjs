@@ -12,7 +12,11 @@ const GENRE_PNGS = [
   "genre_share_by_viewing_year.png",
 ];
 
-const CALENDAR_PNGS = ["views_by_weekday_month.png", "views_by_year.png"];
+const CALENDAR_PNGS = [
+  "views_by_weekday_month.png",
+  "views_by_year.png",
+  "extra_stats_decade_rating.png",
+];
 
 const PNG_NAMES = [...CALENDAR_PNGS, ...GENRE_PNGS];
 
@@ -164,7 +168,7 @@ export async function main() {
     throw new Error("TMDB_BEARER_TOKEN missing");
   }
 
-  const workdir = join(tmpdir(), `letterboxd-genres-${jobId}`);
+  const workdir = join(tmpdir(), `letterboxd-${jobId}`);
   mkdirSync(workdir, { recursive: true });
   const zipPath = join(workdir, "export.zip");
 
