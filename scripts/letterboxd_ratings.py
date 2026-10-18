@@ -3,9 +3,8 @@
 Identity: **Name + Year** (not diary Letterboxd URI — those point at diary
 entries, so each rewatch has a distinct URI and would inflate rated counts).
 
-Primary rating source for averages / «выше оценка» is **ratings.csv**
-(via letterboxd_export.merged_film_ratings). `latest_rated_per_film` is the
-diary fallback when a film is rated only in the diary.
+For averages / «выше оценка» (via letterboxd_export.merged_film_ratings):
+diary latest-rated wins; **ratings.csv** fills films with no diary Rating.
 
 Watch-count metrics still use the full diary / catalog rows.
 
