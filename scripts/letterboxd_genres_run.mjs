@@ -8,17 +8,23 @@ import { tmpdir } from "node:os";
 const GENRE_PNGS = [
   "genre_counts_by_viewing_year.png",
   "average_rating_by_genre.png",
+  "worst_average_rating_by_genre.png",
   "genre_by_release_decade.png",
   "watches_by_country.png",
   "average_rating_by_country.png",
+  "worst_average_rating_by_country.png",
   "watches_by_director.png",
   "average_rating_by_director.png",
+  "worst_average_rating_by_director.png",
   "watches_by_actor.png",
   "average_rating_by_actor.png",
+  "worst_average_rating_by_actor.png",
   "watches_by_language.png",
   "average_rating_by_language.png",
+  "worst_average_rating_by_language.png",
   "watches_by_studio.png",
   "average_rating_by_studio.png",
+  "worst_average_rating_by_studio.png",
 ];
 
 const CALENDAR_PNGS = [
@@ -27,9 +33,11 @@ const CALENDAR_PNGS = [
   "extra_stats_decade_rating.png",
   "average_rating_by_year.png",
   "average_rating_by_release_decade.png",
+  "worst_average_rating_by_release_decade.png",
   "top_rewatches.png",
   "watches_by_release_year.png",
   "average_rating_by_release_year.png",
+  "worst_average_rating_by_release_year.png",
 ];
 
 const CALENDAR_CAPTIONS = {
@@ -38,25 +46,33 @@ const CALENDAR_CAPTIONS = {
   "extra_stats_decade_rating.png": "Десятилетия выхода и оценки",
   "average_rating_by_year.png": "Средняя оценка по годам просмотра",
   "average_rating_by_release_decade.png": "Средняя оценка по десятилетию выхода",
+  "worst_average_rating_by_release_decade.png": "Десятилетия выхода — ниже оценка",
   "top_rewatches.png": "Чаще всего в дневнике",
   "watches_by_release_year.png": "Годы выхода — больше просмотров",
   "average_rating_by_release_year.png": "Годы выхода — выше оценка",
+  "worst_average_rating_by_release_year.png": "Годы выхода — ниже оценка",
 };
 
 const GENRE_CAPTIONS = {
   "genre_counts_by_viewing_year.png": "Жанры по годам просмотра",
-  "average_rating_by_genre.png": "Средняя оценка по жанрам",
+  "average_rating_by_genre.png": "Жанры — выше оценка",
+  "worst_average_rating_by_genre.png": "Жанры — ниже оценка",
   "genre_by_release_decade.png": "Жанры по десятилетию выхода",
   "watches_by_country.png": "Страны производства (TMDB)",
   "average_rating_by_country.png": "Страны — выше оценка",
+  "worst_average_rating_by_country.png": "Страны — ниже оценка",
   "watches_by_director.png": "Режиссёры — просмотры",
   "average_rating_by_director.png": "Режиссёры — выше оценка",
+  "worst_average_rating_by_director.png": "Режиссёры — ниже оценка",
   "watches_by_actor.png": "Актёры — просмотры",
   "average_rating_by_actor.png": "Актёры — выше оценка",
+  "worst_average_rating_by_actor.png": "Актёры — ниже оценка",
   "watches_by_language.png": "Язык оригинала — просмотры",
   "average_rating_by_language.png": "Язык оригинала — выше оценка",
+  "worst_average_rating_by_language.png": "Язык оригинала — ниже оценка",
   "watches_by_studio.png": "Студии — просмотры",
   "average_rating_by_studio.png": "Студии — выше оценка",
+  "worst_average_rating_by_studio.png": "Студии — ниже оценка",
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

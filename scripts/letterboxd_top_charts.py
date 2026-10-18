@@ -141,8 +141,12 @@ def chart_rating_vbar(
     footer: str | None = None,
     ylabel: str = "Средняя оценка (из 5)",
     limit: int = TOP_N_DEFAULT,
+    ascending: bool = False,
 ) -> bool:
-    """Vertical bars: X = category, Y = mean rating; color blue→green→red."""
+    """Vertical bars: X = category, Y = mean rating; color blue→green→red.
+
+    ascending=False → best first («выше оценка»); True → worst first («ниже оценка»).
+    """
     usable = []
     for row in rows or []:
         avg = row.get(avg_key)
@@ -163,8 +167,12 @@ def chart_rating_vbar(
     if not usable:
         return False
 
-    # Highest average on the left (descending).
-    usable.sort(key=lambda r: (-r[1], -(r[2] or 0), r[0]))
+    if ascending:
+        # Worst average on the left.
+        usable.sort(key=lambda r: (r[1], -(r[2] or 0), r[0]))
+    else:
+        # Highest average on the left (descending).
+        usable.sort(key=lambda r: (-r[1], -(r[2] or 0), r[0]))
     if limit and len(usable) > limit:
         usable = usable[:limit]
     labels = [_short_label(lab, limit=18) for lab, _, _ in usable]
@@ -302,9 +310,14 @@ def chart_release_years_by_count(
 
 
 def chart_release_years_by_rating(
-    rows: list[dict], path: Path, limit: int = TOP_N_DEFAULT
+    rows: list[dict],
+    path: Path,
+    limit: int = TOP_N_DEFAULT,
+    *,
+    ascending: bool = False,
+    title: str | None = None,
 ) -> bool:
-    """«Годы выхода — выше оценка» as vertical blue→green→red bars."""
+    """«Годы выхода — выше/ниже оценка» as vertical blue→green→red bars."""
     normalized = []
     for row in rows or []:
         year = row.get("year")
@@ -317,11 +330,18 @@ def chart_release_years_by_rating(
                 "rated": row.get("rated"),
             }
         )
+    if title is None:
+        title = (
+            "Годы выхода — ниже оценка (больше 3 оценённых фильмов)"
+            if ascending
+            else "Годы выхода — выше оценка (больше 3 оценённых фильмов)"
+        )
     return chart_rating_vbar(
         normalized,
         path,
-        title="Годы выхода — выше оценка (больше 3 оценённых фильмов)",
+        title=title,
         limit=limit,
+        ascending=ascending,
     )
 
 
