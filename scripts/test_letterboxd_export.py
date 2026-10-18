@@ -9,6 +9,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+import pandas as pd
+
 from letterboxd_calendar_charts import build_diary_summary, main as cal_main
 from letterboxd_export import latest_rated_union, load_export, load_ratings, merged_film_ratings
 
@@ -27,7 +29,7 @@ def _write_zip(
             zf.writestr("ratings.csv", ratings)
 
 
-def test_union_and_ratings_csv(tmp: Path) -> None:
+def test_union_and_diary_wins(tmp: Path) -> None:
     diary_csv = """Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date
 2024-01-02,Diary Only,2020,https://boxd.it/aaa,4.0,,,2024-01-01
 2024-01-03,Shared Film,2019,https://boxd.it/shared,3.0,,,2024-01-02
@@ -38,7 +40,7 @@ def test_union_and_ratings_csv(tmp: Path) -> None:
 2020-01-01,Shared Film,2019,https://boxd.it/film2
 2020-01-01,Watched Unrated,2017,https://boxd.it/film3
 """
-    # ratings.csv wins over diary for Shared Film (1.0 vs diary latest 4.5).
+    # ratings.csv must NOT override diary latest for Shared Film (4.5).
     ratings_csv = """Date,Name,Year,Letterboxd URI,Rating
 2020-01-01,Watched Only,2018,https://boxd.it/film1,5.0
 2020-01-01,Shared Film,2019,https://boxd.it/film2,1.0
@@ -52,12 +54,12 @@ def test_union_and_ratings_csv(tmp: Path) -> None:
     assert set(only["Name"]) == {"Watched Only", "Watched Unrated"}
     assert len(catalog) == 5, len(catalog)
 
-    # ratings.csv primary: Shared Film = 1.0 (not diary 4.5); Watched Only from ratings.
     rated = film_ratings
-    by_name = {r["Name"]: float(r["Rating"]) for _, r in rated.iterrows()}
-    assert by_name["Shared Film"] == 1.0, by_name
-    assert by_name["Watched Only"] == 5.0
-    assert by_name["Diary Only"] == 4.0
+    by_name = {r["Name"]: (float(r["Rating"]), r.get("source")) for _, r in rated.iterrows()}
+    assert by_name["Shared Film"][0] == 4.5, by_name  # diary latest, not ratings 1.0
+    assert by_name["Shared Film"][1] == "diary"
+    assert by_name["Watched Only"] == (5.0, "ratings")  # no diary rating → ratings.csv
+    assert by_name["Diary Only"][0] == 4.0
     assert "Watched Unrated" not in by_name
 
     summary = build_diary_summary(
@@ -65,7 +67,7 @@ def test_union_and_ratings_csv(tmp: Path) -> None:
     )
     assert summary["unique_films"] == 4
     assert summary["watched_only_films"] == 2
-    assert summary["rated_count"] == 3  # all three have ratings.csv entries in catalog
+    assert summary["rated_count"] == 3
     assert summary["peak_year"] == 2024
 
     os.chdir(tmp)
@@ -74,6 +76,52 @@ def test_union_and_ratings_csv(tmp: Path) -> None:
     data = json.loads((tmp / "diary_summary.json").read_text(encoding="utf-8"))
     assert data["unique_films"] == 4
     assert data["rated_count"] == 3
+
+
+def test_diary_latest_beats_older_diary_and_ratings_csv() -> None:
+    """Ocean's-style: diary 4.5 then 3.0 + ratings.csv 4.5 → effective 3.0."""
+    diary = pd.DataFrame(
+        [
+            {
+                "Name": "Ocean's Eleven",
+                "Year": 2001,
+                "Rating": 4.5,
+                "Watched Date": pd.Timestamp("2013-02-12"),
+            },
+            {
+                "Name": "Ocean's Eleven",
+                "Year": 2001,
+                "Rating": 3.0,
+                "Watched Date": pd.Timestamp("2016-02-12"),
+            },
+        ]
+    )
+    ratings = pd.DataFrame(
+        [{"Name": "Ocean's Eleven", "Year": 2001, "Rating": 4.5, "source": "ratings"}]
+    )
+    merged = merged_film_ratings(ratings, diary)
+    assert len(merged) == 1
+    assert float(merged.iloc[0]["Rating"]) == 3.0
+    assert merged.iloc[0]["source"] == "diary"
+    assert float(latest_rated_union(diary, None, ratings=ratings).iloc[0]["Rating"]) == 3.0
+
+
+def test_diary_wins_over_ratings_csv() -> None:
+    diary = pd.DataFrame(
+        [
+            {
+                "Name": "X",
+                "Year": 2000,
+                "Rating": 5.0,
+                "Watched Date": pd.Timestamp("2024-01-01"),
+            }
+        ]
+    )
+    ratings = pd.DataFrame([{"Name": "X", "Year": 2000, "Rating": 2.0, "source": "ratings"}])
+    merged = merged_film_ratings(ratings, diary)
+    assert len(merged) == 1
+    assert float(merged.iloc[0]["Rating"]) == 5.0
+    assert merged.iloc[0]["source"] == "diary"
 
 
 def test_diary_fallback_when_no_ratings_csv(tmp: Path) -> None:
@@ -86,42 +134,24 @@ def test_diary_fallback_when_no_ratings_csv(tmp: Path) -> None:
     diary, catalog, only, film_ratings = load_export(zip_path)
     assert len(only) == 0
     assert len(load_ratings(zip_path)) == 0
-    # Diary latest 5.0 as fallback.
     assert len(film_ratings) == 1
     assert float(film_ratings.iloc[0]["Rating"]) == 5.0
-    assert build_diary_summary(
-        diary, catalog=catalog, watched_only=only, film_ratings=film_ratings
-    )["unique_films"] == 1
-
-
-def test_ratings_csv_wins_over_diary() -> None:
-    diary = __import__("pandas").DataFrame(
-        [
-            {
-                "Name": "X",
-                "Year": 2000,
-                "Rating": 5.0,
-                "Watched Date": __import__("pandas").Timestamp("2024-01-01"),
-            }
-        ]
+    assert (
+        build_diary_summary(
+            diary, catalog=catalog, watched_only=only, film_ratings=film_ratings
+        )["unique_films"]
+        == 1
     )
-    ratings = __import__("pandas").DataFrame(
-        [{"Name": "X", "Year": 2000, "Rating": 2.0, "source": "ratings"}]
-    )
-    merged = merged_film_ratings(ratings, diary)
-    assert len(merged) == 1
-    assert float(merged.iloc[0]["Rating"]) == 2.0
-    # Compatibility wrapper.
-    assert float(latest_rated_union(diary, None, ratings=ratings).iloc[0]["Rating"]) == 2.0
 
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as raw:
         tmp = Path(raw)
         os.chdir(tmp)
-        test_union_and_ratings_csv(tmp)
+        test_union_and_diary_wins(tmp)
+        test_diary_latest_beats_older_diary_and_ratings_csv()
+        test_diary_wins_over_ratings_csv()
         test_diary_fallback_when_no_ratings_csv(tmp)
-        test_ratings_csv_wins_over_diary()
     print("test_letterboxd_export: ok")
     return 0
 

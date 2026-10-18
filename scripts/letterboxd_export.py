@@ -6,10 +6,11 @@ Catalog = diary ∪ watched-only films for date-insensitive stats.
 Film match across files uses Name + Year — diary Letterboxd URIs point at
 diary entries, watched/ratings URIs at film pages, so URI identity does not align.
 
-Ratings for averages / «выше оценка»:
-  1) ratings.csv is primary (one rating per film),
-  2) else latest diary Rating (Name+Year) if the film is missing from ratings.csv.
-Watched.csv has no Rating column in Letterboxd exports — do not invent ratings.
+Ratings for averages / «выше оценка» (one Rating per Name+Year):
+  1) If any diary row has a Rating → latest diary Watched Date with a Rating,
+  2) Else → ratings.csv (rated without a diary entry).
+Never prefer ratings.csv over a diary rating. Never use an older diary rating
+when a newer diary rating exists. watched.csv has no Rating column.
 """
 
 from __future__ import annotations
@@ -203,29 +204,29 @@ def union_catalog(diary: pd.DataFrame, watched: pd.DataFrame) -> tuple[pd.DataFr
 def merged_film_ratings(ratings: pd.DataFrame | None, diary: pd.DataFrame) -> pd.DataFrame:
     """One row per Name+Year with Rating.
 
-    Precedence: ratings.csv wins; diary latest-rated fills films absent from ratings.csv.
+    Precedence: diary latest-rated wins; ratings.csv fills films with no diary Rating.
     """
     parts: list[pd.DataFrame] = []
-    rating_keys: set[str] = set()
+    diary_keys: set[str] = set()
+
+    diary_latest = latest_rated_per_film(diary)
+    if diary_latest is not None and not diary_latest.empty:
+        d = diary_latest.copy()
+        d["_film_key"] = film_name_year_key(d)
+        d["source"] = "diary"
+        diary_keys = set(d["_film_key"].tolist())
+        parts.append(d)
 
     if ratings is not None and not ratings.empty and "Rating" in ratings.columns:
         r = ratings[ratings["Rating"].notna()].copy()
         if not r.empty:
             r["_film_key"] = film_name_year_key(r)
             r = r.groupby("_film_key", dropna=False, as_index=False).head(1)
-            r["source"] = r.get("source", "ratings")
-            rating_keys = set(r["_film_key"].tolist())
-            parts.append(r)
-
-    diary_latest = latest_rated_per_film(diary)
-    if diary_latest is not None and not diary_latest.empty:
-        d = diary_latest.copy()
-        d["_film_key"] = film_name_year_key(d)
-        if rating_keys:
-            d = d[~d["_film_key"].isin(rating_keys)].copy()
-        if not d.empty:
-            d["source"] = "diary"
-            parts.append(d)
+            if diary_keys:
+                r = r[~r["_film_key"].isin(diary_keys)].copy()
+            if not r.empty:
+                r["source"] = "ratings"
+                parts.append(r)
 
     if not parts:
         return _empty_ratings_frame()
@@ -256,7 +257,7 @@ def latest_rated_union(
     watched_only: pd.DataFrame | None = None,
     ratings: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Unique-film ratings: ratings.csv primary, diary latest as fallback.
+    """Unique-film ratings: diary latest wins; ratings.csv fills non-diary gaps.
 
     `watched_only` is accepted for call-site compatibility; watched.csv has no
     ratings in Letterboxd exports. Prefer passing `ratings` from load_ratings.
@@ -271,7 +272,7 @@ def load_export(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return (diary, catalog, watched_only, film_ratings).
 
-    film_ratings = ratings.csv ∪ diary-only rated gaps (ratings.csv wins).
+    film_ratings = diary latest-rated ∪ ratings.csv gaps (diary wins).
     """
     diary = load_diary(zip_path, require_dates=True)
     watched = load_watched(zip_path)
