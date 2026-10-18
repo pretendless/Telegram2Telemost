@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from letterboxd_palette import rating_color
+from letterboxd_palette import RATING_VMAX, RATING_VMIN, rating_color, rating_colormap
 from letterboxd_top_charts import (
-    chart_rating_hbar,
+    TOP_N_DEFAULT,
+    chart_rating_vbar,
     chart_release_years_by_count,
     chart_release_years_by_rating,
     display_lang,
@@ -20,12 +21,34 @@ def test_display_lang():
     assert display_lang("XX") == "xx"
 
 
-def test_rating_color_warmer_is_higher_end():
-    cool = rating_color(2.0)
-    warm = rating_color(5.0)
-    # coolwarm: low → blue-ish (higher B), high → red-ish (higher R)
-    assert cool[2] > cool[0]
-    assert warm[0] > warm[2]
+def test_top_n_default_about_20():
+    assert TOP_N_DEFAULT == 20
+
+
+def test_rating_colormap_is_blue_green_red():
+    cmap = rating_colormap()
+    low = cmap(0.0)
+    mid = cmap(0.5)
+    high = cmap(1.0)
+    # low: blue dominates red
+    assert low[2] > low[0]
+    # mid: green dominates
+    assert mid[1] > mid[0] and mid[1] > mid[2]
+    # high: red dominates blue
+    assert high[0] > high[2]
+    # not a pale peach mid (coolwarm mid ≈ white/cream)
+    assert not (mid[0] > 0.85 and mid[1] > 0.85 and mid[2] > 0.85)
+
+
+def test_rating_color_fixed_scale_separates_high_band():
+    """3.6 vs 4.5 must not collapse into the same flesh band."""
+    a = rating_color(3.6, vmin=RATING_VMIN, vmax=RATING_VMAX)
+    b = rating_color(4.5, vmin=RATING_VMIN, vmax=RATING_VMAX)
+    # Distinct colors
+    dist = sum(abs(x - y) for x, y in zip(a[:3], b[:3]))
+    assert dist > 0.15
+    # Higher rating redder
+    assert b[0] >= a[0]
 
 
 def test_release_year_charts(tmp_path: Path | None = None):
@@ -52,18 +75,17 @@ def test_release_year_charts(tmp_path: Path | None = None):
     assert chart_release_years_by_rating(rows, rating_path) is True
     assert rating_path.is_file() and rating_path.stat().st_size > 0
 
-    # Gate: empty after threshold → no chart
     empty = out / "empty_rating.png"
     assert chart_release_years_by_rating([], empty) is False
     assert not empty.exists()
 
 
-def test_rating_hbar_skips_bad_avg(tmp_path: Path | None = None):
+def test_rating_vbar_skips_bad_avg(tmp_path: Path | None = None):
     out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
     out.mkdir(parents=True, exist_ok=True)
     path = out / "directors_rating.png"
     assert (
-        chart_rating_hbar(
+        chart_rating_vbar(
             [
                 {"name": "Good", "avg": 4.1, "rated": 6},
                 {"name": "Bad", "avg": None, "rated": 4},
@@ -78,7 +100,9 @@ def test_rating_hbar_skips_bad_avg(tmp_path: Path | None = None):
 
 if __name__ == "__main__":
     test_display_lang()
-    test_rating_color_warmer_is_higher_end()
+    test_top_n_default_about_20()
+    test_rating_colormap_is_blue_green_red()
+    test_rating_color_fixed_scale_separates_high_band()
     test_release_year_charts()
-    test_rating_hbar_skips_bad_avg()
+    test_rating_vbar_skips_bad_avg()
     print("ok")

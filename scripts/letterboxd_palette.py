@@ -36,13 +36,49 @@ def color_for_year(palette: dict[int, tuple], year: int, fallback=(0.3, 0.47, 0.
     return palette.get(int(year), fallback)
 
 
-def rating_color(avg: float, vmin: float = 2.0, vmax: float = 5.0) -> tuple:
-    """Map mean Letterboxd rating to cool→warm (blue → orange/red).
+# Fixed Letterboxd rating scale for colormap norm (half-stars … 5).
+# Avoid data-relative norms that squash 3.6–4.5 into a peach mid-band.
+RATING_VMIN = 0.5
+RATING_VMAX = 5.0
+RATING_COLORBAR_LABEL = "оценка (синий → зелёный → красный)"
 
-    Used for «выше оценка» bar charts — not the watch-year turbo palette.
-    """
+# Explicit blue (low) → green (mid) → red (high). No coolwarm/RdBu peach.
+_RATING_BGR_STOPS = (
+    (0.15, 0.35, 0.85, 1.0),  # blue — low
+    (0.12, 0.62, 0.42, 1.0),  # teal-green
+    (0.20, 0.75, 0.25, 1.0),  # green — mid
+    (0.85, 0.75, 0.12, 1.0),  # yellow-green transition (kept vivid, not cream)
+    (0.90, 0.35, 0.12, 1.0),  # orange-red
+    (0.85, 0.12, 0.12, 1.0),  # red — high
+)
+
+
+def rating_colormap():
+    """ListedColormap: cold blue → mid green → warm red."""
+    from matplotlib.colors import LinearSegmentedColormap
+
+    return LinearSegmentedColormap.from_list(
+        "letterboxd_rating_bgr",
+        list(_RATING_BGR_STOPS),
+        N=256,
+    )
+
+
+def rating_norm(vmin: float = RATING_VMIN, vmax: float = RATING_VMAX):
     import matplotlib.pyplot as plt
 
+    return plt.Normalize(vmin=float(vmin), vmax=float(vmax))
+
+
+def rating_color(
+    avg: float,
+    vmin: float = RATING_VMIN,
+    vmax: float = RATING_VMAX,
+) -> tuple:
+    """Map mean Letterboxd rating to blue→green→red on a fixed 0.5–5 scale.
+
+    Used for «выше оценка» charts — not the watch-year turbo palette.
+    """
     try:
         value = float(avg)
     except (TypeError, ValueError):
@@ -53,25 +89,23 @@ def rating_color(avg: float, vmin: float = 2.0, vmax: float = 5.0) -> tuple:
         t = 0.0
     elif t > 1:
         t = 1.0
-    # cool (low) → warm (high): matplotlib coolwarm runs blue→red
-    return plt.cm.coolwarm(0.08 + 0.84 * t)
+    return rating_colormap()(t)
 
 
-def rating_colors(avgs, vmin: float | None = None, vmax: float | None = None) -> list[tuple]:
-    """Colors for a list of averages; optionally lock scale to [vmin, vmax]."""
-    values: list[float] = []
-    for a in avgs or []:
-        try:
-            values.append(float(a))
-        except (TypeError, ValueError):
-            continue
-    if not values:
-        return []
-    lo = float(vmin) if vmin is not None else min(2.0, min(values))
-    hi = float(vmax) if vmax is not None else max(5.0, max(values))
+def rating_colors(
+    avgs,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> list[tuple]:
+    """Colors for a list of averages on the fixed Letterboxd rating scale."""
+    lo = float(vmin) if vmin is not None else RATING_VMIN
+    hi = float(vmax) if vmax is not None else RATING_VMAX
     if hi <= lo:
         hi = lo + 0.01
-    return [rating_color(a, vmin=lo, vmax=hi) for a in avgs]
+    out = []
+    for a in avgs or []:
+        out.append(rating_color(a, vmin=lo, vmax=hi))
+    return out
 
 
 def apply_dark_chart_theme() -> None:
