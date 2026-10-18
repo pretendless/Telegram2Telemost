@@ -12,18 +12,10 @@ Edits one message «Подгружаю подробности из TMDB: N/total
 
 Creates:
   genre_counts_by_viewing_year.png
-  average_rating_by_genre.png
+  average_rating_by_genre.png / worst_average_rating_by_genre.png
   genre_by_release_decade.png
-  watches_by_country.png
-  watches_by_director.png
-  watches_by_actor.png
-  watches_by_language.png
-  watches_by_studio.png
-  average_rating_by_country.png
-  average_rating_by_director.png
-  average_rating_by_actor.png
-  average_rating_by_language.png
-  average_rating_by_studio.png
+  watches_by_country/director/actor/language/studio.png
+  average_rating_by_* + worst_average_rating_by_* (country, director, actor, language, studio)
   letterboxd_with_genres.csv
   tmdb_unmatched.csv
   genre_summary.json
@@ -60,10 +52,8 @@ from letterboxd_ratings import (  # noqa: E402
 )
 from letterboxd_top_charts import (  # noqa: E402
     TOP_N_DEFAULT,
-    add_rating_colorbar,
     chart_diary_entity_stacked,
     chart_rating_vbar,
-    color_bars_by_rating,
     display_lang,
 )
 
@@ -368,12 +358,20 @@ def save_cache(cache):
     CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _rank_named(stats, min_count=1, limit=8, by_avg=False, min_rated=None):
+def _rank_named(
+    stats,
+    min_count=1,
+    limit=8,
+    by_avg=False,
+    min_rated=None,
+    ascending=False,
+):
     """stats: name -> {count, rating_sum, rated}.
 
     Count tops use min_count on watch hits.
     Rating tops require unique rated films > min_rated (strict); omit failures.
     `rated` must be unique-film count after latest_rated_* dedupe, not diary rows.
+    ascending=True on by_avg → worst averages first («ниже оценка»).
     """
     rows = []
     for name, st in stats.items():
@@ -387,9 +385,22 @@ def _rank_named(stats, min_count=1, limit=8, by_avg=False, min_rated=None):
         avg = round(st["rating_sum"] / rated, 2) if rated else None
         rows.append({"name": name, "count": count, "avg": avg, "rated": rated})
     if by_avg:
-        rows.sort(
-            key=lambda r: (-(r["avg"] if r["avg"] is not None else -1), -r["rated"], r["name"])
-        )
+        if ascending:
+            rows.sort(
+                key=lambda r: (
+                    r["avg"] if r["avg"] is not None else 99,
+                    -r["rated"],
+                    r["name"],
+                )
+            )
+        else:
+            rows.sort(
+                key=lambda r: (
+                    -(r["avg"] if r["avg"] is not None else -1),
+                    -r["rated"],
+                    r["name"],
+                )
+            )
     else:
         rows.sort(
             key=lambda r: (-r["count"], -(r["avg"] if r["avg"] is not None else -1), r["name"])
@@ -398,7 +409,7 @@ def _rank_named(stats, min_count=1, limit=8, by_avg=False, min_rated=None):
 
 
 def _paired_ranks(stats, min_count, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT):
-    """Count top + rating top (unique rated films > MIN_RATED_FOR_TOP only)."""
+    """Count top + best rating top + worst rating top (rated > MIN_RATED_FOR_TOP)."""
     by_count = _rank_named(stats, min_count=min_count, limit=limit_count, by_avg=False)
     by_rating = _rank_named(
         stats,
@@ -406,8 +417,17 @@ def _paired_ranks(stats, min_count, limit_count=TOP_N_DEFAULT, limit_rating=TOP_
         limit=limit_rating,
         by_avg=True,
         min_rated=MIN_RATED_FOR_TOP,
+        ascending=False,
     )
-    return by_count, by_rating
+    by_rating_worst = _rank_named(
+        stats,
+        min_count=1,
+        limit=limit_rating,
+        by_avg=True,
+        min_rated=MIN_RATED_FOR_TOP,
+        ascending=True,
+    )
+    return by_count, by_rating, by_rating_worst
 
 
 def _cache_key(row):
@@ -478,25 +498,25 @@ def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watche
 
         apply_meta(rating_only, row, meta)
 
-    countries_c, countries_r = _paired_ranks(
+    countries_c, countries_r, countries_w = _paired_ranks(
         countries, min_count=1, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT
     )
-    directors_c, directors_r = _paired_ranks(
+    directors_c, directors_r, directors_w = _paired_ranks(
         directors,
         min_count=MIN_PERSON_COUNT,
         limit_count=TOP_N_DEFAULT,
         limit_rating=TOP_N_DEFAULT,
     )
-    actors_c, actors_r = _paired_ranks(
+    actors_c, actors_r, actors_w = _paired_ranks(
         actors,
         min_count=MIN_PERSON_COUNT,
         limit_count=TOP_N_DEFAULT,
         limit_rating=TOP_N_DEFAULT,
     )
-    languages_c, languages_r = _paired_ranks(
+    languages_c, languages_r, languages_w = _paired_ranks(
         languages, min_count=1, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT
     )
-    companies_c, companies_r = _paired_ranks(
+    companies_c, companies_r, companies_w = _paired_ranks(
         companies,
         min_count=MIN_COMPANY_COUNT,
         limit_count=TOP_N_DEFAULT,
@@ -505,14 +525,19 @@ def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watche
     return {
         "countries": countries_c,
         "countries_by_rating": countries_r,
+        "countries_by_rating_worst": countries_w,
         "directors": directors_c,
         "directors_by_rating": directors_r,
+        "directors_by_rating_worst": directors_w,
         "actors": actors_c,
         "actors_by_rating": actors_r,
+        "actors_by_rating_worst": actors_w,
         "languages": languages_c,
         "languages_by_rating": languages_r,
+        "languages_by_rating_worst": languages_w,
         "companies": companies_c,
         "companies_by_rating": companies_r,
+        "companies_by_rating_worst": companies_w,
     }
 
 
@@ -555,13 +580,13 @@ def rank_genres(
             st = stats[g]
             st["rating_sum"] += r
             st["rated"] += 1
-    by_count, by_rating = _paired_ranks(
+    by_count, by_rating, by_rating_worst = _paired_ranks(
         stats, min_count=1, limit_count=limit_count, limit_rating=limit_rating
     )
     total_hits = sum(int(st["count"]) for st in stats.values()) or 1
     for row in by_count:
         row["pct"] = round(100.0 * row["count"] / total_hits, 1)
-    return by_count, by_rating
+    return by_count, by_rating, by_rating_worst
 
 
 def _cache_meta_for_row(row, cache):
@@ -665,22 +690,82 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
 
 
 def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
-    """Blue→green→red vertical avg-rating charts for TMDB «выше оценка» tops."""
+    """Blue→green→red vertical avg charts for TMDB «выше» + «ниже оценка» tops."""
     footer = "Source: Letterboxd diary/watched + TMDB metadata"
     made = {}
     specs = [
-        ("average_rating_by_country", "countries_by_rating", "Страны — выше оценка", None),
-        ("average_rating_by_director", "directors_by_rating", "Режиссёры — выше оценка", None),
-        ("average_rating_by_actor", "actors_by_rating", "Актёры — выше оценка", None),
+        (
+            "average_rating_by_country",
+            "countries_by_rating",
+            "Страны — выше оценка",
+            False,
+            None,
+        ),
+        (
+            "worst_average_rating_by_country",
+            "countries_by_rating_worst",
+            "Страны — ниже оценка",
+            True,
+            None,
+        ),
+        (
+            "average_rating_by_director",
+            "directors_by_rating",
+            "Режиссёры — выше оценка",
+            False,
+            None,
+        ),
+        (
+            "worst_average_rating_by_director",
+            "directors_by_rating_worst",
+            "Режиссёры — ниже оценка",
+            True,
+            None,
+        ),
+        (
+            "average_rating_by_actor",
+            "actors_by_rating",
+            "Актёры — выше оценка",
+            False,
+            None,
+        ),
+        (
+            "worst_average_rating_by_actor",
+            "actors_by_rating_worst",
+            "Актёры — ниже оценка",
+            True,
+            None,
+        ),
         (
             "average_rating_by_language",
             "languages_by_rating",
             "Язык оригинала — выше оценка",
+            False,
             display_lang,
         ),
-        ("average_rating_by_studio", "companies_by_rating", "Студии — выше оценка", None),
+        (
+            "worst_average_rating_by_language",
+            "languages_by_rating_worst",
+            "Язык оригинала — ниже оценка",
+            True,
+            display_lang,
+        ),
+        (
+            "average_rating_by_studio",
+            "companies_by_rating",
+            "Студии — выше оценка",
+            False,
+            None,
+        ),
+        (
+            "worst_average_rating_by_studio",
+            "companies_by_rating_worst",
+            "Студии — ниже оценка",
+            True,
+            None,
+        ),
     ]
-    for key, src, title, label_fn in specs:
+    for key, src, title, ascending, label_fn in specs:
         path = paths.get(key)
         if not path:
             continue
@@ -691,6 +776,7 @@ def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
             label_fn=label_fn,
             footer=footer,
             limit=TOP_N_DEFAULT,
+            ascending=ascending,
         )
     return made
 
@@ -801,50 +887,8 @@ def main():
     save_dark_figure(fig, "genre_counts_by_viewing_year.png")
     plt.close(fig)
 
-    # 2) Mean personal rating per genre — ratings.csv ∪ diary joined to catalog.
-    rated = ratings_for_catalog(catalog, film_ratings)
-    if not rated.empty:
-        rated = _attach_tmdb_columns(rated, cache)
+    # 2) Genre avg best/worst PNGs built after rank_genres (same >3 gate as other tops).
     all_genres_catalog = [g for genres in catalog["Genre list"] for g in genres]
-    rows = []
-    for genre in sorted(set(all_genres_catalog)):
-        if rated.empty:
-            break
-        vals = rated[rated["Genre list"].apply(lambda gs: genre in (gs or []))]["Rating"]
-        if len(vals) >= 5:
-            rows.append((genre, float(vals.mean()), int(len(vals))))
-    avg = pd.DataFrame(rows, columns=["Genre", "Average rating", "Rated films"])
-    # Highest first (left → right); cap near TOP_N_DEFAULT.
-    avg = avg.sort_values("Average rating", ascending=False).head(TOP_N_DEFAULT)
-    fig, ax = plt.subplots(figsize=(max(10.0, len(avg) * 0.55), 6.5))
-    if len(avg):
-        values = avg["Average rating"].astype(float).tolist()
-        bar_colors = color_bars_by_rating(values)
-        x = np.arange(len(avg))
-        bars = ax.bar(x, values, color=bar_colors, width=0.78, edgecolor="none")
-        ax.set_xticks(x)
-        ax.set_xticklabels(avg["Genre"].tolist(), rotation=45, ha="right")
-        ax.set_ylim(0, 5.2)
-        ax.set_ylabel("Средняя личная оценка (из 5)")
-        ax.set_title("Средняя оценка по жанрам (минимум 5 оценённых фильмов)")
-        ax.yaxis.grid(True, color="#2A2A2A", linewidth=0.8)
-        ax.set_axisbelow(True)
-        for bar, (_, r) in zip(bars, avg.iterrows()):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                r["Average rating"] + 0.08,
-                f'{r["Average rating"]:.2f}\nn={int(r["Rated films"])}',
-                ha="center",
-                va="bottom",
-                fontsize=7,
-                color=FG,
-            )
-        add_rating_colorbar(fig, ax)
-    style_axes(ax)
-    fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
-    fig.tight_layout(rect=[0, 0.03, 1, 1])
-    save_dark_figure(fig, "average_rating_by_genre.png")
-    plt.close(fig)
 
     # 3) Counts by release decade — catalog (no watch-year stack).
     release_decades = {}
@@ -879,15 +923,31 @@ def main():
         save_dark_figure(fig, "genre_by_release_decade.png")
         plt.close(fig)
 
-    # HTML tops: catalog counts + ratings.csv ∪ diary.
+    # Rating tops: catalog counts + ratings.csv ∪ diary (best + worst).
     # (genre_share_by_viewing_year.png removed — not sent to Telegram.)
-    top_for_report, genres_by_rating = rank_genres(
+    top_for_report, genres_by_rating, genres_by_rating_worst = rank_genres(
         catalog,
         film_ratings=film_ratings,
         diary=diary,
         watched_only=watched_only,
         limit_count=TOP_N_DEFAULT,
         limit_rating=TOP_N_DEFAULT,
+    )
+    made_genre_best = chart_rating_vbar(
+        genres_by_rating,
+        Path("average_rating_by_genre.png"),
+        title="Жанры — выше оценка (больше 3 оценённых фильмов)",
+        footer=footer,
+        limit=TOP_N_DEFAULT,
+        ascending=False,
+    )
+    made_genre_worst = chart_rating_vbar(
+        genres_by_rating_worst,
+        Path("worst_average_rating_by_genre.png"),
+        title="Жанры — ниже оценка (больше 3 оценённых фильмов)",
+        footer=footer,
+        limit=TOP_N_DEFAULT,
+        ascending=True,
     )
 
     deep = aggregate_person_stats(
@@ -904,10 +964,15 @@ def main():
     made_counts = chart_deep_count_tops(diary, cache, count_paths)
     rating_paths = {
         "average_rating_by_country": "average_rating_by_country.png",
+        "worst_average_rating_by_country": "worst_average_rating_by_country.png",
         "average_rating_by_director": "average_rating_by_director.png",
+        "worst_average_rating_by_director": "worst_average_rating_by_director.png",
         "average_rating_by_actor": "average_rating_by_actor.png",
+        "worst_average_rating_by_actor": "worst_average_rating_by_actor.png",
         "average_rating_by_language": "average_rating_by_language.png",
+        "worst_average_rating_by_language": "worst_average_rating_by_language.png",
         "average_rating_by_studio": "average_rating_by_studio.png",
+        "worst_average_rating_by_studio": "worst_average_rating_by_studio.png",
     }
     made_ratings = chart_deep_rating_tops(deep, rating_paths)
 
@@ -918,20 +983,31 @@ def main():
         "unmatched": int(len(unmatched)),
         "top_genres": top_for_report,
         "top_genres_by_rating": genres_by_rating,
+        "top_genres_by_rating_worst": genres_by_rating_worst,
         "genre_hits": int(len(all_genres_catalog)),
         "countries": deep.get("countries") or [],
         "countries_by_rating": deep.get("countries_by_rating") or [],
+        "countries_by_rating_worst": deep.get("countries_by_rating_worst") or [],
         "directors": deep.get("directors") or [],
         "directors_by_rating": deep.get("directors_by_rating") or [],
+        "directors_by_rating_worst": deep.get("directors_by_rating_worst") or [],
         "actors": deep.get("actors") or [],
         "actors_by_rating": deep.get("actors_by_rating") or [],
+        "actors_by_rating_worst": deep.get("actors_by_rating_worst") or [],
         "languages": deep.get("languages") or [],
         "languages_by_rating": deep.get("languages_by_rating") or [],
+        "languages_by_rating_worst": deep.get("languages_by_rating_worst") or [],
         "companies": deep.get("companies") or [],
         "companies_by_rating": deep.get("companies_by_rating") or [],
+        "companies_by_rating_worst": deep.get("companies_by_rating_worst") or [],
         "min_person_count": int(MIN_PERSON_COUNT),
         "min_rated_for_top": int(MIN_RATED_FOR_TOP),
-        "charts": {**{k: bool(v) for k, v in made_counts.items()}, **{k: bool(v) for k, v in made_ratings.items()}},
+        "charts": {
+            "average_rating_by_genre": bool(made_genre_best),
+            "worst_average_rating_by_genre": bool(made_genre_worst),
+            **{k: bool(v) for k, v in made_counts.items()},
+            **{k: bool(v) for k, v in made_ratings.items()},
+        },
     }
     Path("genre_summary.json").write_text(
         json.dumps(genre_summary, ensure_ascii=False, indent=2),
@@ -942,6 +1018,7 @@ def main():
     for f in [
         "genre_counts_by_viewing_year.png",
         "average_rating_by_genre.png",
+        "worst_average_rating_by_genre.png",
         "genre_by_release_decade.png",
         *count_paths.values(),
         *rating_paths.values(),

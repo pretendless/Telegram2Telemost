@@ -98,6 +98,27 @@ def test_rating_vbar_skips_bad_avg(tmp_path: Path | None = None):
     assert path.is_file()
 
 
+def test_rating_vbar_worst_ascending(tmp_path: Path | None = None):
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "actors_worst.png"
+    assert (
+        chart_rating_vbar(
+            [
+                {"name": "High", "avg": 4.5, "rated": 8},
+                {"name": "Low", "avg": 2.1, "rated": 5},
+                {"name": "Mid", "avg": 3.0, "rated": 6},
+            ],
+            path,
+            title="Актёры — ниже оценка",
+            ascending=True,
+            limit=20,
+        )
+        is True
+    )
+    assert path.is_file() and path.stat().st_size > 0
+
+
 if __name__ == "__main__":
     test_display_lang()
     test_top_n_default_about_20()
@@ -105,4 +126,5 @@ if __name__ == "__main__":
     test_rating_color_fixed_scale_separates_high_band()
     test_release_year_charts()
     test_rating_vbar_skips_bad_avg()
+    test_rating_vbar_worst_ascending()
     print("ok")
