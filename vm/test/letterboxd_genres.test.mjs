@@ -14,7 +14,9 @@ import {
   buildGenreReportMessages,
   calendarReadyText,
   escapeHtml,
+  isRetryableTelegramFailure,
   mapScriptError,
+  telegramFetch,
   unmatchedFromWorkdir,
 } from "../../scripts/letterboxd_genres_run.mjs";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -67,6 +69,36 @@ test("buildLetterboxdDispatch", () => {
 test("mapScriptError covers diary and bearer", () => {
   assert.match(mapScriptError("Не задан TMDB_BEARER_TOKEN", "", 2), /TMDB_BEARER_TOKEN/);
   assert.match(mapScriptError("В ZIP не найден diary.csv", "", 1), /diary\.csv/);
+});
+
+test("isRetryableTelegramFailure covers fetch failed and 5xx/429", () => {
+  assert.equal(isRetryableTelegramFailure(new Error("fetch failed")), true);
+  assert.equal(isRetryableTelegramFailure(new Error("ECONNRESET")), true);
+  assert.equal(isRetryableTelegramFailure(null, 429), true);
+  assert.equal(isRetryableTelegramFailure(null, 502), true);
+  assert.equal(isRetryableTelegramFailure(null, 400), false);
+  assert.equal(isRetryableTelegramFailure(new Error("chat not found")), false);
+});
+
+test("telegramFetch retries then succeeds", async () => {
+  let calls = 0;
+  const previous = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls < 3) throw new Error("fetch failed");
+    return { ok: true, status: 200, headers: { get: () => null } };
+  };
+  try {
+    const res = await telegramFetch(
+      "https://example.test/bot",
+      { method: "POST" },
+      { label: "test send", attempts: 4, baseMs: 1 },
+    );
+    assert.equal(res.ok, true);
+    assert.equal(calls, 3);
+  } finally {
+    globalThis.fetch = previous;
+  }
 });
 
 test("unmatchedFromWorkdir reads csv", () => {

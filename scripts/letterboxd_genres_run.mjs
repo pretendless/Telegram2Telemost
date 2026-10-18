@@ -51,6 +51,77 @@ function telegramApi(token, method) {
   return `https://api.telegram.org/bot${token}/${method}`;
 }
 
+const TELEGRAM_RETRY_ATTEMPTS = Math.max(
+  1,
+  Number.parseInt(env("LETTERBOXD_TG_RETRIES") || "5", 10) || 5,
+);
+const TELEGRAM_RETRY_BASE_MS = Math.max(
+  200,
+  Number.parseInt(env("LETTERBOXD_TG_RETRY_MS") || "1000", 10) || 1000,
+);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Transient Bot API / network failures worth retrying. */
+export function isRetryableTelegramFailure(err, status) {
+  if (status === 429 || (typeof status === "number" && status >= 500 && status <= 599)) {
+    return true;
+  }
+  if (!err) return false;
+  const msg = String(err.message || err).toLowerCase();
+  return /fetch failed|network|econnreset|etimedout|econnrefused|socket|aborted|und_err|other side closed/.test(
+    msg,
+  );
+}
+
+/**
+ * fetch() with exponential backoff for transient Telegram / network errors.
+ * @param {string} url
+ * @param {RequestInit | (() => RequestInit)} optionsOrFactory
+ *        Factory rebuilds FormData bodies on each attempt (streams are one-shot).
+ * @param {{ label?: string, attempts?: number }} [meta]
+ */
+export async function telegramFetch(url, optionsOrFactory, meta = {}) {
+  const label = meta.label || "telegram";
+  const attempts = meta.attempts || TELEGRAM_RETRY_ATTEMPTS;
+  const baseMs = meta.baseMs != null ? Number(meta.baseMs) : TELEGRAM_RETRY_BASE_MS;
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    const options =
+      typeof optionsOrFactory === "function" ? optionsOrFactory() : optionsOrFactory;
+    try {
+      const res = await fetch(url, options);
+      if (res.ok) return res;
+      if (isRetryableTelegramFailure(null, res.status) && i < attempts) {
+        const retryAfter = Number(res.headers.get("retry-after")) || 0;
+        const delay = Math.max(retryAfter * 1000, baseMs * 2 ** (i - 1));
+        console.error(`${label}: http ${res.status}, retry ${i}/${attempts} in ${delay}ms`);
+        await sleep(delay);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts && isRetryableTelegramFailure(err)) {
+        const delay = baseMs * 2 ** (i - 1);
+        console.error(
+          `${label}: ${err && err.message ? err.message : err}, retry ${i}/${attempts} in ${delay}ms`,
+        );
+        await sleep(delay);
+        continue;
+      }
+      const wrapped = new Error(
+        `${label}: ${err && err.message ? err.message : err}`,
+      );
+      wrapped.cause = err;
+      throw wrapped;
+    }
+  }
+  throw lastErr || new Error(`${label}: exhausted retries`);
+}
+
 /** Escape user/diary strings for Telegram HTML parse_mode. */
 export function escapeHtml(value) {
   return String(value ?? "")
@@ -359,39 +430,46 @@ export function calendarReadyText() {
   return "Календарные графики готовы, сейчас подробности из TMDB (жанры, страны, режиссёры, актёры)…";
 }
 
-async function sendTelegramText(token, chatId, text, parseMode = "") {
+async function sendTelegramText(token, chatId, text, parseMode = "", label = "sendMessage") {
   const payload = {
     chat_id: chatId,
     text,
     link_preview_options: { is_disabled: true },
   };
   if (parseMode) payload.parse_mode = parseMode;
-  const res = await fetch(telegramApi(token, "sendMessage"), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) console.error("sendMessage", res.status, parseMode || "plain");
+  const res = await telegramFetch(
+    telegramApi(token, "sendMessage"),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    { label: `${label}${parseMode ? `/${parseMode}` : ""}` },
+  );
+  if (!res.ok) console.error(label, res.status, parseMode || "plain");
   return res.ok;
 }
 
-async function sendTelegramHtml(token, chatId, html) {
-  return sendTelegramText(token, chatId, html, "HTML");
+async function sendTelegramHtml(token, chatId, html, label = "sendMessage HTML") {
+  return sendTelegramText(token, chatId, html, "HTML", label);
 }
 
 async function sendTelegramPhoto(token, chatId, filePath, filename, caption = "") {
   const bytes = readFileSync(filePath);
-  const form = new FormData();
-  form.set("chat_id", String(chatId));
-  if (caption) {
-    form.set("caption", caption);
-    form.set("parse_mode", "HTML");
-  }
-  form.set("photo", new Blob([bytes], { type: "image/png" }), filename);
-  const res = await fetch(telegramApi(token, "sendPhoto"), {
-    method: "POST",
-    body: form,
-  });
+  const res = await telegramFetch(
+    telegramApi(token, "sendPhoto"),
+    () => {
+      const form = new FormData();
+      form.set("chat_id", String(chatId));
+      if (caption) {
+        form.set("caption", caption);
+        form.set("parse_mode", "HTML");
+      }
+      form.set("photo", new Blob([bytes], { type: "image/png" }), filename);
+      return { method: "POST", body: form };
+    },
+    { label: `sendPhoto ${filename}` },
+  );
   if (!res.ok) {
     console.error("sendPhoto", filename, res.status);
     // Fallback: document keeps full resolution if photo reject (size/dimensions).
@@ -402,17 +480,20 @@ async function sendTelegramPhoto(token, chatId, filePath, filename, caption = ""
 
 async function sendTelegramDocument(token, chatId, filePath, filename, caption = "") {
   const bytes = readFileSync(filePath);
-  const form = new FormData();
-  form.set("chat_id", String(chatId));
-  if (caption) {
-    form.set("caption", caption);
-    form.set("parse_mode", "HTML");
-  }
-  form.set("document", new Blob([bytes], { type: "image/png" }), filename);
-  const res = await fetch(telegramApi(token, "sendDocument"), {
-    method: "POST",
-    body: form,
-  });
+  const res = await telegramFetch(
+    telegramApi(token, "sendDocument"),
+    () => {
+      const form = new FormData();
+      form.set("chat_id", String(chatId));
+      if (caption) {
+        form.set("caption", caption);
+        form.set("parse_mode", "HTML");
+      }
+      form.set("document", new Blob([bytes], { type: "image/png" }), filename);
+      return { method: "POST", body: form };
+    },
+    { label: `sendDocument ${filename}` },
+  );
   if (!res.ok) console.error("sendDocument", filename, res.status);
   return res.ok;
 }
@@ -421,33 +502,76 @@ async function sendCaptionedPhotos(token, chatId, workdir, names, captions) {
   let sent = 0;
   for (const name of names) {
     const caption = captions[name] ? `<i>${escapeHtml(captions[name])}</i>` : "";
-    const ok = await sendTelegramPhoto(token, chatId, join(workdir, name), name, caption);
-    if (!ok) {
-      await sendTelegramText(token, chatId, `Не удалось отправить ${name}.`);
-    } else {
-      sent += 1;
+    try {
+      const ok = await sendTelegramPhoto(token, chatId, join(workdir, name), name, caption);
+      if (!ok) {
+        await sendTelegramText(token, chatId, `Не удалось отправить ${name}.`, "", `notify fail ${name}`);
+      } else {
+        sent += 1;
+      }
+    } catch (err) {
+      console.error(`sendCaptionedPhotos ${name}:`, err && err.message ? err.message : err);
+      try {
+        await sendTelegramText(
+          token,
+          chatId,
+          `Не удалось отправить ${name}: ${err && err.message ? err.message : err}`,
+          "",
+          `notify fail ${name}`,
+        );
+      } catch (_) {
+        /* ignore secondary notify failure */
+      }
     }
   }
   return sent;
 }
 
 async function downloadTelegramFile(token, fileId, destPath) {
-  const metaRes = await fetch(telegramApi(token, "getFile"), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ file_id: fileId }),
-  });
+  const metaRes = await telegramFetch(
+    telegramApi(token, "getFile"),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ file_id: fileId }),
+    },
+    { label: "getFile" },
+  );
   if (!metaRes.ok) throw new Error(`getFile http ${metaRes.status}`);
   const meta = await metaRes.json();
   if (!meta.ok || !meta.result || !meta.result.file_path) {
     throw new Error("getFile missing path");
   }
   const filePath = String(meta.result.file_path);
-  const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  const fileRes = await telegramFetch(
+    `https://api.telegram.org/file/bot${token}/${filePath}`,
+    {},
+    { label: "download ZIP" },
+  );
   if (!fileRes.ok) throw new Error(`file download http ${fileRes.status}`);
   const buf = Buffer.from(await fileRes.arrayBuffer());
   writeFileSync(destPath, buf);
   return destPath;
+}
+
+/** Best-effort chat notice after a late failure (e.g. post-TMDB send). */
+async function notifySendFailure(token, chatId, phase, err) {
+  const detail = err && err.message ? err.message : String(err);
+  console.error(`notifySendFailure [${phase}]:`, detail);
+  try {
+    await sendTelegramText(
+      token,
+      chatId,
+      `Letterboxd: сбой отправки после ${phase}: ${detail}`,
+      "",
+      `notify ${phase}`,
+    );
+  } catch (notifyErr) {
+    console.error(
+      "could not notify chat about send failure:",
+      notifyErr && notifyErr.message ? notifyErr.message : notifyErr,
+    );
+  }
 }
 
 function runPython(script, zipPath, workdir) {
@@ -536,10 +660,34 @@ export async function main() {
   const unmatched = unmatchedFromWorkdir(workdir, genres.stdout);
   const genreSummary = readJsonFile(join(workdir, "genre_summary.json"));
   const tmdbMessages = buildGenreReportMessages(genreSummary || {}, unmatched);
-  for (const html of tmdbMessages) {
-    await sendTelegramHtml(token, chatId, html);
+
+  // TMDB work is done — retry Telegram sends; on final failure still tell the chat.
+  try {
+    for (let i = 0; i < tmdbMessages.length; i++) {
+      const ok = await sendTelegramHtml(
+        token,
+        chatId,
+        tmdbMessages[i],
+        `genre HTML part ${i + 1}/${tmdbMessages.length}`,
+      );
+      if (!ok) {
+        throw new Error(`genre HTML part ${i + 1}/${tmdbMessages.length} rejected by Telegram`);
+      }
+    }
+    const genreSent = await sendCaptionedPhotos(
+      token,
+      chatId,
+      workdir,
+      genrePngs,
+      GENRE_CAPTIONS,
+    );
+    if (genreSent < genrePngs.length) {
+      console.error(`genre PNGs sent ${genreSent}/${genrePngs.length}`);
+    }
+  } catch (err) {
+    await notifySendFailure(token, chatId, "TMDB HTML/PNG", err);
+    throw err;
   }
-  await sendCaptionedPhotos(token, chatId, workdir, genrePngs, GENRE_CAPTIONS);
 
   console.log("calendar pngs", calendarPngs.join(","));
   console.log("genre pngs", genrePngs.join(","));
