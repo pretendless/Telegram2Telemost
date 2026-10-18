@@ -20,12 +20,18 @@ import pandas as pd
 from letterboxd_palette import (
     FG,
     GRID,
+    RATING_COLORBAR_LABEL,
     rating_color,
+    rating_colormap,
     rating_colors,
+    rating_norm,
     save_dark_figure,
     style_axes,
     watch_year_palette,
 )
+
+# Default size for ranking charts (count + avg-rating tops).
+TOP_N_DEFAULT = 20
 
 LANG_LABELS = {
     "en": "английский",
@@ -123,7 +129,7 @@ def chart_stacked_count_hbar(
     return True
 
 
-def chart_rating_hbar(
+def chart_rating_vbar(
     rows: list[dict],
     path: Path,
     *,
@@ -133,9 +139,10 @@ def chart_rating_hbar(
     rated_key: str = "rated",
     label_fn: Callable[[object], str] | None = None,
     footer: str | None = None,
-    xlabel: str = "Средняя оценка (из 5)",
+    ylabel: str = "Средняя оценка (из 5)",
+    limit: int = TOP_N_DEFAULT,
 ) -> bool:
-    """Horizontal bars: length = mean rating; color cool→warm by rating."""
+    """Vertical bars: X = category, Y = mean rating; color blue→green→red."""
     usable = []
     for row in rows or []:
         avg = row.get(avg_key)
@@ -156,34 +163,40 @@ def chart_rating_hbar(
     if not usable:
         return False
 
-    # Ascending so highest sits at top (barh bottom→top).
-    usable.sort(key=lambda r: (r[1], r[2] or 0))
-    labels = [_short_label(lab) for lab, _, _ in usable]
+    # Highest average on the left (descending).
+    usable.sort(key=lambda r: (-r[1], -(r[2] or 0), r[0]))
+    if limit and len(usable) > limit:
+        usable = usable[:limit]
+    labels = [_short_label(lab, limit=18) for lab, _, _ in usable]
     avgs = [a for _, a, _ in usable]
-    colors = rating_colors(avgs, vmin=2.0, vmax=5.0)
+    colors = rating_colors(avgs)
 
-    fig, ax = plt.subplots(figsize=(10, max(4.0, len(labels) * 0.42)))
-    y = np.arange(len(labels))
-    ax.barh(y, avgs, color=colors, height=0.72, edgecolor="none")
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels)
-    ax.set_xlim(0, 5.2)
-    ax.set_xlabel(xlabel)
+    fig, ax = plt.subplots(figsize=(max(10.0, len(labels) * 0.55), 6.5))
+    x = np.arange(len(labels))
+    bars = ax.bar(x, avgs, color=colors, width=0.78, edgecolor="none")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_ylim(0, 5.2)
+    ax.set_ylabel(ylabel)
     ax.set_title(title)
-    ax.xaxis.grid(True, color=GRID, linewidth=0.8)
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
-    for yi, (avg, rated) in enumerate([(a, n) for _, a, n in usable]):
-        suffix = f"  (n={rated})" if rated is not None else ""
-        ax.text(avg + 0.06, yi, f"{avg:.2f}{suffix}", va="center", fontsize=8, color=FG)
-    # Small cool↔warm key
-    sm = plt.cm.ScalarMappable(
-        cmap=plt.cm.coolwarm,
-        norm=plt.Normalize(vmin=2.0, vmax=5.0),
-    )
+    for bar, avg, rated in zip(bars, avgs, [n for _, _, n in usable]):
+        suffix = f"\nn={rated}" if rated is not None else ""
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            avg + 0.08,
+            f"{avg:.2f}{suffix}",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color=FG,
+        )
+    sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
-    cbar.set_label("оценка (холоднее → теплее)", color=FG, fontsize=8)
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.025, pad=0.02)
+    cbar.set_label(RATING_COLORBAR_LABEL, color=FG, fontsize=8)
     cbar.ax.yaxis.set_tick_params(color=FG)
     plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
     if footer:
@@ -196,13 +209,17 @@ def chart_rating_hbar(
     return True
 
 
+# Back-compat alias for older call sites / tests.
+chart_rating_hbar = chart_rating_vbar
+
+
 def chart_diary_entity_stacked(
     diary: pd.DataFrame,
     path: Path,
     *,
     names_for_row: Callable[[pd.Series], list[str]],
     title: str,
-    top_n: int = 10,
+    top_n: int = TOP_N_DEFAULT,
     min_count: int = 1,
     label_fn: Callable[[str], str] | None = None,
     footer: str | None = None,
@@ -260,7 +277,9 @@ def chart_diary_entity_stacked(
     )
 
 
-def chart_release_years_by_count(diary: pd.DataFrame, path: Path, top_n: int = 12) -> bool:
+def chart_release_years_by_count(
+    diary: pd.DataFrame, path: Path, top_n: int = TOP_N_DEFAULT
+) -> bool:
     """Release-year count top stacked by watch year (diary only)."""
 
     def names_for_row(row):
@@ -282,8 +301,10 @@ def chart_release_years_by_count(diary: pd.DataFrame, path: Path, top_n: int = 1
     )
 
 
-def chart_release_years_by_rating(rows: list[dict], path: Path) -> bool:
-    """«Годы выхода — выше оценка» as cool↔warm rating bars."""
+def chart_release_years_by_rating(
+    rows: list[dict], path: Path, limit: int = TOP_N_DEFAULT
+) -> bool:
+    """«Годы выхода — выше оценка» as vertical blue→green→red bars."""
     normalized = []
     for row in rows or []:
         year = row.get("year")
@@ -296,17 +317,28 @@ def chart_release_years_by_rating(rows: list[dict], path: Path) -> bool:
                 "rated": row.get("rated"),
             }
         )
-    return chart_rating_hbar(
+    return chart_rating_vbar(
         normalized,
         path,
         title="Годы выхода — выше оценка (больше 3 оценённых фильмов)",
+        limit=limit,
     )
 
 
 def color_bars_by_rating(avgs: list[float]) -> list[tuple]:
     """Public helper for existing chart call sites (decade / genre avg)."""
-    return rating_colors(avgs, vmin=2.0, vmax=5.0)
+    return rating_colors(avgs)
 
 
 def single_rating_bar_color(avg: float) -> tuple:
-    return rating_color(avg, vmin=2.0, vmax=5.0)
+    return rating_color(avg)
+
+
+def add_rating_colorbar(fig, ax) -> None:
+    """Shared colorbar for avg-rating charts (blue→green→red, 0.5–5)."""
+    sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.025, pad=0.02)
+    cbar.set_label(RATING_COLORBAR_LABEL, color=FG, fontsize=8)
+    cbar.ax.yaxis.set_tick_params(color=FG)
+    plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)

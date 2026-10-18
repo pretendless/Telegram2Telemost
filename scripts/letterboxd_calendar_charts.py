@@ -47,6 +47,7 @@ from letterboxd_palette import (  # noqa: E402
     watch_year_palette,
 )
 from letterboxd_top_charts import (  # noqa: E402
+    add_rating_colorbar,
     chart_release_years_by_count,
     chart_release_years_by_rating,
     color_bars_by_rating,
@@ -180,11 +181,11 @@ def build_diary_summary(
                     }
                 )
             top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["rated"], -r["year"]))
-            top_rated_release_years = top_rated_release_years[:10]
+            top_rated_release_years = top_rated_release_years[:20]
 
         # Counts: every diary row + one per watched-only film (no fake dates).
         watch_by_release = with_release.groupby("release_year").size().sort_values(ascending=False)
-        for year, count in watch_by_release.head(10).items():
+        for year, count in watch_by_release.head(20).items():
             top_release_years_by_count.append({"year": int(year), "count": int(count)})
 
     return {
@@ -460,14 +461,11 @@ def chart_average_rating_by_year(
     labels = grouped.index.tolist()
     values = grouped["mean"].astype(float).tolist()
     counts = grouped["count"].astype(int).tolist()
-    all_years = sorted(df["Watched Date"].dt.year.dropna().astype(int).unique().tolist())
-    colors = year_colors(labels, palette_years=all_years)
-    point_colors = [colors.get(y, "#4C78A8") for y in labels]
+    bar_colors = color_bars_by_rating(values)
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(max(10.0, len(labels) * 0.45), 6.5))
     x = np.arange(len(labels))
-    ax.plot(x, values, color="#888888", linewidth=1.5, zorder=1)
-    ax.scatter(x, values, c=point_colors, s=64, zorder=2, edgecolors="#111111", linewidths=0.6)
+    bars = ax.bar(x, values, color=bar_colors, width=0.78, edgecolor="none")
     ax.set_ylim(0, 5.2)
     ax.set_title("Средняя оценка по годам просмотра")
     ax.set_xlabel("Год просмотра")
@@ -477,9 +475,9 @@ def chart_average_rating_by_year(
     ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
-    for xi, value, count in zip(x, values, counts):
+    for bar, value, count in zip(bars, values, counts):
         ax.text(
-            xi,
+            bar.get_x() + bar.get_width() / 2,
             value + 0.08,
             f"{value:.2f}\n(n={count})",
             ha="center",
@@ -487,6 +485,7 @@ def chart_average_rating_by_year(
             fontsize=7,
             color=FG,
         )
+    add_rating_colorbar(fig, ax)
     fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
@@ -535,7 +534,7 @@ def chart_average_rating_by_release_decade(
 
     fig, ax = plt.subplots(figsize=(12, 6))
     x = np.arange(len(labels))
-    # Means: cool↔warm by rating (not watch-year palette).
+    # Means: blue→green→red by rating (not watch-year palette).
     bars = ax.bar(x, values, color=bar_colors, width=0.8)
     ax.set_ylim(0, 5.2)
     ax.set_title("Средняя оценка по десятилетию выхода")
@@ -556,13 +555,14 @@ def chart_average_rating_by_release_decade(
             fontsize=7,
             color=FG,
         )
+    add_rating_colorbar(fig, ax)
     fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
 
 
-def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 10) -> bool:
+def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 20) -> bool:
     """Horizontal stacked bars of rewatched films, colored by watch year."""
     names = df["Name"].fillna("").astype(str).str.strip()
     years_release = df["Year"] if "Year" in df.columns else pd.Series(dtype=float)

@@ -14,7 +14,6 @@ Creates:
   genre_counts_by_viewing_year.png
   average_rating_by_genre.png
   genre_by_release_decade.png
-  genre_share_by_viewing_year.png
   watches_by_country.png
   watches_by_director.png
   watches_by_actor.png
@@ -28,6 +27,8 @@ Creates:
   letterboxd_with_genres.csv
   tmdb_unmatched.csv
   genre_summary.json
+
+(Does not create genre_share_by_viewing_year.png — dropped.)
 
 TMDB attribution is included in chart footers. Use of TMDB data is subject to its terms.
 """
@@ -58,8 +59,10 @@ from letterboxd_ratings import (  # noqa: E402
     passes_rated_threshold,
 )
 from letterboxd_top_charts import (  # noqa: E402
+    TOP_N_DEFAULT,
+    add_rating_colorbar,
     chart_diary_entity_stacked,
-    chart_rating_hbar,
+    chart_rating_vbar,
     color_bars_by_rating,
     display_lang,
 )
@@ -394,7 +397,7 @@ def _rank_named(stats, min_count=1, limit=8, by_avg=False, min_rated=None):
     return rows[:limit]
 
 
-def _paired_ranks(stats, min_count, limit_count=8, limit_rating=8):
+def _paired_ranks(stats, min_count, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT):
     """Count top + rating top (unique rated films > MIN_RATED_FOR_TOP only)."""
     by_count = _rank_named(stats, min_count=min_count, limit=limit_count, by_avg=False)
     by_rating = _rank_named(
@@ -475,18 +478,29 @@ def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watche
 
         apply_meta(rating_only, row, meta)
 
-    countries_c, countries_r = _paired_ranks(countries, min_count=1, limit_count=10, limit_rating=8)
+    countries_c, countries_r = _paired_ranks(
+        countries, min_count=1, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT
+    )
     directors_c, directors_r = _paired_ranks(
-        directors, min_count=MIN_PERSON_COUNT, limit_count=8, limit_rating=8
+        directors,
+        min_count=MIN_PERSON_COUNT,
+        limit_count=TOP_N_DEFAULT,
+        limit_rating=TOP_N_DEFAULT,
     )
     actors_c, actors_r = _paired_ranks(
-        actors, min_count=MIN_PERSON_COUNT, limit_count=8, limit_rating=8
+        actors,
+        min_count=MIN_PERSON_COUNT,
+        limit_count=TOP_N_DEFAULT,
+        limit_rating=TOP_N_DEFAULT,
     )
     languages_c, languages_r = _paired_ranks(
-        languages, min_count=1, limit_count=8, limit_rating=8
+        languages, min_count=1, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT
     )
     companies_c, companies_r = _paired_ranks(
-        companies, min_count=MIN_COMPANY_COUNT, limit_count=6, limit_rating=6
+        companies,
+        min_count=MIN_COMPANY_COUNT,
+        limit_count=TOP_N_DEFAULT,
+        limit_rating=TOP_N_DEFAULT,
     )
     return {
         "countries": countries_c,
@@ -502,7 +516,14 @@ def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watche
     }
 
 
-def rank_genres(catalog, film_ratings=None, diary=None, watched_only=None, limit_count=8, limit_rating=8):
+def rank_genres(
+    catalog,
+    film_ratings=None,
+    diary=None,
+    watched_only=None,
+    limit_count=TOP_N_DEFAULT,
+    limit_rating=TOP_N_DEFAULT,
+):
     """Genre tops: catalog hits; avg from ratings.csv ∪ diary joined to catalog."""
     stats = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     for _, row in catalog.iterrows():
@@ -548,7 +569,7 @@ def _cache_meta_for_row(row, cache):
     return cache.get(key) or {}
 
 
-def chart_watches_by_country(diary, cache, path: Path, top_n: int = 12) -> bool:
+def chart_watches_by_country(diary, cache, path: Path, top_n: int = TOP_N_DEFAULT) -> bool:
     """Stacked horizontal bars: top countries by watches, color = watch year."""
     footer = "Source: Letterboxd diary + TMDB metadata"
 
@@ -584,12 +605,19 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
         return _fn
 
     specs = [
-        ("watches_by_country", "countries", "Страны производства — цвет = год просмотра", 12, 1, None),
+        (
+            "watches_by_country",
+            "countries",
+            "Страны производства — цвет = год просмотра",
+            TOP_N_DEFAULT,
+            1,
+            None,
+        ),
         (
             "watches_by_director",
             "directors",
             "Режиссёры — цвет = год просмотра",
-            10,
+            TOP_N_DEFAULT,
             MIN_PERSON_COUNT,
             None,
         ),
@@ -597,7 +625,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_actor",
             "cast",
             "Актёры (top-billed) — цвет = год просмотра",
-            10,
+            TOP_N_DEFAULT,
             MIN_PERSON_COUNT,
             None,
         ),
@@ -605,7 +633,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_language",
             "languages",
             "Язык оригинала — цвет = год просмотра",
-            10,
+            TOP_N_DEFAULT,
             1,
             display_lang,
         ),
@@ -613,7 +641,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_studio",
             "companies",
             "Студии — цвет = год просмотра",
-            8,
+            TOP_N_DEFAULT,
             MIN_COMPANY_COUNT,
             None,
         ),
@@ -637,7 +665,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
 
 
 def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
-    """Cool↔warm average-rating charts for TMDB deep «выше оценка» tops."""
+    """Blue→green→red vertical avg-rating charts for TMDB «выше оценка» tops."""
     footer = "Source: Letterboxd diary/watched + TMDB metadata"
     made = {}
     specs = [
@@ -656,12 +684,13 @@ def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
         path = paths.get(key)
         if not path:
             continue
-        made[key] = chart_rating_hbar(
+        made[key] = chart_rating_vbar(
             deep.get(src) or [],
             Path(path),
             title=f"{title} (больше 3 оценённых фильмов)",
             label_fn=label_fn,
             footer=footer,
+            limit=TOP_N_DEFAULT,
         )
     return made
 
@@ -785,23 +814,32 @@ def main():
         if len(vals) >= 5:
             rows.append((genre, float(vals.mean()), int(len(vals))))
     avg = pd.DataFrame(rows, columns=["Genre", "Average rating", "Rated films"])
-    avg = avg.sort_values("Average rating")
-    fig, ax = plt.subplots(figsize=(10, max(5, len(avg) * 0.32)))
+    # Highest first (left → right); cap near TOP_N_DEFAULT.
+    avg = avg.sort_values("Average rating", ascending=False).head(TOP_N_DEFAULT)
+    fig, ax = plt.subplots(figsize=(max(10.0, len(avg) * 0.55), 6.5))
     if len(avg):
-        bar_colors = color_bars_by_rating(avg["Average rating"].astype(float).tolist())
-        bars = ax.barh(avg["Genre"], avg["Average rating"], color=bar_colors)
-        ax.set_xlim(0, 5)
-        ax.set_xlabel("Средняя личная оценка (из 5)")
+        values = avg["Average rating"].astype(float).tolist()
+        bar_colors = color_bars_by_rating(values)
+        x = np.arange(len(avg))
+        bars = ax.bar(x, values, color=bar_colors, width=0.78, edgecolor="none")
+        ax.set_xticks(x)
+        ax.set_xticklabels(avg["Genre"].tolist(), rotation=45, ha="right")
+        ax.set_ylim(0, 5.2)
+        ax.set_ylabel("Средняя личная оценка (из 5)")
         ax.set_title("Средняя оценка по жанрам (минимум 5 оценённых фильмов)")
+        ax.yaxis.grid(True, color="#2A2A2A", linewidth=0.8)
+        ax.set_axisbelow(True)
         for bar, (_, r) in zip(bars, avg.iterrows()):
             ax.text(
-                r["Average rating"] + 0.04,
-                bar.get_y() + bar.get_height() / 2,
-                f'{r["Average rating"]:.2f}  (n={int(r["Rated films"])})',
-                va="center",
-                fontsize=8,
+                bar.get_x() + bar.get_width() / 2,
+                r["Average rating"] + 0.08,
+                f'{r["Average rating"]:.2f}\nn={int(r["Rated films"])}',
+                ha="center",
+                va="bottom",
+                fontsize=7,
                 color=FG,
             )
+        add_rating_colorbar(fig, ax)
     style_axes(ax)
     fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
     fig.tight_layout(rect=[0, 0.03, 1, 1])
@@ -841,38 +879,15 @@ def main():
         save_dark_figure(fig, "genre_by_release_decade.png")
         plt.close(fig)
 
-    # 4) Genre share within each viewing year — diary only.
-    top10 = [g for g, _ in Counter(all_genres_diary).most_common(10)]
-    matrix = []
-    for y in years:
-        subset = diary[diary["Watched Date"].dt.year == y]
-        n = len(subset)
-        matrix.append([100 * subset["Genre list"].apply(lambda gs: g in gs).sum() / n if n else 0 for g in top10])
-    if years and top10:
-        fig, ax = plt.subplots(figsize=(13, 6))
-        im = ax.imshow(np.array(matrix).T, aspect="auto", cmap="turbo", interpolation="nearest")
-        ax.set_yticks(range(len(top10))); ax.set_yticklabels(top10)
-        ax.set_xticks(range(len(years))); ax.set_xticklabels(years, rotation=45)
-        ax.set_title("Доля просмотров каждого жанра по годам (%)")
-        ax.set_xlabel("Год просмотра")
-        cb = fig.colorbar(im, ax=ax)
-        cb.set_label("% просмотров за год с этим жанром", color=FG)
-        cb.ax.yaxis.set_tick_params(color=FG)
-        plt.setp(plt.getp(cb.ax.axes, "yticklabels"), color=FG)
-        style_axes(ax)
-        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
-        fig.tight_layout(rect=[0, 0.03, 1, 1])
-        save_dark_figure(fig, "genre_share_by_viewing_year.png")
-        plt.close(fig)
-
     # HTML tops: catalog counts + ratings.csv ∪ diary.
+    # (genre_share_by_viewing_year.png removed — not sent to Telegram.)
     top_for_report, genres_by_rating = rank_genres(
         catalog,
         film_ratings=film_ratings,
         diary=diary,
         watched_only=watched_only,
-        limit_count=8,
-        limit_rating=8,
+        limit_count=TOP_N_DEFAULT,
+        limit_rating=TOP_N_DEFAULT,
     )
 
     deep = aggregate_person_stats(
@@ -928,7 +943,6 @@ def main():
         "genre_counts_by_viewing_year.png",
         "average_rating_by_genre.png",
         "genre_by_release_decade.png",
-        "genre_share_by_viewing_year.png",
         *count_paths.values(),
         *rating_paths.values(),
         "letterboxd_with_genres.csv",
