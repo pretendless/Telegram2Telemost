@@ -14,7 +14,6 @@ Creates:
   genre_counts_by_viewing_year.png
   average_rating_by_genre.png
   genre_by_release_decade.png
-  genre_share_by_viewing_year.png
   watches_by_country.png
   watches_by_director.png
   watches_by_actor.png
@@ -28,6 +27,8 @@ Creates:
   letterboxd_with_genres.csv
   tmdb_unmatched.csv
   genre_summary.json
+
+(Does not create genre_share_by_viewing_year.png — dropped.)
 
 TMDB attribution is included in chart footers. Use of TMDB data is subject to its terms.
 """
@@ -878,31 +879,8 @@ def main():
         save_dark_figure(fig, "genre_by_release_decade.png")
         plt.close(fig)
 
-    # 4) Genre share within each viewing year — diary only.
-    top10 = [g for g, _ in Counter(all_genres_diary).most_common(10)]
-    matrix = []
-    for y in years:
-        subset = diary[diary["Watched Date"].dt.year == y]
-        n = len(subset)
-        matrix.append([100 * subset["Genre list"].apply(lambda gs: g in gs).sum() / n if n else 0 for g in top10])
-    if years and top10:
-        fig, ax = plt.subplots(figsize=(13, 6))
-        im = ax.imshow(np.array(matrix).T, aspect="auto", cmap="turbo", interpolation="nearest")
-        ax.set_yticks(range(len(top10))); ax.set_yticklabels(top10)
-        ax.set_xticks(range(len(years))); ax.set_xticklabels(years, rotation=45)
-        ax.set_title("Доля просмотров каждого жанра по годам (%)")
-        ax.set_xlabel("Год просмотра")
-        cb = fig.colorbar(im, ax=ax)
-        cb.set_label("% просмотров за год с этим жанром", color=FG)
-        cb.ax.yaxis.set_tick_params(color=FG)
-        plt.setp(plt.getp(cb.ax.axes, "yticklabels"), color=FG)
-        style_axes(ax)
-        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
-        fig.tight_layout(rect=[0, 0.03, 1, 1])
-        save_dark_figure(fig, "genre_share_by_viewing_year.png")
-        plt.close(fig)
-
     # HTML tops: catalog counts + ratings.csv ∪ diary.
+    # (genre_share_by_viewing_year.png removed — not sent to Telegram.)
     top_for_report, genres_by_rating = rank_genres(
         catalog,
         film_ratings=film_ratings,
@@ -965,7 +943,6 @@ def main():
         "genre_counts_by_viewing_year.png",
         "average_rating_by_genre.png",
         "genre_by_release_decade.png",
-        "genre_share_by_viewing_year.png",
         *count_paths.values(),
         *rating_paths.values(),
         "letterboxd_with_genres.csv",

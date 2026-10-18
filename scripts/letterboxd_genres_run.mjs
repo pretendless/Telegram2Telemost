@@ -9,7 +9,6 @@ const GENRE_PNGS = [
   "genre_counts_by_viewing_year.png",
   "average_rating_by_genre.png",
   "genre_by_release_decade.png",
-  "genre_share_by_viewing_year.png",
   "watches_by_country.png",
   "average_rating_by_country.png",
   "watches_by_director.png",
@@ -48,7 +47,6 @@ const GENRE_CAPTIONS = {
   "genre_counts_by_viewing_year.png": "Жанры по годам просмотра",
   "average_rating_by_genre.png": "Средняя оценка по жанрам",
   "genre_by_release_decade.png": "Жанры по десятилетию выхода",
-  "genre_share_by_viewing_year.png": "Доля жанров по годам",
   "watches_by_country.png": "Страны производства (TMDB)",
   "average_rating_by_country.png": "Страны — выше оценка",
   "watches_by_director.png": "Режиссёры — просмотры",
@@ -357,24 +355,43 @@ async function sendTelegramDocument(token, chatId, filePath, filename, caption =
   return res.ok;
 }
 
+/**
+ * Send charts one-by-one. On failure: log + notify that file, then continue
+ * the rest of the batch (no retries — one ECONNRESET must not drop everything after).
+ */
 async function sendCaptionedPhotos(token, chatId, workdir, names, captions) {
   let sent = 0;
+  const failed = [];
   for (const name of names) {
     const caption = captions[name] ? `<i>${escapeHtml(captions[name])}</i>` : "";
     try {
       const ok = await sendTelegramPhoto(token, chatId, join(workdir, name), name, caption);
       if (!ok) {
-        await sendTelegramText(token, chatId, `Не удалось отправить ${name}.`, "", `notify fail ${name}`);
+        failed.push(`${name} (HTTP reject)`);
+        console.error(`[letterboxd] sendCaptionedPhotos CONTINUE after fail: ${name} HTTP reject`);
+        try {
+          await sendTelegramText(
+            token,
+            chatId,
+            `Не удалось отправить ${name}.`,
+            "",
+            `notify fail ${name}`,
+          );
+        } catch (_) {
+          /* ignore secondary notify failure */
+        }
       } else {
         sent += 1;
       }
     } catch (err) {
-      console.error(`sendCaptionedPhotos ${name}:`, err && err.message ? err.message : err);
+      const detail = err && err.message ? err.message : String(err);
+      failed.push(`${name}: ${detail}`);
+      console.error(`[letterboxd] sendCaptionedPhotos CONTINUE after fail: ${name}: ${detail}`);
       try {
         await sendTelegramText(
           token,
           chatId,
-          `Не удалось отправить ${name}: ${err && err.message ? err.message : err}`,
+          `Не удалось отправить ${name}: ${detail}`,
           "",
           `notify fail ${name}`,
         );
@@ -383,7 +400,7 @@ async function sendCaptionedPhotos(token, chatId, workdir, names, captions) {
       }
     }
   }
-  return sent;
+  return { sent, failed, total: names.length };
 }
 
 async function downloadTelegramFile(token, fileId, destPath) {
@@ -520,32 +537,39 @@ export async function main() {
   const genreSummary = readJsonFile(join(workdir, "genre_summary.json"));
   const tmdbMessages = buildGenreReportMessages(genreSummary || {}, unmatched);
 
-  // TMDB work is done — send results once; on failure log clearly and notify chat once.
-  try {
-    for (let i = 0; i < tmdbMessages.length; i++) {
-      const ok = await sendTelegramHtml(
-        token,
-        chatId,
-        tmdbMessages[i],
-        `genre HTML part ${i + 1}/${tmdbMessages.length}`,
-      );
+  // TMDB work is done — send once each; mid-batch failures continue (no retries).
+  const batchFailures = [];
+  for (let i = 0; i < tmdbMessages.length; i++) {
+    const label = `genre HTML part ${i + 1}/${tmdbMessages.length}`;
+    try {
+      const ok = await sendTelegramHtml(token, chatId, tmdbMessages[i], label);
       if (!ok) {
-        throw new Error(`genre HTML part ${i + 1}/${tmdbMessages.length} rejected by Telegram`);
+        batchFailures.push(`${label} rejected by Telegram`);
+        console.error(`[letterboxd] CONTINUE after fail: ${label} HTTP reject`);
       }
+    } catch (err) {
+      const detail = err && err.message ? err.message : String(err);
+      batchFailures.push(`${label}: ${detail}`);
+      console.error(`[letterboxd] CONTINUE after fail: ${label}: ${detail}`);
     }
-    const genreSent = await sendCaptionedPhotos(
-      token,
-      chatId,
-      workdir,
-      genrePngs,
-      GENRE_CAPTIONS,
+  }
+  const photoResult = await sendCaptionedPhotos(
+    token,
+    chatId,
+    workdir,
+    genrePngs,
+    GENRE_CAPTIONS,
+  );
+  if (photoResult.failed.length) {
+    batchFailures.push(...photoResult.failed);
+    console.error(
+      `[letterboxd] genre PNGs sent ${photoResult.sent}/${photoResult.total}; failed: ${photoResult.failed.join("; ")}`,
     );
-    if (genreSent < genrePngs.length) {
-      console.error(`genre PNGs sent ${genreSent}/${genrePngs.length}`);
-    }
-  } catch (err) {
-    await notifySendFailure(token, chatId, "TMDB HTML/PNG", err);
-    throw err;
+  }
+  if (batchFailures.length) {
+    const summary = batchFailures.join(" | ");
+    await notifySendFailure(token, chatId, "TMDB HTML/PNG", new Error(summary));
+    throw new Error(`TMDB send incomplete: ${summary}`);
   }
 
   console.log("calendar pngs", calendarPngs.join(","));
