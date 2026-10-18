@@ -16,6 +16,15 @@ Creates:
   genre_by_release_decade.png
   genre_share_by_viewing_year.png
   watches_by_country.png
+  watches_by_director.png
+  watches_by_actor.png
+  watches_by_language.png
+  watches_by_studio.png
+  average_rating_by_country.png
+  average_rating_by_director.png
+  average_rating_by_actor.png
+  average_rating_by_language.png
+  average_rating_by_studio.png
   letterboxd_with_genres.csv
   tmdb_unmatched.csv
   genre_summary.json
@@ -40,15 +49,19 @@ from letterboxd_export import (  # noqa: E402
 )
 from letterboxd_palette import (  # noqa: E402
     FG,
-    GRID,
     apply_dark_chart_theme,
     save_dark_figure,
     style_axes,
-    watch_year_palette,
 )
 from letterboxd_ratings import (  # noqa: E402
     MIN_RATED_FOR_TOP,
     passes_rated_threshold,
+)
+from letterboxd_top_charts import (  # noqa: E402
+    chart_diary_entity_stacked,
+    chart_rating_hbar,
+    color_bars_by_rating,
+    display_lang,
 )
 
 apply_dark_chart_theme()
@@ -530,78 +543,127 @@ def rank_genres(catalog, film_ratings=None, diary=None, watched_only=None, limit
     return by_count, by_rating
 
 
+def _cache_meta_for_row(row, cache):
+    key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
+    return cache.get(key) or {}
+
+
 def chart_watches_by_country(diary, cache, path: Path, top_n: int = 12) -> bool:
     """Stacked horizontal bars: top countries by watches, color = watch year."""
-    work = diary.copy()
-    work["watch_year"] = work["Watched Date"].dt.year
-    work = work[work["watch_year"].notna()].copy()
-    if work.empty:
-        return False
-    work["watch_year"] = work["watch_year"].astype(int)
+    footer = "Source: Letterboxd diary + TMDB metadata"
 
-    country_totals = Counter()
-    for _, row in work.iterrows():
-        key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
-        for c in (cache.get(key) or {}).get("countries") or []:
-            if c:
-                country_totals[c] += 1
-    if not country_totals:
-        return False
-    top_countries = [name for name, _ in country_totals.most_common(top_n)]
-    # Bottom-to-top for barh (smallest at bottom among top-N shown ascending).
-    top_countries = list(reversed(top_countries))
+    def names_for_row(row):
+        return list(_cache_meta_for_row(row, cache).get("countries") or [])
 
-    all_years = sorted(work["watch_year"].unique().tolist())
-    palette = watch_year_palette(all_years)
-    years = all_years
-    year_index = {y: i for i, y in enumerate(years)}
-    country_index = {c: i for i, c in enumerate(top_countries)}
-    matrix = np.zeros((len(years), len(top_countries)), dtype=float)
-    for _, row in work.iterrows():
-        key = f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
-        wy = int(row["watch_year"])
-        for c in (cache.get(key) or {}).get("countries") or []:
-            if c not in country_index:
-                continue
-            matrix[year_index[wy], country_index[c]] += 1
-
-    fig, ax = plt.subplots(figsize=(10, max(4, len(top_countries) * 0.4)))
-    y = np.arange(len(top_countries))
-    left = np.zeros(len(top_countries))
-    for yi, year in enumerate(years):
-        vals = matrix[yi]
-        ax.barh(y, vals, left=left, color=palette[year], height=0.72, edgecolor="none")
-        left += vals
-    ax.set_yticks(y)
-    ax.set_yticklabels(top_countries)
-    ax.set_xlabel("Просмотры")
-    ax.set_title("Страны производства — цвет = год просмотра")
-    ax.xaxis.grid(True, color=GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-    style_axes(ax)
-    xmax = float(left.max()) if len(left) else 1.0
-    ax.set_xlim(0, xmax * 1.18)
-    for yi, total in enumerate(left):
-        ax.text(total + xmax * 0.02, yi, str(int(total)), va="center", fontsize=9, color=FG)
-    handles = [plt.Rectangle((0, 0), 1, 1, color=palette[y]) for y in years]
-    leg = fig.legend(
-        handles,
-        [str(y) for y in years],
-        title="Год просмотра",
-        loc="center left",
-        bbox_to_anchor=(0.92, 0.5),
-        frameon=False,
-        fontsize=8,
-        title_fontsize=9,
-        labelcolor=FG,
+    return chart_diary_entity_stacked(
+        diary,
+        path,
+        names_for_row=names_for_row,
+        title="Страны производства — цвет = год просмотра",
+        top_n=top_n,
+        min_count=1,
+        footer=footer,
     )
-    if leg is not None and leg.get_title() is not None:
-        leg.get_title().set_color(FG)
-    fig.text(0.01, 0.01, "Source: Letterboxd diary + TMDB metadata", fontsize=7, color=FG)
-    fig.tight_layout(rect=[0, 0.03, 0.88, 1])
-    save_dark_figure(fig, path)
-    plt.close(fig)
-    return True
+
+
+def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
+    """Watch-year stacked count charts for TMDB deep entities."""
+    footer = "Source: Letterboxd diary + TMDB metadata"
+    made = {}
+
+    def names(field):
+        def _fn(row):
+            meta = _cache_meta_for_row(row, cache)
+            if field == "languages":
+                lang = (meta.get("original_language") or "").strip()
+                return [lang] if lang else []
+            if field == "cast":
+                return list(meta.get("cast") or [])
+            return list(meta.get(field) or [])
+
+        return _fn
+
+    specs = [
+        ("watches_by_country", "countries", "Страны производства — цвет = год просмотра", 12, 1, None),
+        (
+            "watches_by_director",
+            "directors",
+            "Режиссёры — цвет = год просмотра",
+            10,
+            MIN_PERSON_COUNT,
+            None,
+        ),
+        (
+            "watches_by_actor",
+            "cast",
+            "Актёры (top-billed) — цвет = год просмотра",
+            10,
+            MIN_PERSON_COUNT,
+            None,
+        ),
+        (
+            "watches_by_language",
+            "languages",
+            "Язык оригинала — цвет = год просмотра",
+            10,
+            1,
+            display_lang,
+        ),
+        (
+            "watches_by_studio",
+            "companies",
+            "Студии — цвет = год просмотра",
+            8,
+            MIN_COMPANY_COUNT,
+            None,
+        ),
+    ]
+    for key, field, title, top_n, min_count, label_fn in specs:
+        path = paths.get(key)
+        if not path:
+            continue
+        # Country also exposed via chart_watches_by_country for back-compat.
+        made[key] = chart_diary_entity_stacked(
+            diary,
+            Path(path),
+            names_for_row=names(field),
+            title=title,
+            top_n=top_n,
+            min_count=min_count,
+            label_fn=label_fn,
+            footer=footer,
+        )
+    return made
+
+
+def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
+    """Cool↔warm average-rating charts for TMDB deep «выше оценка» tops."""
+    footer = "Source: Letterboxd diary/watched + TMDB metadata"
+    made = {}
+    specs = [
+        ("average_rating_by_country", "countries_by_rating", "Страны — выше оценка", None),
+        ("average_rating_by_director", "directors_by_rating", "Режиссёры — выше оценка", None),
+        ("average_rating_by_actor", "actors_by_rating", "Актёры — выше оценка", None),
+        (
+            "average_rating_by_language",
+            "languages_by_rating",
+            "Язык оригинала — выше оценка",
+            display_lang,
+        ),
+        ("average_rating_by_studio", "companies_by_rating", "Студии — выше оценка", None),
+    ]
+    for key, src, title, label_fn in specs:
+        path = paths.get(key)
+        if not path:
+            continue
+        made[key] = chart_rating_hbar(
+            deep.get(src) or [],
+            Path(path),
+            title=f"{title} (больше 3 оценённых фильмов)",
+            label_fn=label_fn,
+            footer=footer,
+        )
+    return made
 
 def _attach_tmdb_columns(frame, cache):
     """Add Genre list / countries / directors from TMDB cache onto a frame."""
@@ -726,8 +788,10 @@ def main():
     avg = avg.sort_values("Average rating")
     fig, ax = plt.subplots(figsize=(10, max(5, len(avg) * 0.32)))
     if len(avg):
-        bars = ax.barh(avg["Genre"], avg["Average rating"], color=plt.cm.turbo(np.linspace(0.05, 0.95, len(avg))))
-        ax.set_xlim(0, 5); ax.set_xlabel("Средняя личная оценка (из 5)")
+        bar_colors = color_bars_by_rating(avg["Average rating"].astype(float).tolist())
+        bars = ax.barh(avg["Genre"], avg["Average rating"], color=bar_colors)
+        ax.set_xlim(0, 5)
+        ax.set_xlabel("Средняя личная оценка (из 5)")
         ax.set_title("Средняя оценка по жанрам (минимум 5 оценённых фильмов)")
         for bar, (_, r) in zip(bars, avg.iterrows()):
             ax.text(
@@ -814,8 +878,23 @@ def main():
     deep = aggregate_person_stats(
         catalog, cache, film_ratings=film_ratings, diary=diary, watched_only=watched_only
     )
-    # Country chart stacks by watch year → diary only.
-    made_country = chart_watches_by_country(diary, cache, Path("watches_by_country.png"))
+    # Count tops: diary watches stacked by watch year (same spirit as countries).
+    count_paths = {
+        "watches_by_country": "watches_by_country.png",
+        "watches_by_director": "watches_by_director.png",
+        "watches_by_actor": "watches_by_actor.png",
+        "watches_by_language": "watches_by_language.png",
+        "watches_by_studio": "watches_by_studio.png",
+    }
+    made_counts = chart_deep_count_tops(diary, cache, count_paths)
+    rating_paths = {
+        "average_rating_by_country": "average_rating_by_country.png",
+        "average_rating_by_director": "average_rating_by_director.png",
+        "average_rating_by_actor": "average_rating_by_actor.png",
+        "average_rating_by_language": "average_rating_by_language.png",
+        "average_rating_by_studio": "average_rating_by_studio.png",
+    }
+    made_ratings = chart_deep_rating_tops(deep, rating_paths)
 
     genre_summary = {
         "unique_titles": int(total),
@@ -837,7 +916,7 @@ def main():
         "companies_by_rating": deep.get("companies_by_rating") or [],
         "min_person_count": int(MIN_PERSON_COUNT),
         "min_rated_for_top": int(MIN_RATED_FOR_TOP),
-        "charts": {"watches_by_country": bool(made_country)},
+        "charts": {**{k: bool(v) for k, v in made_counts.items()}, **{k: bool(v) for k, v in made_ratings.items()}},
     }
     Path("genre_summary.json").write_text(
         json.dumps(genre_summary, ensure_ascii=False, indent=2),
@@ -850,7 +929,8 @@ def main():
         "average_rating_by_genre.png",
         "genre_by_release_decade.png",
         "genre_share_by_viewing_year.png",
-        "watches_by_country.png",
+        *count_paths.values(),
+        *rating_paths.values(),
         "letterboxd_with_genres.csv",
         "tmdb_unmatched.csv",
         "genre_summary.json",

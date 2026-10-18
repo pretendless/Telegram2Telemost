@@ -123,7 +123,7 @@ test("escapeHtml for film titles", () => {
   assert.equal(escapeHtml('A & B <C> "D"'), "A &amp; B &lt;C&gt; \"D\"");
 });
 
-test("buildCalendarReportHtml uses bold numbers and HTML", () => {
+test("buildCalendarReportHtml keeps blurb, drops charted tops", () => {
   const html = buildCalendarReportHtml({
     entries: 100,
     unique_films: 80,
@@ -146,17 +146,18 @@ test("buildCalendarReportHtml uses bold numbers and HTML", () => {
   });
   assert.match(html, /<b>Letterboxd<\/b>/);
   assert.match(html, /<b>100<\/b>/);
-  assert.match(html, /Heat &amp; Dust/);
-  assert.match(html, /Годы выхода — выше оценка/);
-  assert.match(html, /больше 3 оценённых фильмов/);
-  assert.match(html, /<b>1999<\/b>/);
-  assert.match(html, /Годы выхода — больше просмотров/);
+  assert.match(html, /средняя <b>3\.75<\/b>/);
+  assert.doesNotMatch(html, /Heat/);
+  assert.doesNotMatch(html, /Годы выхода/);
+  assert.doesNotMatch(html, /Повторы/);
   assert.doesNotMatch(html, /parse_mode/);
 });
 
-test("buildGenreReportHtml lists top genres", () => {
+test("buildGenreReportHtml is short blurb without ranked lists", () => {
   const html = buildGenreReportHtml(
     {
+      unique_titles: 100,
+      resolved: 98,
       top_genres: [
         { name: "Drama", count: 50, pct: 20.5 },
         { name: "Comedy <x>", count: 10, pct: 4.1 },
@@ -165,14 +166,17 @@ test("buildGenreReportHtml lists top genres", () => {
     },
     9,
   );
-  assert.match(html, /<b>Жанры \(TMDB\)<\/b>/);
-  assert.match(html, /Comedy &lt;x&gt;/);
+  assert.match(html, /Letterboxd · TMDB/);
+  assert.match(html, /Обогащено/);
   assert.match(html, /<b>2<\/b>/);
-  assert.doesNotMatch(html, /выше оценка/);
+  assert.doesNotMatch(html, /Comedy/);
+  assert.doesNotMatch(html, /Жанры \(TMDB\) — выше оценка/);
 });
 
-test("buildGenreReportMessages splits genres and people/countries", () => {
+test("buildGenreReportMessages drops people/country bullet tops", () => {
   const msgs = buildGenreReportMessages({
+    unique_titles: 50,
+    resolved: 48,
     top_genres: [{ name: "Drama", count: 50, pct: 20 }],
     top_genres_by_rating: [{ name: "Drama", count: 50, avg: 4.1, rated: 40 }],
     unmatched: 1,
@@ -188,16 +192,11 @@ test("buildGenreReportMessages splits genres and people/countries", () => {
     companies_by_rating: [{ name: "A24", count: 6, avg: 4.0, rated: 6 }],
     min_person_count: 3,
   });
-  assert.equal(msgs.length, 2);
-  assert.match(msgs[0], /Жанры \(TMDB\)/);
-  assert.match(msgs[0], /Жанры \(TMDB\) — выше оценка/);
-  assert.match(msgs[1], /Страны/);
-  assert.match(msgs[1], /Страны — выше оценка/);
-  assert.match(msgs[1], /Режиссёры/);
-  assert.match(msgs[1], /Nolan &amp; Co/);
-  assert.match(msgs[1], /Actor &lt;X&gt;/);
-  assert.doesNotMatch(msgs[1], /Актёры — выше оценка/);
-  assert.match(msgs[1], /английский/);
-  assert.match(msgs[1], /Студии — выше оценка/);
-  assert.match(msgs[1], /больше 3 оценённых фильмов/);
+  assert.equal(msgs.length, 1);
+  assert.match(msgs[0], /Letterboxd · TMDB/);
+  assert.match(msgs[0], /графиках/);
+  assert.doesNotMatch(msgs[0], /Nolan/);
+  assert.doesNotMatch(msgs[0], /Страны — выше оценка/);
+  assert.doesNotMatch(msgs[0], /Актёры/);
+  assert.doesNotMatch(msgs[0], /Студии/);
 });

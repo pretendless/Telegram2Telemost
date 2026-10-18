@@ -36,6 +36,44 @@ def color_for_year(palette: dict[int, tuple], year: int, fallback=(0.3, 0.47, 0.
     return palette.get(int(year), fallback)
 
 
+def rating_color(avg: float, vmin: float = 2.0, vmax: float = 5.0) -> tuple:
+    """Map mean Letterboxd rating to cool→warm (blue → orange/red).
+
+    Used for «выше оценка» bar charts — not the watch-year turbo palette.
+    """
+    import matplotlib.pyplot as plt
+
+    try:
+        value = float(avg)
+    except (TypeError, ValueError):
+        value = vmin
+    span = max(1e-6, float(vmax) - float(vmin))
+    t = (value - float(vmin)) / span
+    if t < 0:
+        t = 0.0
+    elif t > 1:
+        t = 1.0
+    # cool (low) → warm (high): matplotlib coolwarm runs blue→red
+    return plt.cm.coolwarm(0.08 + 0.84 * t)
+
+
+def rating_colors(avgs, vmin: float | None = None, vmax: float | None = None) -> list[tuple]:
+    """Colors for a list of averages; optionally lock scale to [vmin, vmax]."""
+    values: list[float] = []
+    for a in avgs or []:
+        try:
+            values.append(float(a))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return []
+    lo = float(vmin) if vmin is not None else min(2.0, min(values))
+    hi = float(vmax) if vmax is not None else max(5.0, max(values))
+    if hi <= lo:
+        hi = lo + 0.01
+    return [rating_color(a, vmin=lo, vmax=hi) for a in avgs]
+
+
 def apply_dark_chart_theme() -> None:
     """Apply black-background rcParams once for all Letterboxd PNGs."""
     import matplotlib as mpl

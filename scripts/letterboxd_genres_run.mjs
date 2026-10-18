@@ -11,6 +11,15 @@ const GENRE_PNGS = [
   "genre_by_release_decade.png",
   "genre_share_by_viewing_year.png",
   "watches_by_country.png",
+  "average_rating_by_country.png",
+  "watches_by_director.png",
+  "average_rating_by_director.png",
+  "watches_by_actor.png",
+  "average_rating_by_actor.png",
+  "watches_by_language.png",
+  "average_rating_by_language.png",
+  "watches_by_studio.png",
+  "average_rating_by_studio.png",
 ];
 
 const CALENDAR_PNGS = [
@@ -20,6 +29,8 @@ const CALENDAR_PNGS = [
   "average_rating_by_year.png",
   "average_rating_by_release_decade.png",
   "top_rewatches.png",
+  "watches_by_release_year.png",
+  "average_rating_by_release_year.png",
 ];
 
 const CALENDAR_CAPTIONS = {
@@ -29,6 +40,8 @@ const CALENDAR_CAPTIONS = {
   "average_rating_by_year.png": "Средняя оценка по годам просмотра",
   "average_rating_by_release_decade.png": "Средняя оценка по десятилетию выхода",
   "top_rewatches.png": "Чаще всего в дневнике",
+  "watches_by_release_year.png": "Годы выхода — больше просмотров",
+  "average_rating_by_release_year.png": "Годы выхода — выше оценка",
 };
 
 const GENRE_CAPTIONS = {
@@ -37,6 +50,15 @@ const GENRE_CAPTIONS = {
   "genre_by_release_decade.png": "Жанры по десятилетию выхода",
   "genre_share_by_viewing_year.png": "Доля жанров по годам",
   "watches_by_country.png": "Страны производства (TMDB)",
+  "average_rating_by_country.png": "Страны — выше оценка",
+  "watches_by_director.png": "Режиссёры — просмотры",
+  "average_rating_by_director.png": "Режиссёры — выше оценка",
+  "watches_by_actor.png": "Актёры — просмотры",
+  "average_rating_by_actor.png": "Актёры — выше оценка",
+  "watches_by_language.png": "Язык оригинала — просмотры",
+  "average_rating_by_language.png": "Язык оригинала — выше оценка",
+  "watches_by_studio.png": "Студии — просмотры",
+  "average_rating_by_studio.png": "Студии — выше оценка",
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -173,108 +195,13 @@ export function buildCalendarReportHtml(summary) {
     lines.push(ratingLine);
   }
 
-  const rewatches = Array.isArray(s.top_rewatches) ? s.top_rewatches.slice(0, 3) : [];
-  if (rewatches.length) {
-    lines.push("<b>Повторы</b>");
-    for (const row of rewatches) {
-      const title = escapeHtml(row.name || "?");
-      const year = row.year != null ? ` (${escapeHtml(row.year)})` : "";
-      lines.push(`• ${title}${year} — <b>${escapeHtml(fmtNum(row.count))}</b>`);
-    }
-  }
-
-  const watchedYears = Array.isArray(s.top_release_years_by_count)
-    ? s.top_release_years_by_count.slice(0, 10)
-    : [];
-  if (watchedYears.length) {
-    lines.push("<b>Годы выхода — больше просмотров</b>");
-    for (const row of watchedYears) {
-      lines.push(
-        `• <b>${escapeHtml(row.year)}</b> — <b>${escapeHtml(fmtNum(row.count))}</b>`,
-      );
-    }
-  }
-
-  const ratedYears = Array.isArray(s.top_rated_release_years)
-    ? s.top_rated_release_years.slice(0, 10)
-    : [];
-  if (ratedYears.length) {
-    lines.push("<b>Годы выхода — выше оценка</b> <i>(больше 3 оценённых фильмов)</i>");
-    for (const row of ratedYears) {
-      lines.push(
-        `• <b>${escapeHtml(row.year)}</b> — ср. <b>${escapeHtml(fmtRating(row.avg))}</b> (n=${escapeHtml(fmtNum(row.rated))})`,
-      );
-    }
-  }
-
+  // Count / rating tops (rewatches, release years, …) ship as charts — no HTML lists.
   return lines.join("\n");
 }
 
-const LANG_LABELS = {
-  en: "английский",
-  ru: "русский",
-  fr: "французский",
-  de: "немецкий",
-  it: "итальянский",
-  es: "испанский",
-  ja: "японский",
-  ko: "корейский",
-  zh: "китайский",
-  sv: "шведский",
-  pl: "польский",
-  pt: "португальский",
-  hi: "хинди",
-  tr: "турецкий",
-  uk: "украинский",
-  da: "датский",
-  no: "норвежский",
-  nl: "нидерландский",
-  cs: "чешский",
-  hu: "венгерский",
-};
-
-function displayLang(code) {
-  const key = String(code || "")
-    .trim()
-    .toLowerCase();
-  return LANG_LABELS[key] || key || "?";
-}
-
-function formatNamedRankLine(row, { language = false, byRating = false } = {}) {
-  const raw = row.name || "?";
-  const name = escapeHtml(language ? displayLang(raw) : raw);
-  if (byRating) {
-    const avg = escapeHtml(fmtRating(row.avg));
-    const rated = escapeHtml(fmtNum(row.rated != null ? row.rated : row.count));
-    return `• <b>${name}</b> — ср. <b>${avg}</b> (n=${rated})`;
-  }
-  const count = escapeHtml(fmtNum(row.count));
-  const pct =
-    row.pct != null && Number.isFinite(Number(row.pct)) ? ` · ${escapeHtml(String(row.pct))}%` : "";
-  return `• <b>${name}</b> — ${count}${pct}`;
-}
-
-function appendPairedTops(lines, title, countRows, ratingRows, opts = {}) {
-  const countList = Array.isArray(countRows) ? countRows : [];
-  const ratingList = Array.isArray(ratingRows) ? ratingRows : [];
-  if (countList.length) {
-    const hint = opts.countHint ? ` <i>${escapeHtml(opts.countHint)}</i>` : "";
-    lines.push(`<b>${title}</b>${hint}`);
-    for (const row of countList) {
-      lines.push(formatNamedRankLine(row, { language: !!opts.language, byRating: false }));
-    }
-  }
-  if (ratingList.length) {
-    lines.push(`<b>${title} — выше оценка</b> <i>(больше 3 оценённых фильмов)</i>`);
-    for (const row of ratingList) {
-      lines.push(formatNamedRankLine(row, { language: !!opts.language, byRating: true }));
-    }
-  }
-}
-
 /**
- * TMDB genre + people/country HTML after enrichment.
- * Returns one or two messages to stay under Telegram's ~4096 limit.
+ * Short TMDB blurb after enrichment — ranked tops are charts, not HTML bullets.
+ * Returns one message (array for call-site compatibility).
  */
 export function buildGenreReportMessages(summary, unmatchedFallback = 0) {
   const s = summary && typeof summary === "object" ? summary : {};
@@ -282,60 +209,22 @@ export function buildGenreReportMessages(summary, unmatchedFallback = 0) {
     s.unmatched != null && Number.isFinite(Number(s.unmatched))
       ? Number(s.unmatched)
       : Number(unmatchedFallback) || 0;
+  const unique = s.unique_titles != null ? fmtNum(s.unique_titles) : null;
+  const resolved = s.resolved != null ? fmtNum(s.resolved) : null;
 
-  const genreLines = [];
-  appendPairedTops(
-    genreLines,
-    "Жанры (TMDB)",
-    Array.isArray(s.top_genres) ? s.top_genres.slice(0, 6) : [],
-    Array.isArray(s.top_genres_by_rating) ? s.top_genres_by_rating.slice(0, 6) : [],
-  );
-  if (!genreLines.length) {
-    genreLines.push("<b>Жанры (TMDB)</b>", "Топ жанров пуст.");
+  const lines = ["<b>Letterboxd · TMDB</b>"];
+  if (unique != null && resolved != null) {
+    lines.push(
+      `Обогащено: <b>${escapeHtml(resolved)}</b> / <b>${escapeHtml(unique)}</b> фильмов`,
+    );
+  } else {
+    lines.push("Подробности из TMDB готовы — графики ниже.");
   }
   if (unmatched > 0) {
-    genreLines.push(`Без жанров TMDB: <b>${escapeHtml(String(unmatched))}</b>`);
+    lines.push(`Без жанров TMDB: <b>${escapeHtml(String(unmatched))}</b>`);
   }
-
-  const deepLines = [];
-  const min = s.min_person_count != null ? fmtNum(s.min_person_count) : "3";
-  appendPairedTops(
-    deepLines,
-    "Страны",
-    Array.isArray(s.countries) ? s.countries.slice(0, 8) : [],
-    Array.isArray(s.countries_by_rating) ? s.countries_by_rating.slice(0, 8) : [],
-  );
-  appendPairedTops(
-    deepLines,
-    "Режиссёры",
-    Array.isArray(s.directors) ? s.directors.slice(0, 6) : [],
-    Array.isArray(s.directors_by_rating) ? s.directors_by_rating.slice(0, 6) : [],
-    { countHint: `(от ${min} просмотров)` },
-  );
-  appendPairedTops(
-    deepLines,
-    "Актёры",
-    Array.isArray(s.actors) ? s.actors.slice(0, 6) : [],
-    Array.isArray(s.actors_by_rating) ? s.actors_by_rating.slice(0, 6) : [],
-    { countHint: `(от ${min} просмотров)` },
-  );
-  appendPairedTops(
-    deepLines,
-    "Язык оригинала",
-    Array.isArray(s.languages) ? s.languages.slice(0, 6) : [],
-    Array.isArray(s.languages_by_rating) ? s.languages_by_rating.slice(0, 6) : [],
-    { language: true },
-  );
-  appendPairedTops(
-    deepLines,
-    "Студии",
-    Array.isArray(s.companies) ? s.companies.slice(0, 5) : [],
-    Array.isArray(s.companies_by_rating) ? s.companies_by_rating.slice(0, 5) : [],
-  );
-
-  const messages = [genreLines.join("\n")];
-  if (deepLines.length) messages.push(deepLines.join("\n"));
-  return messages;
+  lines.push("<i>Топы — на графиках (просмотры / выше оценка).</i>");
+  return [lines.join("\n")];
 }
 
 /** Genre-section HTML after TMDB enrichment (single string; tests / simple callers). */
