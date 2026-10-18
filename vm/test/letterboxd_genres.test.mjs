@@ -14,7 +14,9 @@ import {
   buildGenreReportMessages,
   calendarReadyText,
   escapeHtml,
+  formatTelegramError,
   mapScriptError,
+  telegramFetch,
   unmatchedFromWorkdir,
 } from "../../scripts/letterboxd_genres_run.mjs";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -67,6 +69,42 @@ test("buildLetterboxdDispatch", () => {
 test("mapScriptError covers diary and bearer", () => {
   assert.match(mapScriptError("Не задан TMDB_BEARER_TOKEN", "", 2), /TMDB_BEARER_TOKEN/);
   assert.match(mapScriptError("В ZIP не найден diary.csv", "", 1), /diary\.csv/);
+});
+
+test("formatTelegramError expands cause chain", () => {
+  const cause = new Error("connect ECONNRESET");
+  cause.code = "ECONNRESET";
+  cause.syscall = "connect";
+  cause.address = "1.2.3.4";
+  const err = new Error("fetch failed");
+  err.cause = cause;
+  const text = formatTelegramError(err);
+  assert.match(text, /fetch failed/);
+  assert.match(text, /ECONNRESET/);
+  assert.match(text, /cause:/);
+});
+
+test("telegramFetch is one-shot and labels failures", async () => {
+  let calls = 0;
+  const previous = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls += 1;
+    throw new Error("fetch failed");
+  };
+  try {
+    await assert.rejects(
+      () =>
+        telegramFetch("https://example.test/bot", { method: "POST" }, { label: "genre HTML part 1/2" }),
+      (err) => {
+        assert.match(String(err.message), /genre HTML part 1\/2/);
+        assert.match(String(err.message), /fetch failed/);
+        return true;
+      },
+    );
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = previous;
+  }
 });
 
 test("unmatchedFromWorkdir reads csv", () => {
