@@ -11,6 +11,8 @@ Writes into the current working directory:
   average_rating_by_year.png
   average_rating_by_release_decade.png
   top_rewatches.png
+  watches_by_release_year.png
+  average_rating_by_release_year.png
   diary_summary.json
 """
 
@@ -43,6 +45,11 @@ from letterboxd_palette import (  # noqa: E402
     save_dark_figure,
     style_axes,
     watch_year_palette,
+)
+from letterboxd_top_charts import (  # noqa: E402
+    chart_release_years_by_count,
+    chart_release_years_by_rating,
+    color_bars_by_rating,
 )
 from letterboxd_ratings import (  # noqa: E402
     MIN_RATED_FOR_TOP,
@@ -524,11 +531,12 @@ def chart_average_rating_by_release_decade(
     labels = grouped.index.tolist()
     values = grouped["mean"].astype(float).tolist()
     counts = grouped["count"].astype(int).tolist()
+    bar_colors = color_bars_by_rating(values)
 
     fig, ax = plt.subplots(figsize=(12, 6))
     x = np.arange(len(labels))
-    # Single accent on dark theme; stacking by watch year does not apply to means.
-    bars = ax.bar(x, values, color="#54A24B", width=0.8)
+    # Means: cool↔warm by rating (not watch-year palette).
+    bars = ax.bar(x, values, color=bar_colors, width=0.8)
     ax.set_ylim(0, 5.2)
     ax.set_title("Средняя оценка по десятилетию выхода")
     ax.set_xlabel("Десятилетие выхода")
@@ -645,10 +653,19 @@ def main(argv: list[str] | None = None) -> int:
         summary = build_diary_summary(
             diary, catalog=catalog, watched_only=watched_only, film_ratings=film_ratings
         )
+        made_release_count = chart_release_years_by_count(
+            diary, Path("watches_by_release_year.png")
+        )
+        made_release_rating = chart_release_years_by_rating(
+            summary.get("top_rated_release_years") or [],
+            Path("average_rating_by_release_year.png"),
+        )
         summary["charts"] = {
             "average_rating_by_year": bool(made_rating),
             "average_rating_by_release_decade": bool(made_decade_avg),
             "top_rewatches": bool(made_rewatch),
+            "watches_by_release_year": bool(made_release_count),
+            "average_rating_by_release_year": bool(made_release_rating),
         }
         Path("diary_summary.json").write_text(
             json.dumps(summary, ensure_ascii=False, indent=2),
@@ -662,6 +679,8 @@ def main(argv: list[str] | None = None) -> int:
         "average_rating_by_year.png",
         "average_rating_by_release_decade.png",
         "top_rewatches.png",
+        "watches_by_release_year.png",
+        "average_rating_by_release_year.png",
     ):
         if Path(name).is_file():
             extras.append(name)
