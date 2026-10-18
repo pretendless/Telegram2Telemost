@@ -51,75 +51,47 @@ function telegramApi(token, method) {
   return `https://api.telegram.org/bot${token}/${method}`;
 }
 
-const TELEGRAM_RETRY_ATTEMPTS = Math.max(
-  1,
-  Number.parseInt(env("LETTERBOXD_TG_RETRIES") || "5", 10) || 5,
-);
-const TELEGRAM_RETRY_BASE_MS = Math.max(
-  200,
-  Number.parseInt(env("LETTERBOXD_TG_RETRY_MS") || "1000", 10) || 1000,
-);
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Transient Bot API / network failures worth retrying. */
-export function isRetryableTelegramFailure(err, status) {
-  if (status === 429 || (typeof status === "number" && status >= 500 && status <= 599)) {
-    return true;
-  }
-  if (!err) return false;
-  const msg = String(err.message || err).toLowerCase();
-  return /fetch failed|network|econnreset|etimedout|econnrefused|socket|aborted|und_err|other side closed/.test(
-    msg,
-  );
-}
-
 /**
- * fetch() with exponential backoff for transient Telegram / network errors.
- * @param {string} url
- * @param {RequestInit | (() => RequestInit)} optionsOrFactory
- *        Factory rebuilds FormData bodies on each attempt (streams are one-shot).
- * @param {{ label?: string, attempts?: number }} [meta]
+ * Expand bare "fetch failed" / undici errors into a readable string for Actions logs.
+ * Includes cause chain (code, errno, syscall, address) when present.
  */
-export async function telegramFetch(url, optionsOrFactory, meta = {}) {
-  const label = meta.label || "telegram";
-  const attempts = meta.attempts || TELEGRAM_RETRY_ATTEMPTS;
-  const baseMs = meta.baseMs != null ? Number(meta.baseMs) : TELEGRAM_RETRY_BASE_MS;
-  let lastErr;
-  for (let i = 1; i <= attempts; i++) {
-    const options =
-      typeof optionsOrFactory === "function" ? optionsOrFactory() : optionsOrFactory;
-    try {
-      const res = await fetch(url, options);
-      if (res.ok) return res;
-      if (isRetryableTelegramFailure(null, res.status) && i < attempts) {
-        const retryAfter = Number(res.headers.get("retry-after")) || 0;
-        const delay = Math.max(retryAfter * 1000, baseMs * 2 ** (i - 1));
-        console.error(`${label}: http ${res.status}, retry ${i}/${attempts} in ${delay}ms`);
-        await sleep(delay);
-        continue;
-      }
-      return res;
-    } catch (err) {
-      lastErr = err;
-      if (i < attempts && isRetryableTelegramFailure(err)) {
-        const delay = baseMs * 2 ** (i - 1);
-        console.error(
-          `${label}: ${err && err.message ? err.message : err}, retry ${i}/${attempts} in ${delay}ms`,
-        );
-        await sleep(delay);
-        continue;
-      }
-      const wrapped = new Error(
-        `${label}: ${err && err.message ? err.message : err}`,
-      );
-      wrapped.cause = err;
-      throw wrapped;
+export function formatTelegramError(err) {
+  if (err == null) return "unknown error";
+  const parts = [];
+  let cur = err;
+  let depth = 0;
+  while (cur && depth < 4) {
+    if (typeof cur === "string") {
+      parts.push(cur);
+      break;
     }
+    const msg = cur.message || String(cur);
+    const bits = [msg];
+    if (cur.name && cur.name !== "Error") bits.push(`name=${cur.name}`);
+    if (cur.code) bits.push(`code=${cur.code}`);
+    if (cur.errno != null) bits.push(`errno=${cur.errno}`);
+    if (cur.syscall) bits.push(`syscall=${cur.syscall}`);
+    if (cur.address) bits.push(`address=${cur.address}`);
+    if (cur.port != null) bits.push(`port=${cur.port}`);
+    parts.push(bits.join(" "));
+    cur = cur.cause;
+    depth += 1;
   }
-  throw lastErr || new Error(`${label}: exhausted retries`);
+  return parts.join(" | cause: ");
+}
+
+/** One-shot Bot API fetch; wraps failures with step label (no retries). */
+export async function telegramFetch(url, options, meta = {}) {
+  const label = meta.label || "telegram";
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    const detail = formatTelegramError(err);
+    console.error(`[letterboxd] ${label} FAILED: ${detail}`);
+    const wrapped = new Error(`${label}: ${detail}`);
+    wrapped.cause = err;
+    throw wrapped;
+  }
 }
 
 /** Escape user/diary strings for Telegram HTML parse_mode. */
@@ -446,7 +418,9 @@ async function sendTelegramText(token, chatId, text, parseMode = "", label = "se
     },
     { label: `${label}${parseMode ? `/${parseMode}` : ""}` },
   );
-  if (!res.ok) console.error(label, res.status, parseMode || "plain");
+  if (!res.ok) {
+    console.error(`[letterboxd] ${label} HTTP ${res.status}${parseMode ? ` (${parseMode})` : ""}`);
+  }
   return res.ok;
 }
 
@@ -456,22 +430,20 @@ async function sendTelegramHtml(token, chatId, html, label = "sendMessage HTML")
 
 async function sendTelegramPhoto(token, chatId, filePath, filename, caption = "") {
   const bytes = readFileSync(filePath);
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  if (caption) {
+    form.set("caption", caption);
+    form.set("parse_mode", "HTML");
+  }
+  form.set("photo", new Blob([bytes], { type: "image/png" }), filename);
   const res = await telegramFetch(
     telegramApi(token, "sendPhoto"),
-    () => {
-      const form = new FormData();
-      form.set("chat_id", String(chatId));
-      if (caption) {
-        form.set("caption", caption);
-        form.set("parse_mode", "HTML");
-      }
-      form.set("photo", new Blob([bytes], { type: "image/png" }), filename);
-      return { method: "POST", body: form };
-    },
+    { method: "POST", body: form },
     { label: `sendPhoto ${filename}` },
   );
   if (!res.ok) {
-    console.error("sendPhoto", filename, res.status);
+    console.error(`[letterboxd] sendPhoto ${filename} HTTP ${res.status}`);
     // Fallback: document keeps full resolution if photo reject (size/dimensions).
     return sendTelegramDocument(token, chatId, filePath, filename, caption);
   }
@@ -480,21 +452,19 @@ async function sendTelegramPhoto(token, chatId, filePath, filename, caption = ""
 
 async function sendTelegramDocument(token, chatId, filePath, filename, caption = "") {
   const bytes = readFileSync(filePath);
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  if (caption) {
+    form.set("caption", caption);
+    form.set("parse_mode", "HTML");
+  }
+  form.set("document", new Blob([bytes], { type: "image/png" }), filename);
   const res = await telegramFetch(
     telegramApi(token, "sendDocument"),
-    () => {
-      const form = new FormData();
-      form.set("chat_id", String(chatId));
-      if (caption) {
-        form.set("caption", caption);
-        form.set("parse_mode", "HTML");
-      }
-      form.set("document", new Blob([bytes], { type: "image/png" }), filename);
-      return { method: "POST", body: form };
-    },
+    { method: "POST", body: form },
     { label: `sendDocument ${filename}` },
   );
-  if (!res.ok) console.error("sendDocument", filename, res.status);
+  if (!res.ok) console.error(`[letterboxd] sendDocument ${filename} HTTP ${res.status}`);
   return res.ok;
 }
 
@@ -661,7 +631,7 @@ export async function main() {
   const genreSummary = readJsonFile(join(workdir, "genre_summary.json"));
   const tmdbMessages = buildGenreReportMessages(genreSummary || {}, unmatched);
 
-  // TMDB work is done — retry Telegram sends; on final failure still tell the chat.
+  // TMDB work is done — send results once; on failure log clearly and notify chat once.
   try {
     for (let i = 0; i < tmdbMessages.length; i++) {
       const ok = await sendTelegramHtml(

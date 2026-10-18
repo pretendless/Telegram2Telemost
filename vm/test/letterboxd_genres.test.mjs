@@ -14,7 +14,7 @@ import {
   buildGenreReportMessages,
   calendarReadyText,
   escapeHtml,
-  isRetryableTelegramFailure,
+  formatTelegramError,
   mapScriptError,
   telegramFetch,
   unmatchedFromWorkdir,
@@ -71,31 +71,37 @@ test("mapScriptError covers diary and bearer", () => {
   assert.match(mapScriptError("В ZIP не найден diary.csv", "", 1), /diary\.csv/);
 });
 
-test("isRetryableTelegramFailure covers fetch failed and 5xx/429", () => {
-  assert.equal(isRetryableTelegramFailure(new Error("fetch failed")), true);
-  assert.equal(isRetryableTelegramFailure(new Error("ECONNRESET")), true);
-  assert.equal(isRetryableTelegramFailure(null, 429), true);
-  assert.equal(isRetryableTelegramFailure(null, 502), true);
-  assert.equal(isRetryableTelegramFailure(null, 400), false);
-  assert.equal(isRetryableTelegramFailure(new Error("chat not found")), false);
+test("formatTelegramError expands cause chain", () => {
+  const cause = new Error("connect ECONNRESET");
+  cause.code = "ECONNRESET";
+  cause.syscall = "connect";
+  cause.address = "1.2.3.4";
+  const err = new Error("fetch failed");
+  err.cause = cause;
+  const text = formatTelegramError(err);
+  assert.match(text, /fetch failed/);
+  assert.match(text, /ECONNRESET/);
+  assert.match(text, /cause:/);
 });
 
-test("telegramFetch retries then succeeds", async () => {
+test("telegramFetch is one-shot and labels failures", async () => {
   let calls = 0;
   const previous = globalThis.fetch;
   globalThis.fetch = async () => {
     calls += 1;
-    if (calls < 3) throw new Error("fetch failed");
-    return { ok: true, status: 200, headers: { get: () => null } };
+    throw new Error("fetch failed");
   };
   try {
-    const res = await telegramFetch(
-      "https://example.test/bot",
-      { method: "POST" },
-      { label: "test send", attempts: 4, baseMs: 1 },
+    await assert.rejects(
+      () =>
+        telegramFetch("https://example.test/bot", { method: "POST" }, { label: "genre HTML part 1/2" }),
+      (err) => {
+        assert.match(String(err.message), /genre HTML part 1\/2/);
+        assert.match(String(err.message), /fetch failed/);
+        return true;
+      },
     );
-    assert.equal(res.ok, true);
-    assert.equal(calls, 3);
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = previous;
   }
