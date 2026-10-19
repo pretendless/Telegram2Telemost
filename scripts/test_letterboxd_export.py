@@ -13,6 +13,7 @@ import pandas as pd
 
 from letterboxd_calendar_charts import (
     build_diary_summary,
+    diary_rating_means_by_watch_year,
     format_ru_calendar_date,
     main as cal_main,
 )
@@ -82,6 +83,39 @@ def test_union_and_diary_wins(tmp: Path) -> None:
     data = json.loads((tmp / "diary_summary.json").read_text(encoding="utf-8"))
     assert data["unique_films"] == 4
     assert data["rated_count"] == 3
+
+
+def test_watch_year_avg_uses_each_diary_rating() -> None:
+    """average_rating_by_year: rewatches contribute to their Watched Date years."""
+    diary = pd.DataFrame(
+        [
+            {
+                "Name": "Ocean's Eleven",
+                "Year": 2001,
+                "Rating": 5.0,
+                "Watched Date": pd.Timestamp("2013-02-12"),
+            },
+            {
+                "Name": "Ocean's Eleven",
+                "Year": 2001,
+                "Rating": 3.0,
+                "Watched Date": pd.Timestamp("2016-02-12"),
+            },
+            {
+                "Name": "Other",
+                "Year": 1999,
+                "Rating": 4.0,
+                "Watched Date": pd.Timestamp("2013-06-01"),
+            },
+        ]
+    )
+    means = diary_rating_means_by_watch_year(diary)
+    assert list(means.index) == [2013, 2016]
+    assert means.loc[2013, "count"] == 2  # 5.0 + 4.0, not collapsed
+    assert abs(float(means.loc[2013, "mean"]) - 4.5) < 1e-9
+    assert means.loc[2016, "count"] == 1
+    assert float(means.loc[2016, "mean"]) == 3.0
+    # Latest-per-film would put only 2016 (or overwrite); this keeps both years.
 
 
 def test_peak_viewing_day_from_diary() -> None:
@@ -173,6 +207,7 @@ def main() -> int:
         tmp = Path(raw)
         os.chdir(tmp)
         test_union_and_diary_wins(tmp)
+        test_watch_year_avg_uses_each_diary_rating()
         test_peak_viewing_day_from_diary()
         test_diary_latest_beats_older_diary_and_ratings_csv()
         test_diary_wins_over_ratings_csv()

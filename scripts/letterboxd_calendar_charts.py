@@ -529,39 +529,40 @@ def _chart_average_rating_line(
     return True
 
 
+def diary_rating_means_by_watch_year(df: pd.DataFrame) -> pd.DataFrame:
+    """Mean Rating per watch year from **each** rated diary row (no film collapse).
+
+    Rewatches with ratings in different years contribute to those years.
+    Does not use ratings.csv / latest-per-film merge.
+    """
+    empty = pd.DataFrame(columns=["mean", "count"])
+    if df is None or df.empty or "Rating" not in df.columns or "Watched Date" not in df.columns:
+        return empty
+    work = df[df["Watched Date"].notna() & df["Rating"].notna()].copy()
+    if work.empty:
+        return empty
+    work["Rating"] = pd.to_numeric(work["Rating"], errors="coerce")
+    work = work[work["Rating"].notna() & (work["Rating"] > 0)].copy()
+    if work.empty:
+        return empty
+    work["watch_year"] = work["Watched Date"].dt.year.astype(int)
+    grouped = work.groupby("watch_year")["Rating"].agg(["mean", "count"]).sort_index()
+    return grouped[grouped["count"] >= 1]
+
+
 def chart_average_rating_by_year(
     df: pd.DataFrame,
     path: Path,
     film_ratings: pd.DataFrame | None = None,
 ) -> bool:
-    """Mean Letterboxd rating per watch year (ratings.csv joined to diary films)."""
-    work = df[df["Watched Date"].notna()].copy()
-    if work.empty:
-        return False
-    work["_film_key"] = film_identity_series(work)
-    work = work.sort_values("Watched Date", kind="mergesort")
-    # One film → latest diary watch year for the time axis.
-    latest_watch = work.groupby("_film_key", dropna=False, as_index=False).tail(1)
+    """Mean diary Rating per watch year — each rated diary row in its Watched Date year.
 
-    if film_ratings is not None and not film_ratings.empty:
-        fr = film_ratings.copy()
-        if "_film_key" not in fr.columns:
-            fr["_film_key"] = film_identity_series(fr)
-        rate_map = fr.drop_duplicates("_film_key").set_index("_film_key")["Rating"]
-        rated = latest_watch.copy()
-        rated["Rating"] = rated["_film_key"].map(rate_map)
-        rated = rated[rated["Rating"].notna()].copy()
-    else:
-        rated = latest_rated_per_film(df)
-        if rated.empty:
-            return False
-        rated = rated.copy()
-
-    if rated.empty:
-        return False
-    rated["watch_year"] = rated["Watched Date"].dt.year.astype(int)
-    grouped = rated.groupby("watch_year")["Rating"].agg(["mean", "count"]).sort_index()
-    grouped = grouped[grouped["count"] >= 1]
+    Exception to the usual latest-rating-per-film rule: rewatches contribute to
+    the year they were watched (not collapsed to one film score). ``film_ratings``
+    / ratings.csv are ignored here (kept as a no-op kwarg for call-site compat).
+    """
+    del film_ratings  # intentional: do not collapse to latest film rating
+    grouped = diary_rating_means_by_watch_year(df)
     if grouped.empty:
         return False
 
