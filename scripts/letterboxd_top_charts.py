@@ -158,21 +158,22 @@ def chart_stacked_count_hbar(
 ) -> bool:
     """matrix shape (len(years), len(labels)); labels ordered bottom→top.
 
-    Roomier y-tick names (larger font + left margin) for Telegram readability —
-    used by TMDB watches_by_* count tops and similar stacked count charts.
+    Full-bleed stacked count chart for TMDB watches_by_* (and similar):
+    readable y-names without oversized fonts or empty black voids.
     """
     if not labels or not years or matrix.size == 0:
         return False
     n = len(labels)
-    # Taller rows + wider canvas so long names read well on Telegram.
-    fig_h = max(6.0, n * 0.68)
-    fig_w = 13.5
+    # Compact rows — plot fills most of the canvas (not a tall sparse strip).
+    fig_h = max(4.2, n * 0.44)
+    fig_w = 11.0
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     y = np.arange(n)
     left_stack = np.zeros(n)
     for yi, year in enumerate(years):
         vals = matrix[yi]
-        ax.barh(y, vals, left=left_stack, color=palette[year], height=0.8, edgecolor="none")
+        # Thick bars → small gap between rows.
+        ax.barh(y, vals, left=left_stack, color=palette[year], height=0.82, edgecolor="none")
         left_stack += vals
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
@@ -181,33 +182,31 @@ def chart_stacked_count_hbar(
     ax.xaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
-    # After style_axes: larger y-tick names + padding (avoid crushed labels).
-    label_fs = 14
-    ax.tick_params(axis="y", labelsize=label_fs, pad=10, length=0, colors=FG)
-    ax.tick_params(axis="x", labelsize=11, colors=FG)
-    ax.xaxis.label.set_fontsize(12)
-    ax.set_title(title, fontsize=14, pad=12, color=FG)
+    # Modest label size; labels hug the bars (small pad).
+    label_fs = 10
+    ax.tick_params(axis="y", labelsize=label_fs, pad=2, length=0, colors=FG)
+    ax.tick_params(axis="x", labelsize=9, colors=FG)
+    ax.xaxis.label.set_fontsize(10)
+    ax.set_title(title, fontsize=12, pad=8, color=FG)
     xmax = float(left_stack.max()) if len(left_stack) else 1.0
-    ax.set_xlim(0, xmax * 1.18)
+    ax.set_xlim(0, xmax * 1.14)
     for yi, total in enumerate(left_stack):
         ax.text(
-            total + xmax * 0.02,
+            total + xmax * 0.015,
             yi,
             str(int(total)),
             va="center",
-            fontsize=11,
+            fontsize=9,
             color=FG,
         )
     add_watch_year_legend(fig, years, palette)
-    # Generous left margin for long names (scales with longest label).
-    max_chars = max((len(str(s)) for s in labels), default=8)
-    left_frac = min(0.46, max(0.28, 0.14 + max_chars * 0.008))
-    bottom = 0.09 if footer else 0.07
     if footer:
-        fig.text(0.01, 0.015, footer, fontsize=7, color=FG)
-    fig.subplots_adjust(left=left_frac, right=0.83, top=0.92, bottom=bottom)
-    # pad_inches keeps y-tick names from being tight-cropped on save.
-    save_dark_figure(fig, path, dpi=160, pad_inches=0.35)
+        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
+        fig.tight_layout(rect=[0.0, 0.03, 0.88, 0.98])
+    else:
+        fig.tight_layout(rect=[0.0, 0.0, 0.88, 0.99])
+    # Minimal outer pad — avoid giant black border from bbox_inches=tight.
+    save_dark_figure(fig, path, dpi=160, pad_inches=0.08)
     plt.close(fig)
     return True
 
@@ -527,8 +526,7 @@ def chart_diary_entity_stacked(
     labels = []
     for n in top:
         raw = label_fn(n) if label_fn else n
-        # Longer allowance — chart_stacked_count_hbar leaves a wide left margin.
-        labels.append(_short_label(raw, limit=52))
+        labels.append(_short_label(raw, limit=40))
     return chart_stacked_count_hbar(
         labels,
         all_years,
