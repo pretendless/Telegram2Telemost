@@ -57,7 +57,6 @@ from letterboxd_top_charts import (  # noqa: E402
 from letterboxd_ratings import (  # noqa: E402
     MIN_RATED_FOR_TOP,
     film_identity_series,
-    latest_rated_per_film,
     passes_rated_threshold,
 )
 
