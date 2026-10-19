@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 
 const GENRE_PNGS = [
   "genre_counts_by_viewing_year.png",
+  "watches_by_genre.png",
   "average_rating_by_genre.png",
   "worst_average_rating_by_genre.png",
   "genre_by_release_decade.png",
@@ -55,6 +56,7 @@ const CALENDAR_CAPTIONS = {
 
 const GENRE_CAPTIONS = {
   "genre_counts_by_viewing_year.png": "Жанры по годам просмотра",
+  "watches_by_genre.png": "Жанры — просмотры",
   "average_rating_by_genre.png": "Жанры — выше оценка",
   "worst_average_rating_by_genre.png": "Жанры — ниже оценка",
   "genre_by_release_decade.png": "Жанры по десятилетию выхода",

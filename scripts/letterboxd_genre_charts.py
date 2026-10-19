@@ -12,6 +12,7 @@ Edits one message «Подгружаю подробности из TMDB: N/total
 
 Creates:
   genre_counts_by_viewing_year.png
+  watches_by_genre.png
   average_rating_by_genre.png / worst_average_rating_by_genre.png
   genre_by_release_decade.png
   watches_by_country/director/actor/language/studio.png
@@ -646,6 +647,14 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
 
     specs = [
         (
+            "watches_by_genre",
+            "genres",
+            "Жанры — цвет = год просмотра",
+            TOP_N_DEFAULT,
+            1,
+            None,
+        ),
+        (
             "watches_by_country",
             "countries",
             "Страны производства — цвет = год просмотра",
@@ -690,11 +699,24 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
         path = paths.get(key)
         if not path:
             continue
+
+        if field == "genres":
+            # Diary Genre list (TMDB) — same stacked count family as countries/actors.
+            def genre_names(row, _cache=cache):
+                gl = row.get("Genre list")
+                if isinstance(gl, (list, tuple)) and gl:
+                    return [str(g) for g in gl if g]
+                return list(_cache_meta_for_row(row, _cache).get("genres") or [])
+
+            names_for_row = genre_names
+        else:
+            names_for_row = names(field)
+
         # Country also exposed via chart_watches_by_country for back-compat.
         made[key] = chart_diary_entity_stacked(
             diary,
             Path(path),
-            names_for_row=names(field),
+            names_for_row=names_for_row,
             title=title,
             top_n=top_n,
             min_count=min_count,
@@ -970,6 +992,7 @@ def main():
     )
     # Count tops: diary watches stacked by watch year (same spirit as countries).
     count_paths = {
+        "watches_by_genre": "watches_by_genre.png",
         "watches_by_country": "watches_by_country.png",
         "watches_by_director": "watches_by_director.png",
         "watches_by_actor": "watches_by_actor.png",

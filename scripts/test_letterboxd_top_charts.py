@@ -193,6 +193,38 @@ def test_rating_hbar_long_names_no_overlap(tmp_path: Path | None = None):
 
 
 
+def test_watches_by_genre_stacked_count(tmp_path: Path | None = None):
+    """Genre count top uses same watch-year stacked helper as countries/actors."""
+    from letterboxd_top_charts import chart_diary_entity_stacked
+
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "watches_by_genre.png"
+    diary = pd.DataFrame(
+        [
+            {"Name": "A", "Year": 2020, "Watched Date": "2021-01-01", "Genre list": ["Drama", "Crime"]},
+            {"Name": "B", "Year": 2019, "Watched Date": "2021-06-01", "Genre list": ["Drama"]},
+            {"Name": "C", "Year": 2018, "Watched Date": "2022-01-01", "Genre list": ["Comedy", "Drama"]},
+            {"Name": "D", "Year": 2017, "Watched Date": "2022-03-01", "Genre list": ["Action"]},
+            {"Name": "E", "Year": 2016, "Watched Date": "2022-06-01", "Genre list": ["Drama", "Action"]},
+            {"Name": "F", "Year": 2015, "Watched Date": "2023-01-01", "Genre list": ["Comedy"]},
+        ]
+    )
+    diary["Watched Date"] = pd.to_datetime(diary["Watched Date"])
+    assert (
+        chart_diary_entity_stacked(
+            diary,
+            path,
+            names_for_row=lambda row: list(row.get("Genre list") or []),
+            title="Жанры — цвет = год просмотра",
+            top_n=TOP_N_DEFAULT,
+            footer="Source: Letterboxd diary + TMDB metadata",
+        )
+        is True
+    )
+    assert path.is_file() and path.stat().st_size > 0
+
+
 def test_stacked_count_hbar_long_names(tmp_path: Path | None = None):
     """Count tops: long y-labels still render on a roomier canvas."""
     out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
@@ -265,5 +297,6 @@ if __name__ == "__main__":
     test_rating_hbar_worst_ascending()
     test_rating_hbar_long_names_no_overlap()
     test_rating_hbar_worst_skips_short_slate()
+    test_watches_by_genre_stacked_count()
     test_stacked_count_hbar_long_names()
     print("ok")
