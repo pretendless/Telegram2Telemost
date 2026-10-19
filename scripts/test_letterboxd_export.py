@@ -13,8 +13,10 @@ import pandas as pd
 
 from letterboxd_calendar_charts import (
     build_diary_summary,
+    chart_viewing_pace,
     diary_rating_means_by_watch_year,
     format_ru_calendar_date,
+    viewing_pace_stats,
     main as cal_main,
 )
 from letterboxd_export import latest_rated_union, load_export, load_ratings, merged_film_ratings
@@ -118,6 +120,30 @@ def test_watch_year_avg_uses_each_diary_rating() -> None:
     # Latest-per-film would put only 2016 (or overwrite); this keeps both years.
 
 
+def test_viewing_pace_is_monthly_not_yearly() -> None:
+    """Pace chart: films/month across calendar months (distinct from views_by_year)."""
+    diary = pd.DataFrame(
+        [
+            {"Name": "A", "Year": 2020, "Rating": 4.0, "Watched Date": "2021-01-05"},
+            {"Name": "B", "Year": 2019, "Rating": 3.0, "Watched Date": "2021-01-20"},
+            {"Name": "C", "Year": 2018, "Rating": 5.0, "Watched Date": "2021-03-01"},
+            {"Name": "D", "Year": 2017, "Rating": 2.0, "Watched Date": "2021-03-15"},
+            {"Name": "E", "Year": 2016, "Rating": 4.0, "Watched Date": "2021-03-20"},
+        ]
+    )
+    diary["Watched Date"] = pd.to_datetime(diary["Watched Date"])
+    stats = viewing_pace_stats(diary)
+    # Jan + Feb(0) + Mar = 3 months span, 5 watches → ~1.7/mo
+    assert stats["span_months"] == 3
+    assert stats["counts"] == [2, 0, 3]
+    assert stats["films_per_month"] == round(5 / 3, 1)
+    summary = build_diary_summary(diary, catalog=diary, watched_only=diary.iloc[0:0].copy())
+    assert summary["films_per_month"] == stats["films_per_month"]
+    path = Path("/tmp/lb-viewing-pace-test.png")
+    assert chart_viewing_pace(diary, path) is True
+    assert path.is_file() and path.stat().st_size > 0
+
+
 def test_peak_viewing_day_from_diary() -> None:
     """Peak day = calendar date with most diary Watched Date rows (Russian label)."""
     diary = pd.DataFrame(
@@ -208,6 +234,7 @@ def main() -> int:
         os.chdir(tmp)
         test_union_and_diary_wins(tmp)
         test_watch_year_avg_uses_each_diary_rating()
+        test_viewing_pace_is_monthly_not_yearly()
         test_peak_viewing_day_from_diary()
         test_diary_latest_beats_older_diary_and_ratings_csv()
         test_diary_wins_over_ratings_csv()

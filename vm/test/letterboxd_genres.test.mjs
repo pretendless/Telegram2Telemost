@@ -138,6 +138,7 @@ test("buildCalendarReportHtml keeps blurb, drops charted tops", () => {
     favorite_weekday_count: 20,
     favorite_month: "Окт",
     favorite_month_count: 15,
+    films_per_month: 4.2,
     rated_count: 70,
     rated_share: 0.7,
     rating_avg: 3.75,
@@ -150,6 +151,7 @@ test("buildCalendarReportHtml keeps blurb, drops charted tops", () => {
   assert.match(html, /<b>Letterboxd<\/b>/);
   assert.match(html, /<b>100<\/b>/);
   assert.match(html, /Больше всего просмотров за день: <b>15 марта 2021<\/b> \(<b>7<\/b>\)/);
+  assert.match(html, /Темп: в среднем <b>4\.2<\/b> фильмов в месяц/);
   assert.match(html, /средняя <b>3\.75<\/b>/);
   assert.doesNotMatch(html, /Heat/);
   assert.doesNotMatch(html, /Годы выхода/);

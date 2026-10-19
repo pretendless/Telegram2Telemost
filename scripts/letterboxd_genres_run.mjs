@@ -33,6 +33,7 @@ const CALENDAR_PNGS = [
   "extra_stats_decade_rating.png",
   "average_rating_by_year.png",
   "average_rating_by_release_decade.png",
+  "viewing_pace.png",
   "top_rewatches.png",
   "watches_by_release_year.png",
   "average_rating_by_release_year.png",
@@ -45,6 +46,7 @@ const CALENDAR_CAPTIONS = {
   "extra_stats_decade_rating.png": "Десятилетия выхода и оценки",
   "average_rating_by_year.png": "Средняя оценка по годам просмотра",
   "average_rating_by_release_decade.png": "Средняя оценка по десятилетию выхода",
+  "viewing_pace.png": "Темп просмотров — фильмов в месяц",
   "top_rewatches.png": "Чаще всего в дневнике",
   "watches_by_release_year.png": "Годы выхода — больше просмотров",
   "average_rating_by_release_year.png": "Годы выхода — выше оценка",
@@ -199,6 +201,11 @@ export function buildCalendarReportHtml(summary) {
   if (s.favorite_month) {
     lines.push(
       `Месяц: <b>${escapeHtml(s.favorite_month)}</b> (${escapeHtml(fmtNum(s.favorite_month_count))})`,
+    );
+  }
+  if (s.films_per_month != null && Number.isFinite(Number(s.films_per_month))) {
+    lines.push(
+      `Темп: в среднем <b>${escapeHtml(fmtRating(s.films_per_month))}</b> фильмов в месяц`,
     );
   }
 
