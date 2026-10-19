@@ -297,5 +297,6 @@ if __name__ == "__main__":
     test_rating_hbar_worst_ascending()
     test_rating_hbar_long_names_no_overlap()
     test_rating_hbar_worst_skips_short_slate()
+    test_watches_by_genre_stacked_count()
     test_stacked_count_hbar_long_names()
     print("ok")
