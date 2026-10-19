@@ -370,7 +370,7 @@ def _rank_named(
     """stats: name -> {count, rating_sum, rated}.
 
     Count tops use min_count on watch hits.
-    Rating tops require unique rated films > min_rated (strict); omit failures.
+    Rating tops require unique rated films ≥ min_rated (inclusive); omit failures.
     `rated` must be unique-film count after latest_rated_* dedupe, not diary rows.
     ascending=True on by_avg → worst averages first («ниже оценка»).
     """
@@ -419,7 +419,7 @@ def _qualifying_rated_n(stats, min_rated=MIN_RATED_FOR_TOP) -> int:
 
 
 def _paired_ranks(stats, min_count, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT):
-    """Count top + best rating top + worst rating top (rated > MIN_RATED_FOR_TOP).
+    """Count top + best rating top + worst rating top (rated ≥ MIN_RATED_FOR_TOP).
 
     Anti-rating («ниже оценка») is omitted unless ≥ limit_rating entities qualify —
     no short worst lists (M ≈ TOP_N_DEFAULT).
@@ -809,7 +809,7 @@ def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
         made[key] = chart_rating_hbar(
             deep.get(src) or [],
             Path(path),
-            title=f"{title} (больше 3 оценённых фильмов)",
+            title=f"{title} (не меньше 3 оценённых фильмов)",
             label_fn=label_fn,
             footer=footer,
             limit=TOP_N_DEFAULT,
@@ -973,7 +973,7 @@ def main():
     made_genre_best = chart_rating_hbar(
         genres_by_rating,
         Path("average_rating_by_genre.png"),
-        title="Жанры — выше оценка (больше 3 оценённых фильмов)",
+        title="Жанры — выше оценка (не меньше 3 оценённых фильмов)",
         footer=footer,
         limit=TOP_N_DEFAULT,
         ascending=False,
@@ -981,7 +981,7 @@ def main():
     made_genre_worst = chart_rating_hbar(
         genres_by_rating_worst,
         Path("worst_average_rating_by_genre.png"),
-        title="Жанры — ниже оценка (больше 3 оценённых фильмов)",
+        title="Жанры — ниже оценка (не меньше 3 оценённых фильмов)",
         footer=footer,
         limit=TOP_N_DEFAULT,
         ascending=True,

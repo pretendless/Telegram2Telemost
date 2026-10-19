@@ -46,10 +46,11 @@ def _diary_five_plus_one() -> pd.DataFrame:
 def test_passes_rated_threshold_helper() -> None:
     assert MIN_RATED_FOR_TOP == 3
     assert passes_rated_threshold(0) is False
-    assert passes_rated_threshold(3) is False  # need strictly > 3
+    assert passes_rated_threshold(2) is False
+    assert passes_rated_threshold(3) is True  # inclusive ≥ 3
     assert passes_rated_threshold(4) is True
     assert passes_rated_threshold(2, min_rated=3) is False
-    assert passes_rated_threshold(4, min_rated=3) is True
+    assert passes_rated_threshold(3, min_rated=3) is True
 
 
 def test_five_plus_one_rewatches_are_two_unique_films() -> None:
@@ -84,13 +85,13 @@ def test_threshold_blocks_rating_top_for_five_plus_one() -> None:
     by_rating = _rank_named(stats, by_avg=True, min_rated=MIN_RATED_FOR_TOP, limit=8)
     assert by_rating == [], by_rating
 
-    # Same bucket with 4 unique rated films would pass.
-    stats4 = {
-        "Drama": {"count": 4, "rating_sum": 16.0, "rated": 4},
+    # Same bucket with exactly 3 unique rated films now passes (≥ 3).
+    stats3 = {
+        "Drama": {"count": 3, "rating_sum": 12.0, "rated": 3},
     }
-    by_rating4 = _rank_named(stats4, by_avg=True, min_rated=MIN_RATED_FOR_TOP, limit=8)
-    assert len(by_rating4) == 1
-    assert by_rating4[0]["rated"] == 4
+    by_rating3 = _rank_named(stats3, by_avg=True, min_rated=MIN_RATED_FOR_TOP, limit=8)
+    assert len(by_rating3) == 1
+    assert by_rating3[0]["rated"] == 3
 
 
 def test_release_year_top_uses_unique_rated() -> None:
@@ -105,7 +106,7 @@ def test_release_year_top_uses_unique_rated() -> None:
 
 
 def test_worst_rank_skipped_when_fewer_than_top_m() -> None:
-    """Anti-rating list empty unless ≥ M entities pass rated > 3."""
+    """Anti-rating list empty unless ≥ M entities pass rated ≥ 3."""
     # 5 qualifying entities — below TOP_N_DEFAULT (~20).
     stats = {
         f"E{i}": {"count": 10, "rating_sum": float(10 + i), "rated": 4 + (i % 2)}

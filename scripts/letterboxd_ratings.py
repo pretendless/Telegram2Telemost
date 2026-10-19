@@ -8,15 +8,15 @@ diary latest-rated wins; **ratings.csv** fills films with no diary Rating.
 
 Watch-count metrics still use the full diary / catalog rows.
 
-«Выше оценка» tops require strictly more than MIN_RATED_FOR_TOP **unique**
-rated films (after merge + Name+Year dedupe), never raw diary rating rows.
+«Выше оценка» tops require at least MIN_RATED_FOR_TOP **unique**
+rated films (rated ≥ 3 after merge + Name+Year dedupe), never raw diary rows.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
-# Rating tops («выше оценка»): entity needs rated unique films > this value.
+# Rating tops («выше оценка»): entity needs rated unique films ≥ this value.
 MIN_RATED_FOR_TOP = 3
 
 
@@ -37,16 +37,16 @@ def film_identity_series(df: pd.DataFrame) -> pd.Series:
 
 
 def passes_rated_threshold(rated_count: int, min_rated: int | None = None) -> bool:
-    """True when unique rated films strictly exceed the «выше оценка» gate.
+    """True when unique rated films meet the «выше оценка» gate (inclusive).
 
-    min_rated defaults to MIN_RATED_FOR_TOP (need rated > 3 unique films).
+    min_rated defaults to MIN_RATED_FOR_TOP (need rated ≥ 3 unique films).
     """
     threshold = MIN_RATED_FOR_TOP if min_rated is None else int(min_rated)
     try:
         n = int(rated_count)
     except (TypeError, ValueError):
         return False
-    return n > threshold
+    return n >= threshold
 
 
 def latest_rated_per_film(df: pd.DataFrame) -> pd.DataFrame:
