@@ -6,13 +6,14 @@ from __future__ import annotations
 import pandas as pd
 
 from letterboxd_calendar_charts import build_diary_summary
-from letterboxd_genre_charts import _rank_named
+from letterboxd_genre_charts import _paired_ranks, _rank_named
 from letterboxd_ratings import (
     MIN_RATED_FOR_TOP,
     film_identity_series,
     latest_rated_per_film,
     passes_rated_threshold,
 )
+from letterboxd_top_charts import TOP_N_DEFAULT
 
 
 def _diary_five_plus_one() -> pd.DataFrame:
@@ -103,11 +104,33 @@ def test_release_year_top_uses_unique_rated() -> None:
     assert summary["top_rated_release_years"] == []
 
 
+def test_worst_rank_skipped_when_fewer_than_top_m() -> None:
+    """Anti-rating list empty unless ≥ M entities pass rated > 3."""
+    # 5 qualifying entities — below TOP_N_DEFAULT (~20).
+    stats = {
+        f"E{i}": {"count": 10, "rating_sum": float(10 + i), "rated": 4 + (i % 2)}
+        for i in range(5)
+    }
+    _c, best, worst = _paired_ranks(stats, min_count=1, limit_rating=TOP_N_DEFAULT)
+    assert len(best) == 5
+    assert worst == []
+
+    # Full slate of M qualifying → worst present.
+    stats_full = {
+        f"E{i}": {"count": 10, "rating_sum": float(20 + i), "rated": 5}
+        for i in range(TOP_N_DEFAULT)
+    }
+    _c2, best2, worst2 = _paired_ranks(stats_full, min_count=1, limit_rating=TOP_N_DEFAULT)
+    assert len(best2) == TOP_N_DEFAULT
+    assert len(worst2) == TOP_N_DEFAULT
+
+
 def main() -> int:
     test_passes_rated_threshold_helper()
     test_five_plus_one_rewatches_are_two_unique_films()
     test_threshold_blocks_rating_top_for_five_plus_one()
     test_release_year_top_uses_unique_rated()
+    test_worst_rank_skipped_when_fewer_than_top_m()
     print("test_letterboxd_ratings: ok")
     return 0
 

@@ -48,6 +48,7 @@ from letterboxd_palette import (  # noqa: E402
     watch_year_palette,
 )
 from letterboxd_top_charts import (  # noqa: E402
+    TOP_N_DEFAULT,
     add_rating_colorbar,
     chart_release_years_by_count,
     chart_release_years_by_rating,
@@ -218,17 +219,21 @@ def build_diary_summary(
                     }
                 )
             top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["rated"], -r["year"]))
-            worst_rated_release_years = sorted(
-                top_rated_release_years,
-                key=lambda r: (r["avg"], -r["rated"], r["year"]),
-            )[:20]
-            top_rated_release_years = top_rated_release_years[:20]
+            # Anti-rating only when a full top-M of qualifying years exists.
+            if len(top_rated_release_years) >= TOP_N_DEFAULT:
+                worst_rated_release_years = sorted(
+                    top_rated_release_years,
+                    key=lambda r: (r["avg"], -r["rated"], r["year"]),
+                )[:TOP_N_DEFAULT]
+            else:
+                worst_rated_release_years = []
+            top_rated_release_years = top_rated_release_years[:TOP_N_DEFAULT]
         else:
             worst_rated_release_years = []
 
         # Counts: every diary row + one per watched-only film (no fake dates).
         watch_by_release = with_release.groupby("release_year").size().sort_values(ascending=False)
-        for year, count in watch_by_release.head(20).items():
+        for year, count in watch_by_release.head(TOP_N_DEFAULT).items():
             top_release_years_by_count.append({"year": int(year), "count": int(count)})
     else:
         worst_rated_release_years = []

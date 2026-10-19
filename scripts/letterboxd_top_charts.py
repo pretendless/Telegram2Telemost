@@ -160,6 +160,9 @@ def _prepare_rating_rows(
         return []
     if ascending:
         usable.sort(key=lambda r: (r[1], -(r[2] or 0), r[0]))
+        # Anti-rating charts need a full top-M slate — skip short lists.
+        if limit and len(usable) < limit:
+            return []
     else:
         usable.sort(key=lambda r: (-r[1], -(r[2] or 0), r[0]))
     if limit and len(usable) > limit:

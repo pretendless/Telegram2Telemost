@@ -124,6 +124,28 @@ def test_rating_hbar_worst_ascending(tmp_path: Path | None = None):
     out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
     out.mkdir(parents=True, exist_ok=True)
     path = out / "actors_worst_hbar.png"
+    # Full top-M slate required for anti-rating charts.
+    rows = [
+        {"name": f"E{i}", "avg": 1.0 + (i % 10) * 0.1, "rated": 4 + (i % 3)}
+        for i in range(TOP_N_DEFAULT)
+    ]
+    assert (
+        chart_rating_hbar(
+            rows,
+            path,
+            title="Актёры — ниже оценка",
+            ascending=True,
+            limit=TOP_N_DEFAULT,
+        )
+        is True
+    )
+    assert path.is_file() and path.stat().st_size > 0
+
+
+def test_rating_hbar_worst_skips_short_slate(tmp_path: Path | None = None):
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "actors_worst_short.png"
     assert (
         chart_rating_hbar(
             [
@@ -133,10 +155,11 @@ def test_rating_hbar_worst_ascending(tmp_path: Path | None = None):
             path,
             title="Актёры — ниже оценка",
             ascending=True,
+            limit=TOP_N_DEFAULT,
         )
-        is True
+        is False
     )
-    assert path.is_file() and path.stat().st_size > 0
+    assert not path.is_file()
 
 
 if __name__ == "__main__":
@@ -148,4 +171,5 @@ if __name__ == "__main__":
     test_rating_vbar_skips_bad_avg()
     test_rating_hbar_with_in_bar_labels()
     test_rating_hbar_worst_ascending()
+    test_rating_hbar_worst_skips_short_slate()
     print("ok")
