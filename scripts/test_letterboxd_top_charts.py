@@ -6,13 +6,22 @@ from pathlib import Path
 
 import pandas as pd
 
-from letterboxd_palette import RATING_VMAX, RATING_VMIN, rating_color, rating_colormap
+import numpy as np
+
+from letterboxd_palette import (
+    RATING_VMAX,
+    RATING_VMIN,
+    rating_color,
+    rating_colormap,
+    watch_year_palette,
+)
 from letterboxd_top_charts import (
     TOP_N_DEFAULT,
     chart_rating_hbar,
     chart_rating_vbar,
     chart_release_years_by_count,
     chart_release_years_by_rating,
+    chart_stacked_count_hbar,
     display_lang,
 )
 
@@ -69,12 +78,17 @@ def test_release_year_charts(tmp_path: Path | None = None):
     assert count_path.is_file() and count_path.stat().st_size > 0
 
     rating_path = out / "average_rating_by_release_year.png"
+    # Full top-M slate so anti-rating path can also be exercised.
     rows = [
-        {"year": 1999, "avg": 4.5, "rated": 8},
-        {"year": 2010, "avg": 3.2, "rated": 5},
+        {"year": 2000 + i, "avg": round(4.5 - i * 0.05, 2), "rated": 5 + (i % 4)}
+        for i in range(TOP_N_DEFAULT)
     ]
     assert chart_release_years_by_rating(rows, rating_path) is True
     assert rating_path.is_file() and rating_path.stat().st_size > 0
+
+    worst_path = out / "worst_average_rating_by_release_year.png"
+    assert chart_release_years_by_rating(rows, worst_path, ascending=True) is True
+    assert worst_path.is_file() and worst_path.stat().st_size > 0
 
     empty = out / "empty_rating.png"
     assert chart_release_years_by_rating([], empty) is False
@@ -177,6 +191,49 @@ def test_rating_hbar_long_names_no_overlap(tmp_path: Path | None = None):
     assert path.is_file() and path.stat().st_size > 0
 
 
+
+
+def test_stacked_count_hbar_long_names(tmp_path: Path | None = None):
+    """Count tops: long y-labels still render on a roomier canvas."""
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "watches_by_director_long.png"
+    labels = [
+        "Christopher Nolan",
+        "Quentin Tarantino",
+        "Wes Anderson",
+        "Denis Villeneuve",
+        "Guillermo del Toro",
+        "Alfonso Cuarón",
+        "Alejandro González Iñárritu",
+        "Park Chan-wook",
+        "Bong Joon-ho",
+        "Yorgos Lanthimos",
+    ]
+    years = [2020, 2021, 2022]
+    palette = watch_year_palette(years)
+    matrix = np.array(
+        [
+            [3, 2, 1, 4, 2, 1, 2, 3, 1, 2],
+            [1, 3, 2, 1, 3, 2, 1, 1, 2, 1],
+            [2, 1, 3, 2, 1, 3, 2, 2, 3, 2],
+        ],
+        dtype=float,
+    )
+    assert (
+        chart_stacked_count_hbar(
+            labels,
+            years,
+            matrix,
+            palette,
+            path,
+            title="Режиссёры — цвет = год просмотра",
+            footer="Source: Letterboxd diary/watched + TMDB metadata",
+        )
+        is True
+    )
+    assert path.is_file() and path.stat().st_size > 0
+
 def test_rating_hbar_worst_skips_short_slate(tmp_path: Path | None = None):
     out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
     out.mkdir(parents=True, exist_ok=True)
@@ -208,4 +265,5 @@ if __name__ == "__main__":
     test_rating_hbar_worst_ascending()
     test_rating_hbar_long_names_no_overlap()
     test_rating_hbar_worst_skips_short_slate()
+    test_stacked_count_hbar_long_names()
     print("ok")

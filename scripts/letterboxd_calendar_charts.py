@@ -10,6 +10,7 @@ Writes into the current working directory:
   extra_stats_decade_rating.png
   average_rating_by_year.png
   average_rating_by_release_decade.png
+  viewing_pace.png
   top_rewatches.png
   watches_by_release_year.png
   average_rating_by_release_year.png
@@ -253,6 +254,7 @@ def build_diary_summary(
         "favorite_weekday_count": favorite_weekday_count,
         "favorite_month": favorite_month,
         "favorite_month_count": favorite_month_count,
+        "films_per_month": viewing_pace_stats(df).get("films_per_month"),
         "rating_avg": rating_avg,
         "rating_mode": rating_mode,
         "rating_mode_count": rating_mode_count,
@@ -527,6 +529,113 @@ def _chart_average_rating_line(
     return True
 
 
+def viewing_pace_stats(df: pd.DataFrame) -> dict:
+    """Diary watch pace from Watched Date: monthly counts + overall films/month.
+
+    films_per_month = diary rows / inclusive calendar months from first→last watch.
+    Empty months in the span count as 0 on the chart (pace dips show).
+    """
+    out: dict = {
+        "films_per_month": None,
+        "span_months": 0,
+        "periods": [],
+        "counts": [],
+    }
+    if df is None or df.empty or "Watched Date" not in df.columns:
+        return out
+    dates = df["Watched Date"].dropna()
+    if dates.empty:
+        return out
+    periods = dates.dt.to_period("M")
+    counts = periods.value_counts().sort_index()
+    if counts.empty:
+        return out
+    full = pd.period_range(counts.index.min(), counts.index.max(), freq="M")
+    series = counts.reindex(full, fill_value=0).astype(int)
+    span = int(len(series))
+    total = int(len(dates))
+    out["span_months"] = span
+    out["periods"] = [str(p) for p in series.index.tolist()]
+    out["counts"] = [int(v) for v in series.tolist()]
+    if span > 0:
+        out["films_per_month"] = round(total / span, 1)
+    return out
+
+
+def chart_viewing_pace(df: pd.DataFrame, path: Path) -> bool:
+    """Line: diary watches per calendar month; dashed mean pace.
+
+    Title: «Темп просмотров — фильмов в месяц».
+    """
+    stats = viewing_pace_stats(df)
+    periods = stats.get("periods") or []
+    counts = stats.get("counts") or []
+    avg = stats.get("films_per_month")
+    if len(periods) < 2:
+        return False
+
+    # Tick labels: short month + year; thin out when many months.
+    labels = []
+    for p in periods:
+        per = pd.Period(p, freq="M")
+        labels.append(f"{MONTHS[int(per.month) - 1]} {per.year}")
+    n = len(labels)
+    step = max(1, n // 14)
+    tick_idx = list(range(0, n, step))
+    if tick_idx[-1] != n - 1:
+        tick_idx.append(n - 1)
+
+    fig_w = max(10.0, min(16.0, n * 0.22))
+    fig, ax = plt.subplots(figsize=(fig_w, 5.8))
+    x = np.arange(n)
+    line_color = "#5EB8E0"
+    ax.plot(
+        x,
+        counts,
+        color=line_color,
+        linewidth=2.0,
+        zorder=2,
+        solid_capstyle="round",
+    )
+    ax.fill_between(x, counts, color=line_color, alpha=0.18, zorder=1)
+    ax.scatter(
+        x,
+        counts,
+        c=line_color,
+        s=28 if n <= 48 else 16,
+        zorder=3,
+        edgecolors="#111111",
+        linewidths=0.5,
+    )
+    if avg is not None and avg > 0:
+        ax.axhline(
+            float(avg),
+            color="#E0C06A",
+            linestyle="--",
+            linewidth=1.4,
+            zorder=2,
+            label=f"среднее {avg:.1f}/мес",
+        )
+        leg = ax.legend(loc="upper right", frameon=False, labelcolor=FG, fontsize=10)
+        if leg is not None:
+            for text in leg.get_texts():
+                text.set_color(FG)
+    ax.set_title("Темп просмотров — фильмов в месяц")
+    ax.set_xlabel("Месяц просмотра")
+    ax.set_ylabel("Фильмов за месяц")
+    ax.set_xticks(tick_idx)
+    ax.set_xticklabels([labels[i] for i in tick_idx], rotation=45, ha="right")
+    ymax = max(counts) if counts else 1
+    ax.set_ylim(0, max(ymax * 1.15, (avg or 0) * 1.3, 1))
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    style_axes(ax)
+    fig.tight_layout()
+    save_dark_figure(fig, path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def diary_rating_means_by_watch_year(df: pd.DataFrame) -> pd.DataFrame:
     """Mean Rating per watch year from **each** rated diary row (no film collapse).
 
@@ -712,6 +821,8 @@ def main(argv: list[str] | None = None) -> int:
             film_ratings=film_ratings,
             catalog=catalog,
         )
+        # Monthly pace (not a rescaled views_by_year) — dips/gaps between months.
+        made_pace = chart_viewing_pace(diary, Path("viewing_pace.png"))
         made_rewatch = chart_top_rewatches(diary, Path("top_rewatches.png"))
         summary = build_diary_summary(
             diary, catalog=catalog, watched_only=watched_only, film_ratings=film_ratings
@@ -731,6 +842,7 @@ def main(argv: list[str] | None = None) -> int:
         summary["charts"] = {
             "average_rating_by_year": bool(made_rating),
             "average_rating_by_release_decade": bool(made_decade_avg),
+            "viewing_pace": bool(made_pace),
             "top_rewatches": bool(made_rewatch),
             "watches_by_release_year": bool(made_release_count),
             "average_rating_by_release_year": bool(made_release_rating),
@@ -747,6 +859,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in (
         "average_rating_by_year.png",
         "average_rating_by_release_decade.png",
+        "viewing_pace.png",
         "top_rewatches.png",
         "watches_by_release_year.png",
         "average_rating_by_release_year.png",
