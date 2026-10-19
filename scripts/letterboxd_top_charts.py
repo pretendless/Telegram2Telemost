@@ -167,10 +167,10 @@ def _prepare_rating_rows(
     return usable
 
 
-def _rating_colorbar(fig, ax) -> None:
+def _rating_colorbar(fig, ax, *, location: str = "right") -> None:
     sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.025, pad=0.02)
+    cbar = fig.colorbar(sm, ax=ax, location=location, fraction=0.03, pad=0.04)
     cbar.set_label(RATING_COLORBAR_LABEL, color=FG, fontsize=8)
     cbar.ax.yaxis.set_tick_params(color=FG)
     plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
@@ -336,10 +336,11 @@ def chart_rating_hbar(
                 fontsize=9,
                 color=FG,
             )
-    _rating_colorbar(fig, ax)
+    # Colorbar on the left of horizontal TMDB avg charts.
+    _rating_colorbar(fig, ax, location="left")
     if footer:
         fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
-        fig.tight_layout(rect=[0, 0.03, 1, 1])
+        fig.tight_layout(rect=[0.02, 0.03, 1, 1])
     else:
         fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)
