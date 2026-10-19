@@ -547,7 +547,12 @@ def chart_release_years_by_rating(
     ascending: bool = False,
     title: str | None = None,
 ) -> bool:
-    """«Годы выхода — выше/ниже оценка» as vertical blue→green→red bars."""
+    """«Годы выхода — выше/ниже оценка» as TMDB-style horizontal avg bars.
+
+    Same layout as deep-stats hbars: left «оценка» colorbar, in-bar ``N. Year``
+    (white + black stroke), ``mean n=`` to the right of the bar. Not the
+    watch-year / release-decade line charts.
+    """
     normalized = []
     for row in rows or []:
         year = row.get("year")
@@ -566,7 +571,7 @@ def chart_release_years_by_rating(
             if ascending
             else "Годы выхода — выше оценка (больше 3 оценённых фильмов)"
         )
-    return chart_rating_vbar(
+    return chart_rating_hbar(
         normalized,
         path,
         title=title,

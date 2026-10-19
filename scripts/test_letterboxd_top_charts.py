@@ -69,12 +69,17 @@ def test_release_year_charts(tmp_path: Path | None = None):
     assert count_path.is_file() and count_path.stat().st_size > 0
 
     rating_path = out / "average_rating_by_release_year.png"
+    # Full top-M slate so anti-rating path can also be exercised.
     rows = [
-        {"year": 1999, "avg": 4.5, "rated": 8},
-        {"year": 2010, "avg": 3.2, "rated": 5},
+        {"year": 2000 + i, "avg": round(4.5 - i * 0.05, 2), "rated": 5 + (i % 4)}
+        for i in range(TOP_N_DEFAULT)
     ]
     assert chart_release_years_by_rating(rows, rating_path) is True
     assert rating_path.is_file() and rating_path.stat().st_size > 0
+
+    worst_path = out / "worst_average_rating_by_release_year.png"
+    assert chart_release_years_by_rating(rows, worst_path, ascending=True) is True
+    assert worst_path.is_file() and worst_path.stat().st_size > 0
 
     empty = out / "empty_rating.png"
     assert chart_release_years_by_rating([], empty) is False
