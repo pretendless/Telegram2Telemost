@@ -64,7 +64,30 @@ apply_dark_chart_theme()
 
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
+# Genitive month names for calendar dates («15 марта 2021»).
+MONTHS_GENITIVE = [
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+]
 RATING_BINS = [round(x * 0.5, 1) for x in range(1, 11)]  # 0.5 … 5.0
+
+
+def format_ru_calendar_date(ts) -> str:
+    """Format a pandas/py datetime as «15 марта 2021»."""
+    day = int(ts.day)
+    month = MONTHS_GENITIVE[int(ts.month) - 1]
+    year = int(ts.year)
+    return f"{day} {month} {year}"
 
 
 def build_diary_summary(
@@ -104,6 +127,19 @@ def build_diary_summary(
     year_counts = watch_years.value_counts()
     peak_year = int(year_counts.index[0]) if len(year_counts) else None
     peak_year_count = int(year_counts.iloc[0]) if len(year_counts) else 0
+
+    # Peak calendar day: most diary rows on a single Watched Date (diary only).
+    peak_day = None
+    peak_day_count = 0
+    peak_day_label = None
+    dated = df[df["Watched Date"].notna()]
+    if len(dated):
+        day_counts = dated["Watched Date"].dt.normalize().value_counts()
+        if len(day_counts):
+            peak_ts = day_counts.index[0]
+            peak_day_count = int(day_counts.iloc[0])
+            peak_day = str(pd.Timestamp(peak_ts).date())
+            peak_day_label = format_ru_calendar_date(pd.Timestamp(peak_ts))
 
     weekday_counts = df["Watched Date"].dt.weekday.value_counts()
     fav_wd_i = int(weekday_counts.index[0]) if len(weekday_counts) else None
@@ -207,6 +243,9 @@ def build_diary_summary(
         "rated_share": rated_share,
         "peak_year": peak_year,
         "peak_year_count": peak_year_count,
+        "peak_day": peak_day,
+        "peak_day_label": peak_day_label,
+        "peak_day_count": peak_day_count,
         "favorite_weekday": favorite_weekday,
         "favorite_weekday_count": favorite_weekday_count,
         "favorite_month": favorite_month,

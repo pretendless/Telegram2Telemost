@@ -129,6 +129,9 @@ test("buildCalendarReportHtml keeps blurb, drops charted tops", () => {
     unique_films: 80,
     year_min: 2020,
     year_max: 2024,
+    peak_day: "2021-03-15",
+    peak_day_label: "15 марта 2021",
+    peak_day_count: 7,
     peak_year: 2023,
     peak_year_count: 40,
     favorite_weekday: "Сб",
@@ -146,6 +149,7 @@ test("buildCalendarReportHtml keeps blurb, drops charted tops", () => {
   });
   assert.match(html, /<b>Letterboxd<\/b>/);
   assert.match(html, /<b>100<\/b>/);
+  assert.match(html, /Больше всего просмотров за день: <b>15 марта 2021<\/b> \(<b>7<\/b>\)/);
   assert.match(html, /средняя <b>3\.75<\/b>/);
   assert.doesNotMatch(html, /Heat/);
   assert.doesNotMatch(html, /Годы выхода/);

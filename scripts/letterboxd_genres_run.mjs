@@ -177,6 +177,13 @@ export function buildCalendarReportHtml(summary) {
     `Дневник: <b>${escapeHtml(entries)}</b> записей · <b>${escapeHtml(films)}</b> фильмов · ${escapeHtml(years)}`,
   ];
 
+  // Peak calendar day first (diary Watched Date row count).
+  if (s.peak_day_label && s.peak_day_count != null) {
+    lines.push(
+      `Больше всего просмотров за день: <b>${escapeHtml(s.peak_day_label)}</b> (<b>${escapeHtml(fmtNum(s.peak_day_count))}</b>)`,
+    );
+  }
+
   if (s.peak_year != null) {
     lines.push(
       `Пик: <b>${escapeHtml(s.peak_year)}</b> — <b>${escapeHtml(fmtNum(s.peak_year_count))}</b> просмотров`,

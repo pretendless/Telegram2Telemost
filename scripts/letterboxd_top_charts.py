@@ -167,23 +167,42 @@ def _prepare_rating_rows(
     return usable
 
 
-def _rating_colorbar(fig, ax, *, location: str = "right") -> None:
-    """Compact rating colorbar; «оценка» title sits above (not a sideways label)."""
+def _rating_colorbar(fig, ax, *, location: str = "right", size: str = "compact") -> None:
+    """Rating colorbar; «оценка» title sits above (not a sideways label).
+
+    size='compact' — calendar line charts (year/decade).
+    size='large' — TMDB horizontal avg tops (roomier, pre-compact scale).
+    """
     sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
     sm.set_array([])
-    # Narrower/shorter than default so it does not dominate the chart.
-    cbar = fig.colorbar(
-        sm,
-        ax=ax,
-        location=location,
-        fraction=0.018,
-        pad=0.03,
-        aspect=28,
-        shrink=0.55,
-    )
+    if size == "large":
+        # Restore larger colorbar for TMDB deep avg charts (still left + title above).
+        cbar = fig.colorbar(
+            sm,
+            ax=ax,
+            location=location,
+            fraction=0.04,
+            pad=0.05,
+            aspect=18,
+            shrink=0.88,
+        )
+        title_size = 9
+        tick_size = 8
+    else:
+        cbar = fig.colorbar(
+            sm,
+            ax=ax,
+            location=location,
+            fraction=0.018,
+            pad=0.03,
+            aspect=28,
+            shrink=0.55,
+        )
+        title_size = 8
+        tick_size = 7
     cbar.set_label("")
-    cbar.ax.set_title(RATING_COLORBAR_LABEL, color=FG, fontsize=8, pad=6)
-    cbar.ax.tick_params(labelsize=7, colors=FG, length=2.5, width=0.6)
+    cbar.ax.set_title(RATING_COLORBAR_LABEL, color=FG, fontsize=title_size, pad=6)
+    cbar.ax.tick_params(labelsize=tick_size, colors=FG, length=2.5, width=0.6)
     plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
 
 
@@ -347,8 +366,8 @@ def chart_rating_hbar(
                 fontsize=9,
                 color=FG,
             )
-    # Colorbar on the left of horizontal TMDB avg charts.
-    _rating_colorbar(fig, ax, location="left")
+    # Larger colorbar on the left for TMDB horizontal avg charts.
+    _rating_colorbar(fig, ax, location="left", size="large")
     if footer:
         fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
         fig.tight_layout(rect=[0.02, 0.03, 1, 1])
@@ -492,6 +511,9 @@ def single_rating_bar_color(avg: float) -> tuple:
     return rating_color(avg)
 
 
-def add_rating_colorbar(fig, ax, *, location: str = "right") -> None:
-    """Shared compact colorbar for avg-rating charts (blue→green→red, 0.5–5)."""
-    _rating_colorbar(fig, ax, location=location)
+def add_rating_colorbar(fig, ax, *, location: str = "right", size: str = "compact") -> None:
+    """Shared colorbar for avg-rating charts (blue→green→red, 0.5–5).
+
+    Calendar year/decade line charts use size='compact' (default).
+    """
+    _rating_colorbar(fig, ax, location=location, size=size)
