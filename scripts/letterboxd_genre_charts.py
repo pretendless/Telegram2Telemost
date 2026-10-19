@@ -408,8 +408,21 @@ def _rank_named(
     return rows[:limit]
 
 
+def _qualifying_rated_n(stats, min_rated=MIN_RATED_FOR_TOP) -> int:
+    """How many entities pass the unique-rated gate (before top-M slice)."""
+    n = 0
+    for st in stats.values():
+        if passes_rated_threshold(int(st.get("rated") or 0), min_rated=min_rated):
+            n += 1
+    return n
+
+
 def _paired_ranks(stats, min_count, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT):
-    """Count top + best rating top + worst rating top (rated > MIN_RATED_FOR_TOP)."""
+    """Count top + best rating top + worst rating top (rated > MIN_RATED_FOR_TOP).
+
+    Anti-rating («ниже оценка») is omitted unless ≥ limit_rating entities qualify —
+    no short worst lists (M ≈ TOP_N_DEFAULT).
+    """
     by_count = _rank_named(stats, min_count=min_count, limit=limit_count, by_avg=False)
     by_rating = _rank_named(
         stats,
@@ -419,14 +432,16 @@ def _paired_ranks(stats, min_count, limit_count=TOP_N_DEFAULT, limit_rating=TOP_
         min_rated=MIN_RATED_FOR_TOP,
         ascending=False,
     )
-    by_rating_worst = _rank_named(
-        stats,
-        min_count=1,
-        limit=limit_rating,
-        by_avg=True,
-        min_rated=MIN_RATED_FOR_TOP,
-        ascending=True,
-    )
+    by_rating_worst: list = []
+    if _qualifying_rated_n(stats) >= limit_rating:
+        by_rating_worst = _rank_named(
+            stats,
+            min_count=1,
+            limit=limit_rating,
+            by_avg=True,
+            min_rated=MIN_RATED_FOR_TOP,
+            ascending=True,
+        )
     return by_count, by_rating, by_rating_worst
 
 
@@ -743,7 +758,13 @@ def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
             False,
             display_lang,
         ),
-        # No worst_average_rating_by_language — dropped (keep best only).
+        (
+            "worst_average_rating_by_language",
+            "languages_by_rating_worst",
+            "Язык оригинала — ниже оценка",
+            True,
+            display_lang,
+        ),
         (
             "average_rating_by_studio",
             "companies_by_rating",
@@ -964,6 +985,7 @@ def main():
         "average_rating_by_actor": "average_rating_by_actor.png",
         "worst_average_rating_by_actor": "worst_average_rating_by_actor.png",
         "average_rating_by_language": "average_rating_by_language.png",
+        "worst_average_rating_by_language": "worst_average_rating_by_language.png",
         "average_rating_by_studio": "average_rating_by_studio.png",
         "worst_average_rating_by_studio": "worst_average_rating_by_studio.png",
     }
@@ -989,6 +1011,7 @@ def main():
         "actors_by_rating_worst": deep.get("actors_by_rating_worst") or [],
         "languages": deep.get("languages") or [],
         "languages_by_rating": deep.get("languages_by_rating") or [],
+        "languages_by_rating_worst": deep.get("languages_by_rating_worst") or [],
         "companies": deep.get("companies") or [],
         "companies_by_rating": deep.get("companies_by_rating") or [],
         "companies_by_rating_worst": deep.get("companies_by_rating_worst") or [],

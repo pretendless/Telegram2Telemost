@@ -69,6 +69,65 @@ def _short_label(text: str, limit: int = 36) -> str:
     return s
 
 
+def _fit_text_to_data_width(
+    ax,
+    renderer,
+    text: str,
+    *,
+    x0: float,
+    x1: float,
+    y: float,
+    fontsize: float,
+    fontweight: str = "bold",
+    path_effects=None,
+) -> str:
+    """Truncate ``text`` with … so its rendered width fits in data x ∈ [x0, x1].
+
+    When ``path_effects`` (stroke) is used on the final label, pass the same
+    effects here so the measured bbox includes the outline.
+    """
+    max_px = abs(
+        ax.transData.transform((x1, y))[0] - ax.transData.transform((x0, y))[0]
+    )
+    if max_px < 10:
+        # Tiny bar — keep rank digits only when possible.
+        head = text.split(".", 1)[0].strip()
+        return head or "…"
+
+    def width_px(candidate: str) -> float:
+        artist = ax.text(
+            0,
+            0,
+            candidate,
+            fontsize=fontsize,
+            fontweight=fontweight,
+            alpha=0,
+            path_effects=path_effects,
+        )
+        try:
+            return float(artist.get_window_extent(renderer=renderer).width)
+        finally:
+            artist.remove()
+
+    if width_px(text) <= max_px:
+        return text
+    # Binary search longest prefix that fits with ellipsis.
+    lo, hi = 0, len(text)
+    best = "…"
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if mid <= 0:
+            candidate = "…"
+        else:
+            candidate = text[:mid].rstrip() + "…"
+        if width_px(candidate) <= max_px:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
 def add_watch_year_legend(fig, years: list[int], colors: dict, title: str = "Год просмотра"):
     handles = [plt.Rectangle((0, 0), 1, 1, color=colors[y]) for y in years]
     leg = fig.legend(
@@ -160,6 +219,9 @@ def _prepare_rating_rows(
         return []
     if ascending:
         usable.sort(key=lambda r: (r[1], -(r[2] or 0), r[0]))
+        # Anti-rating charts need a full top-M slate — skip short lists.
+        if limit and len(usable) < limit:
+            return []
     else:
         usable.sort(key=lambda r: (-r[1], -(r[2] or 0), r[0]))
     if limit and len(usable) > limit:
@@ -167,23 +229,42 @@ def _prepare_rating_rows(
     return usable
 
 
-def _rating_colorbar(fig, ax, *, location: str = "right") -> None:
-    """Compact rating colorbar; «оценка» title sits above (not a sideways label)."""
+def _rating_colorbar(fig, ax, *, location: str = "right", size: str = "compact") -> None:
+    """Rating colorbar; «оценка» title sits above (not a sideways label).
+
+    size='compact' — calendar line charts (year/decade).
+    size='large' — TMDB horizontal avg tops (roomier, pre-compact scale).
+    """
     sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
     sm.set_array([])
-    # Narrower/shorter than default so it does not dominate the chart.
-    cbar = fig.colorbar(
-        sm,
-        ax=ax,
-        location=location,
-        fraction=0.018,
-        pad=0.03,
-        aspect=28,
-        shrink=0.55,
-    )
+    if size == "large":
+        # Restore larger colorbar for TMDB deep avg charts (still left + title above).
+        cbar = fig.colorbar(
+            sm,
+            ax=ax,
+            location=location,
+            fraction=0.04,
+            pad=0.05,
+            aspect=18,
+            shrink=0.88,
+        )
+        title_size = 9
+        tick_size = 8
+    else:
+        cbar = fig.colorbar(
+            sm,
+            ax=ax,
+            location=location,
+            fraction=0.018,
+            pad=0.03,
+            aspect=28,
+            shrink=0.55,
+        )
+        title_size = 8
+        tick_size = 7
     cbar.set_label("")
-    cbar.ax.set_title(RATING_COLORBAR_LABEL, color=FG, fontsize=8, pad=6)
-    cbar.ax.tick_params(labelsize=7, colors=FG, length=2.5, width=0.6)
+    cbar.ax.set_title(RATING_COLORBAR_LABEL, color=FG, fontsize=title_size, pad=6)
+    cbar.ax.tick_params(labelsize=tick_size, colors=FG, length=2.5, width=0.6)
     plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
 
 
@@ -267,10 +348,11 @@ def chart_rating_hbar(
     limit: int = TOP_N_DEFAULT,
     ascending: bool = False,
 ) -> bool:
-    """Horizontal bars for TMDB avg tops: rank+name inside bar (black + white stroke).
+    """Horizontal bars for TMDB avg tops: rank+name inside bar (white + black stroke).
 
     ascending=False → best at top; True → worst at top («ниже оценка»).
-    Mean/(n) drawn at the bar end so it does not collide with the rank label.
+    Mean/n always sits to the right of the bar; in-bar names are ellipsized to
+    the bar width so they never collide with the trailing stats.
     """
     import matplotlib.patheffects as path_effects
 
@@ -289,7 +371,7 @@ def chart_rating_hbar(
     # barh draws first row at bottom — reverse so rank 1 sits at top.
     display = list(reversed(list(enumerate(usable, start=1))))
     ranks = [rank for rank, _ in display]
-    labels = [_short_label(lab, limit=28) for _, (lab, _, _) in display]
+    labels = [_short_label(lab, limit=40) for _, (lab, _, _) in display]
     avgs = [avg for _, (_, avg, _) in display]
     rateds = [rated for _, (_, _, rated) in display]
     colors = rating_colors(avgs)
@@ -298,62 +380,72 @@ def chart_rating_hbar(
     y = np.arange(len(labels))
     bars = ax.barh(y, avgs, color=colors, height=0.72, edgecolor="none")
     ax.set_yticks([])
-    ax.set_xlim(0, 5.35)
+    # Extra room on the right for mean/n outside the bar.
+    ax.set_xlim(0, 5.65)
     ax.set_xlabel(xlabel)
     ax.set_title(title)
     ax.xaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
 
-    # White fill + black outline so labels pop on blue→green→red fills.
-    stroke = [
-        path_effects.Stroke(linewidth=3.2, foreground="#000000"),
-        path_effects.Normal(),
-    ]
-    for yi, bar, rank, label, avg, rated in zip(y, bars, ranks, labels, avgs, rateds):
-        # Rank + name inside the bar (left).
-        ax.text(
-            0.08,
-            yi,
-            f"{rank}. {label}",
-            ha="left",
-            va="center",
-            fontsize=11,
-            fontweight="bold",
-            color="#FFFFFF",
-            path_effects=stroke,
-            clip_on=True,
-        )
-        # Mean / n at the right end of the bar (outside if short).
-        mean_txt = f"{avg:.2f}" + (f"  n={rated}" if rated is not None else "")
-        if avg >= 1.6:
-            ax.text(
-                avg - 0.06,
-                yi,
-                mean_txt,
-                ha="right",
-                va="center",
-                fontsize=9,
-                color="#FFFFFF",
-                path_effects=stroke,
-            )
-        else:
-            ax.text(
-                avg + 0.06,
-                yi,
-                mean_txt,
-                ha="left",
-                va="center",
-                fontsize=9,
-                color=FG,
-            )
-    # Colorbar on the left of horizontal TMDB avg charts.
-    _rating_colorbar(fig, ax, location="left")
+    # Layout must be finalized before measuring text against data coordinates.
+    _rating_colorbar(fig, ax, location="left", size="large")
     if footer:
         fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
         fig.tight_layout(rect=[0.02, 0.03, 1, 1])
     else:
         fig.tight_layout()
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    # White fill + black outline so labels pop on blue→green→red fills.
+    stroke = [
+        path_effects.Stroke(linewidth=3.2, foreground="#000000"),
+        path_effects.Normal(),
+    ]
+    name_fs = 11
+    pad_left = 0.08
+    # Keep a generous empty tip so stroked names never crowd mean/n outside.
+    tip_gap = 0.4
+    for yi, bar, rank, label, avg, rated in zip(y, bars, ranks, labels, avgs, rateds):
+        raw = f"{rank}. {label}"
+        fitted = _fit_text_to_data_width(
+            ax,
+            renderer,
+            raw,
+            x0=pad_left,
+            x1=max(pad_left, float(avg) - tip_gap),
+            y=float(yi),
+            fontsize=name_fs,
+            fontweight="bold",
+            path_effects=stroke,
+        )
+        txt = ax.text(
+            pad_left,
+            yi,
+            fitted,
+            ha="left",
+            va="center",
+            fontsize=name_fs,
+            fontweight="bold",
+            color="#FFFFFF",
+            path_effects=stroke,
+            clip_on=True,
+        )
+        # Hard clip to the bar rectangle — name cannot draw past the tip.
+        txt.set_clip_path(bar)
+        # Mean / n always outside the bar to the right — no overlap with name.
+        mean_txt = f"{avg:.2f}" + (f"  n={rated}" if rated is not None else "")
+        ax.text(
+            float(avg) + 0.14,
+            yi,
+            mean_txt,
+            ha="left",
+            va="center",
+            fontsize=9,
+            color=FG,
+            clip_on=False,
+        )
     save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
@@ -492,6 +584,9 @@ def single_rating_bar_color(avg: float) -> tuple:
     return rating_color(avg)
 
 
-def add_rating_colorbar(fig, ax, *, location: str = "right") -> None:
-    """Shared compact colorbar for avg-rating charts (blue→green→red, 0.5–5)."""
-    _rating_colorbar(fig, ax, location=location)
+def add_rating_colorbar(fig, ax, *, location: str = "right", size: str = "compact") -> None:
+    """Shared colorbar for avg-rating charts (blue→green→red, 0.5–5).
+
+    Calendar year/decade line charts use size='compact' (default).
+    """
+    _rating_colorbar(fig, ax, location=location, size=size)

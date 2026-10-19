@@ -48,6 +48,7 @@ from letterboxd_palette import (  # noqa: E402
     watch_year_palette,
 )
 from letterboxd_top_charts import (  # noqa: E402
+    TOP_N_DEFAULT,
     add_rating_colorbar,
     chart_release_years_by_count,
     chart_release_years_by_rating,
@@ -55,8 +56,6 @@ from letterboxd_top_charts import (  # noqa: E402
 )
 from letterboxd_ratings import (  # noqa: E402
     MIN_RATED_FOR_TOP,
-    film_identity_series,
-    latest_rated_per_film,
     passes_rated_threshold,
 )
 
@@ -64,7 +63,30 @@ apply_dark_chart_theme()
 
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
+# Genitive month names for calendar dates («15 марта 2021»).
+MONTHS_GENITIVE = [
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+]
 RATING_BINS = [round(x * 0.5, 1) for x in range(1, 11)]  # 0.5 … 5.0
+
+
+def format_ru_calendar_date(ts) -> str:
+    """Format a pandas/py datetime as «15 марта 2021»."""
+    day = int(ts.day)
+    month = MONTHS_GENITIVE[int(ts.month) - 1]
+    year = int(ts.year)
+    return f"{day} {month} {year}"
 
 
 def build_diary_summary(
@@ -104,6 +126,19 @@ def build_diary_summary(
     year_counts = watch_years.value_counts()
     peak_year = int(year_counts.index[0]) if len(year_counts) else None
     peak_year_count = int(year_counts.iloc[0]) if len(year_counts) else 0
+
+    # Peak calendar day: most diary rows on a single Watched Date (diary only).
+    peak_day = None
+    peak_day_count = 0
+    peak_day_label = None
+    dated = df[df["Watched Date"].notna()]
+    if len(dated):
+        day_counts = dated["Watched Date"].dt.normalize().value_counts()
+        if len(day_counts):
+            peak_ts = day_counts.index[0]
+            peak_day_count = int(day_counts.iloc[0])
+            peak_day = str(pd.Timestamp(peak_ts).date())
+            peak_day_label = format_ru_calendar_date(pd.Timestamp(peak_ts))
 
     weekday_counts = df["Watched Date"].dt.weekday.value_counts()
     fav_wd_i = int(weekday_counts.index[0]) if len(weekday_counts) else None
@@ -182,17 +217,21 @@ def build_diary_summary(
                     }
                 )
             top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["rated"], -r["year"]))
-            worst_rated_release_years = sorted(
-                top_rated_release_years,
-                key=lambda r: (r["avg"], -r["rated"], r["year"]),
-            )[:20]
-            top_rated_release_years = top_rated_release_years[:20]
+            # Anti-rating only when a full top-M of qualifying years exists.
+            if len(top_rated_release_years) >= TOP_N_DEFAULT:
+                worst_rated_release_years = sorted(
+                    top_rated_release_years,
+                    key=lambda r: (r["avg"], -r["rated"], r["year"]),
+                )[:TOP_N_DEFAULT]
+            else:
+                worst_rated_release_years = []
+            top_rated_release_years = top_rated_release_years[:TOP_N_DEFAULT]
         else:
             worst_rated_release_years = []
 
         # Counts: every diary row + one per watched-only film (no fake dates).
         watch_by_release = with_release.groupby("release_year").size().sort_values(ascending=False)
-        for year, count in watch_by_release.head(20).items():
+        for year, count in watch_by_release.head(TOP_N_DEFAULT).items():
             top_release_years_by_count.append({"year": int(year), "count": int(count)})
     else:
         worst_rated_release_years = []
@@ -207,6 +246,9 @@ def build_diary_summary(
         "rated_share": rated_share,
         "peak_year": peak_year,
         "peak_year_count": peak_year_count,
+        "peak_day": peak_day,
+        "peak_day_label": peak_day_label,
+        "peak_day_count": peak_day_count,
         "favorite_weekday": favorite_weekday,
         "favorite_weekday_count": favorite_weekday_count,
         "favorite_month": favorite_month,
@@ -485,39 +527,40 @@ def _chart_average_rating_line(
     return True
 
 
+def diary_rating_means_by_watch_year(df: pd.DataFrame) -> pd.DataFrame:
+    """Mean Rating per watch year from **each** rated diary row (no film collapse).
+
+    Rewatches with ratings in different years contribute to those years.
+    Does not use ratings.csv / latest-per-film merge.
+    """
+    empty = pd.DataFrame(columns=["mean", "count"])
+    if df is None or df.empty or "Rating" not in df.columns or "Watched Date" not in df.columns:
+        return empty
+    work = df[df["Watched Date"].notna() & df["Rating"].notna()].copy()
+    if work.empty:
+        return empty
+    work["Rating"] = pd.to_numeric(work["Rating"], errors="coerce")
+    work = work[work["Rating"].notna() & (work["Rating"] > 0)].copy()
+    if work.empty:
+        return empty
+    work["watch_year"] = work["Watched Date"].dt.year.astype(int)
+    grouped = work.groupby("watch_year")["Rating"].agg(["mean", "count"]).sort_index()
+    return grouped[grouped["count"] >= 1]
+
+
 def chart_average_rating_by_year(
     df: pd.DataFrame,
     path: Path,
     film_ratings: pd.DataFrame | None = None,
 ) -> bool:
-    """Mean Letterboxd rating per watch year (ratings.csv joined to diary films)."""
-    work = df[df["Watched Date"].notna()].copy()
-    if work.empty:
-        return False
-    work["_film_key"] = film_identity_series(work)
-    work = work.sort_values("Watched Date", kind="mergesort")
-    # One film → latest diary watch year for the time axis.
-    latest_watch = work.groupby("_film_key", dropna=False, as_index=False).tail(1)
+    """Mean diary Rating per watch year — each rated diary row in its Watched Date year.
 
-    if film_ratings is not None and not film_ratings.empty:
-        fr = film_ratings.copy()
-        if "_film_key" not in fr.columns:
-            fr["_film_key"] = film_identity_series(fr)
-        rate_map = fr.drop_duplicates("_film_key").set_index("_film_key")["Rating"]
-        rated = latest_watch.copy()
-        rated["Rating"] = rated["_film_key"].map(rate_map)
-        rated = rated[rated["Rating"].notna()].copy()
-    else:
-        rated = latest_rated_per_film(df)
-        if rated.empty:
-            return False
-        rated = rated.copy()
-
-    if rated.empty:
-        return False
-    rated["watch_year"] = rated["Watched Date"].dt.year.astype(int)
-    grouped = rated.groupby("watch_year")["Rating"].agg(["mean", "count"]).sort_index()
-    grouped = grouped[grouped["count"] >= 1]
+    Exception to the usual latest-rating-per-film rule: rewatches contribute to
+    the year they were watched (not collapsed to one film score). ``film_ratings``
+    / ratings.csv are ignored here (kept as a no-op kwarg for call-site compat).
+    """
+    del film_ratings  # intentional: do not collapse to latest film rating
+    grouped = diary_rating_means_by_watch_year(df)
     if grouped.empty:
         return False
 
