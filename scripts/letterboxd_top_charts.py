@@ -294,12 +294,13 @@ def chart_rating_hbar(
     ax.set_axisbelow(True)
     style_axes(ax)
 
+    # White fill + black outline so labels pop on blue→green→red fills.
     stroke = [
-        path_effects.Stroke(linewidth=3.2, foreground="white"),
+        path_effects.Stroke(linewidth=3.2, foreground="#000000"),
         path_effects.Normal(),
     ]
     for yi, bar, rank, label, avg, rated in zip(y, bars, ranks, labels, avgs, rateds):
-        # Rank + name inside the bar (left), black with white outline.
+        # Rank + name inside the bar (left).
         ax.text(
             0.08,
             yi,
@@ -308,7 +309,7 @@ def chart_rating_hbar(
             va="center",
             fontsize=11,
             fontweight="bold",
-            color="#000000",
+            color="#FFFFFF",
             path_effects=stroke,
             clip_on=True,
         )
@@ -322,7 +323,7 @@ def chart_rating_hbar(
                 ha="right",
                 va="center",
                 fontsize=9,
-                color="#000000",
+                color="#FFFFFF",
                 path_effects=stroke,
             )
         else:
