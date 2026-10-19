@@ -167,10 +167,10 @@ def _prepare_rating_rows(
     return usable
 
 
-def _rating_colorbar(fig, ax) -> None:
+def _rating_colorbar(fig, ax, *, location: str = "right") -> None:
     sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.025, pad=0.02)
+    cbar = fig.colorbar(sm, ax=ax, location=location, fraction=0.03, pad=0.04)
     cbar.set_label(RATING_COLORBAR_LABEL, color=FG, fontsize=8)
     cbar.ax.yaxis.set_tick_params(color=FG)
     plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
@@ -294,12 +294,13 @@ def chart_rating_hbar(
     ax.set_axisbelow(True)
     style_axes(ax)
 
+    # White fill + black outline so labels pop on blue→green→red fills.
     stroke = [
-        path_effects.Stroke(linewidth=3.2, foreground="white"),
+        path_effects.Stroke(linewidth=3.2, foreground="#000000"),
         path_effects.Normal(),
     ]
     for yi, bar, rank, label, avg, rated in zip(y, bars, ranks, labels, avgs, rateds):
-        # Rank + name inside the bar (left), black with white outline.
+        # Rank + name inside the bar (left).
         ax.text(
             0.08,
             yi,
@@ -308,7 +309,7 @@ def chart_rating_hbar(
             va="center",
             fontsize=11,
             fontweight="bold",
-            color="#000000",
+            color="#FFFFFF",
             path_effects=stroke,
             clip_on=True,
         )
@@ -322,7 +323,7 @@ def chart_rating_hbar(
                 ha="right",
                 va="center",
                 fontsize=9,
-                color="#000000",
+                color="#FFFFFF",
                 path_effects=stroke,
             )
         else:
@@ -335,10 +336,11 @@ def chart_rating_hbar(
                 fontsize=9,
                 color=FG,
             )
-    _rating_colorbar(fig, ax)
+    # Colorbar on the left of horizontal TMDB avg charts.
+    _rating_colorbar(fig, ax, location="left")
     if footer:
         fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
-        fig.tight_layout(rect=[0, 0.03, 1, 1])
+        fig.tight_layout(rect=[0.02, 0.03, 1, 1])
     else:
         fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)

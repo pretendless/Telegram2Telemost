@@ -743,13 +743,7 @@ def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
             False,
             display_lang,
         ),
-        (
-            "worst_average_rating_by_language",
-            "languages_by_rating_worst",
-            "Язык оригинала — ниже оценка",
-            True,
-            display_lang,
-        ),
+        # No worst_average_rating_by_language — dropped (keep best only).
         (
             "average_rating_by_studio",
             "companies_by_rating",
@@ -970,7 +964,6 @@ def main():
         "average_rating_by_actor": "average_rating_by_actor.png",
         "worst_average_rating_by_actor": "worst_average_rating_by_actor.png",
         "average_rating_by_language": "average_rating_by_language.png",
-        "worst_average_rating_by_language": "worst_average_rating_by_language.png",
         "average_rating_by_studio": "average_rating_by_studio.png",
         "worst_average_rating_by_studio": "worst_average_rating_by_studio.png",
     }
@@ -996,7 +989,6 @@ def main():
         "actors_by_rating_worst": deep.get("actors_by_rating_worst") or [],
         "languages": deep.get("languages") or [],
         "languages_by_rating": deep.get("languages_by_rating") or [],
-        "languages_by_rating_worst": deep.get("languages_by_rating_worst") or [],
         "companies": deep.get("companies") or [],
         "companies_by_rating": deep.get("companies_by_rating") or [],
         "companies_by_rating_worst": deep.get("companies_by_rating_worst") or [],
