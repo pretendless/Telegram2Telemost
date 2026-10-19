@@ -165,15 +165,15 @@ def chart_stacked_count_hbar(
         return False
     n = len(labels)
     # Compact rows — plot fills most of the canvas (not a tall sparse strip).
-    fig_h = max(4.2, n * 0.44)
-    fig_w = 11.0
+    fig_h = max(4.0, n * 0.40)
+    fig_w = 10.5
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     y = np.arange(n)
     left_stack = np.zeros(n)
     for yi, year in enumerate(years):
         vals = matrix[yi]
         # Thick bars → small gap between rows.
-        ax.barh(y, vals, left=left_stack, color=palette[year], height=0.82, edgecolor="none")
+        ax.barh(y, vals, left=left_stack, color=palette[year], height=0.86, edgecolor="none")
         left_stack += vals
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
@@ -184,29 +184,49 @@ def chart_stacked_count_hbar(
     style_axes(ax)
     # Modest label size; labels hug the bars (small pad).
     label_fs = 10
-    ax.tick_params(axis="y", labelsize=label_fs, pad=2, length=0, colors=FG)
+    ax.tick_params(axis="y", labelsize=label_fs, pad=1.5, length=0, colors=FG)
     ax.tick_params(axis="x", labelsize=9, colors=FG)
     ax.xaxis.label.set_fontsize(10)
-    ax.set_title(title, fontsize=12, pad=8, color=FG)
+    ax.set_title(title, fontsize=12, pad=6, color=FG)
     xmax = float(left_stack.max()) if len(left_stack) else 1.0
-    ax.set_xlim(0, xmax * 1.14)
+    ax.set_xlim(0, xmax * 1.12)
     for yi, total in enumerate(left_stack):
         ax.text(
-            total + xmax * 0.015,
+            total + xmax * 0.012,
             yi,
             str(int(total)),
             va="center",
-            fontsize=9,
+            fontsize=8,
             color=FG,
         )
-    add_watch_year_legend(fig, years, palette)
+    # Legend attached to axes (not fig@0.92) so bbox_inches=tight stays dense.
+    handles = [plt.Rectangle((0, 0), 1, 1, color=palette[y]) for y in years]
+    ncol = 1 if len(years) <= 14 else 2
+    leg = ax.legend(
+        handles,
+        [str(y) for y in years],
+        title="Год просмотра",
+        loc="center left",
+        bbox_to_anchor=(1.01, 0.5),
+        frameon=False,
+        fontsize=7,
+        title_fontsize=8,
+        labelcolor=FG,
+        borderaxespad=0.2,
+        ncol=ncol,
+        handlelength=0.9,
+        handleheight=0.7,
+        columnspacing=0.8,
+        labelspacing=0.25,
+    )
+    if leg is not None and leg.get_title() is not None:
+        leg.get_title().set_color(FG)
     if footer:
-        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
-        fig.tight_layout(rect=[0.0, 0.03, 0.88, 0.98])
+        fig.text(0.005, 0.005, footer, fontsize=6.5, color=FG)
+        fig.tight_layout(rect=[0.0, 0.025, 1.0, 1.0])
     else:
-        fig.tight_layout(rect=[0.0, 0.0, 0.88, 0.99])
-    # Minimal outer pad — avoid giant black border from bbox_inches=tight.
-    save_dark_figure(fig, path, dpi=160, pad_inches=0.08)
+        fig.tight_layout()
+    save_dark_figure(fig, path, dpi=160, pad_inches=0.05)
     plt.close(fig)
     return True
 
