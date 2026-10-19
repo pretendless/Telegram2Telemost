@@ -743,13 +743,7 @@ def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
             False,
             display_lang,
         ),
-        (
-            "worst_average_rating_by_language",
-            "languages_by_rating_worst",
-            "Язык оригинала — ниже оценка",
-            True,
-            display_lang,
-        ),
+        # No worst_average_rating_by_language — dropped (keep best only).
         (
             "average_rating_by_studio",
             "companies_by_rating",
