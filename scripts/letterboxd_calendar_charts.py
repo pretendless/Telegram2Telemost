@@ -432,6 +432,59 @@ def chart_decade_rating(df: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
+def _chart_average_rating_line(
+    labels: list,
+    values: list[float],
+    counts: list[int],
+    path: Path,
+    *,
+    title: str,
+    xlabel: str,
+    ylabel: str = "Средняя оценка (из 5)",
+) -> bool:
+    """Line + markers: points colored blue→green→red by mean rating."""
+    if not labels or not values:
+        return False
+    point_colors = color_bars_by_rating(values)
+    fig, ax = plt.subplots(figsize=(max(10.0, len(labels) * 0.45), 6.5))
+    x = np.arange(len(labels))
+    # Readable connector on dark theme; markers carry the rating color.
+    ax.plot(x, values, color="#9A9A9A", linewidth=1.8, zorder=1, solid_capstyle="round")
+    ax.scatter(
+        x,
+        values,
+        c=point_colors,
+        s=72,
+        zorder=2,
+        edgecolors="#111111",
+        linewidths=0.7,
+    )
+    ax.set_ylim(0, 5.2)
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(lab) for lab in labels], rotation=45, ha="right")
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    style_axes(ax)
+    for xi, value, count in zip(x, values, counts):
+        ax.text(
+            xi,
+            value + 0.12,
+            f"{value:.2f}\n(n={count})",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color=FG,
+        )
+    add_rating_colorbar(fig, ax)
+    fig.tight_layout()
+    save_dark_figure(fig, path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def chart_average_rating_by_year(
     df: pd.DataFrame,
     path: Path,
@@ -471,35 +524,14 @@ def chart_average_rating_by_year(
     labels = grouped.index.tolist()
     values = grouped["mean"].astype(float).tolist()
     counts = grouped["count"].astype(int).tolist()
-    bar_colors = color_bars_by_rating(values)
-
-    fig, ax = plt.subplots(figsize=(max(10.0, len(labels) * 0.45), 6.5))
-    x = np.arange(len(labels))
-    bars = ax.bar(x, values, color=bar_colors, width=0.78, edgecolor="none")
-    ax.set_ylim(0, 5.2)
-    ax.set_title("Средняя оценка по годам просмотра")
-    ax.set_xlabel("Год просмотра")
-    ax.set_ylabel("Средняя оценка (из 5)")
-    ax.set_xticks(x)
-    ax.set_xticklabels([str(y) for y in labels], rotation=45, ha="right")
-    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-    style_axes(ax)
-    for bar, value, count in zip(bars, values, counts):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            value + 0.08,
-            f"{value:.2f}\n(n={count})",
-            ha="center",
-            va="bottom",
-            fontsize=7,
-            color=FG,
-        )
-    add_rating_colorbar(fig, ax)
-    fig.tight_layout()
-    save_dark_figure(fig, path, dpi=160)
-    plt.close(fig)
-    return True
+    return _chart_average_rating_line(
+        labels,
+        values,
+        counts,
+        path,
+        title="Средняя оценка по годам просмотра",
+        xlabel="Год просмотра",
+    )
 
 
 def chart_average_rating_by_release_decade(
@@ -540,36 +572,14 @@ def chart_average_rating_by_release_decade(
     labels = grouped.index.tolist()
     values = grouped["mean"].astype(float).tolist()
     counts = grouped["count"].astype(int).tolist()
-    bar_colors = color_bars_by_rating(values)
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    x = np.arange(len(labels))
-    # Means: blue→green→red by rating (not watch-year palette).
-    bars = ax.bar(x, values, color=bar_colors, width=0.8)
-    ax.set_ylim(0, 5.2)
-    ax.set_title("Средняя оценка по десятилетию выхода")
-    ax.set_xlabel("Десятилетие выхода")
-    ax.set_ylabel("Средняя оценка (из 5)")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.yaxis.grid(True, color=GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-    style_axes(ax)
-    for bar, value, count in zip(bars, values, counts):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            value + 0.08,
-            f"{value:.2f}\n(n={count})",
-            ha="center",
-            va="bottom",
-            fontsize=7,
-            color=FG,
-        )
-    add_rating_colorbar(fig, ax)
-    fig.tight_layout()
-    save_dark_figure(fig, path, dpi=160)
-    plt.close(fig)
-    return True
+    return _chart_average_rating_line(
+        labels,
+        values,
+        counts,
+        path,
+        title="Средняя оценка по десятилетию выхода",
+        xlabel="Десятилетие выхода",
+    )
 
 
 def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 20) -> bool:
