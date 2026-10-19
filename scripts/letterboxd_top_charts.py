@@ -168,11 +168,22 @@ def _prepare_rating_rows(
 
 
 def _rating_colorbar(fig, ax, *, location: str = "right") -> None:
+    """Compact rating colorbar; «оценка» title sits above (not a sideways label)."""
     sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, location=location, fraction=0.03, pad=0.04)
-    cbar.set_label(RATING_COLORBAR_LABEL, color=FG, fontsize=8)
-    cbar.ax.yaxis.set_tick_params(color=FG)
+    # Narrower/shorter than default so it does not dominate the chart.
+    cbar = fig.colorbar(
+        sm,
+        ax=ax,
+        location=location,
+        fraction=0.018,
+        pad=0.03,
+        aspect=28,
+        shrink=0.55,
+    )
+    cbar.set_label("")
+    cbar.ax.set_title(RATING_COLORBAR_LABEL, color=FG, fontsize=8, pad=6)
+    cbar.ax.tick_params(labelsize=7, colors=FG, length=2.5, width=0.6)
     plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
 
 
@@ -481,11 +492,6 @@ def single_rating_bar_color(avg: float) -> tuple:
     return rating_color(avg)
 
 
-def add_rating_colorbar(fig, ax) -> None:
-    """Shared colorbar for avg-rating charts (blue→green→red, 0.5–5)."""
-    sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.025, pad=0.02)
-    cbar.set_label(RATING_COLORBAR_LABEL, color=FG, fontsize=8)
-    cbar.ax.yaxis.set_tick_params(color=FG)
-    plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
+def add_rating_colorbar(fig, ax, *, location: str = "right") -> None:
+    """Shared compact colorbar for avg-rating charts (blue→green→red, 0.5–5)."""
+    _rating_colorbar(fig, ax, location=location)
