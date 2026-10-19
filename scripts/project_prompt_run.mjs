@@ -14,7 +14,7 @@ const promptId = String(process.env.PROMPT_ID || process.env.INPUT_PROMPT_ID || 
 const chatId = String(process.env.CHAT_ID || process.env.INPUT_CHAT_ID || "").trim();
 const runUrl = String(process.env.RUN_URL || "").trim();
 const mode = String(process.env.PROJECT_PROMPT_MODE || "issue").trim().toLowerCase();
-const repo = String(process.env.GITHUB_REPOSITORY || "pretendless/tg2tm").trim();
+const repo = String(process.env.GITHUB_REPOSITORY || "pretendless/Telegram2Telemost").trim();
 
 export function workerBaseFromProgressUrl(url) {
   return String(url || "").trim().replace(/\/progress\/?$/i, "");

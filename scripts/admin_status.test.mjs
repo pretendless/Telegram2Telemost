@@ -89,7 +89,7 @@ test('the card names the pack, the step, the bot line, and another user only by 
     step: 'отправка',
     lastLine: 'Отправьте эмодзи',
     error: 'Actions завершились с ошибкой',
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/1',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/1',
   }));
   assert.match(failed, /стикер 1 из 144/);
   assert.match(failed, /сбой Actions \| отправка/);
@@ -99,20 +99,20 @@ test('the card names the pack, the step, the bot line, and another user only by 
 
 test('actionsRunUrl uses RUN_URL, or builds github.server_url/repo/actions/runs/id', () => {
   assert.equal(
-    actionsRunUrl({ RUN_URL: 'https://github.com/pretendless/tg2tm/actions/runs/9' }),
-    'https://github.com/pretendless/tg2tm/actions/runs/9',
+    actionsRunUrl({ RUN_URL: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/9' }),
+    'https://github.com/pretendless/Telegram2Telemost/actions/runs/9',
   );
   assert.equal(
     actionsRunUrl({
       GITHUB_RUN_ID: '38602403732',
       GITHUB_SERVER_URL: 'https://github.com',
-      GITHUB_REPOSITORY: 'pretendless/tg2tm',
+      GITHUB_REPOSITORY: 'pretendless/Telegram2Telemost',
     }),
-    'https://github.com/pretendless/tg2tm/actions/runs/38602403732',
+    'https://github.com/pretendless/Telegram2Telemost/actions/runs/38602403732',
   );
   assert.equal(
     actionsRunUrl({ GITHUB_RUN_ID: '38602403732' }),
-    'https://github.com/pretendless/tg2tm/actions/runs/38602403732',
+    'https://github.com/pretendless/Telegram2Telemost/actions/runs/38602403732',
   );
   assert.equal(actionsRunUrl({}), '');
   assert.equal(actionsRunUrl({ RUN_URL: 'not a url', GITHUB_RUN_ID: '4', GITHUB_REPOSITORY: 'acme/widgets' }), 'https://github.com/acme/widgets/actions/runs/4');
@@ -137,7 +137,7 @@ test('an error card gains the Actions run URL once and the next identical error 
     env: {
       GITHUB_RUN_ID: '38602403732',
       GITHUB_SERVER_URL: 'https://github.com',
-      GITHUB_REPOSITORY: 'pretendless/tg2tm',
+      GITHUB_REPOSITORY: 'pretendless/Telegram2Telemost',
     },
   });
   const error = 'fetch failed for /opt/tg2tm/packs/request-2026-10-13T180955555Z-2 | slug request-2026-10-13T180955555Z-2 | стикер 0 из 116: exit 1: PermissionError: [Errno 13] Permission denied';
@@ -149,7 +149,7 @@ test('an error card gains the Actions run URL once and the next identical error 
   assert.match(calls[1][2], /стикер 0 из 116 \| ошибка/);
   assert.match(calls[1][2], /slug request-2026-10-13T180955555Z-2/);
   assert.match(calls[1][2], /PermissionError/);
-  assert.match(calls[1][2], /https:\/\/github\.com\/pretendless\/tg2tm\/actions\/runs\/38602403732/);
+  assert.match(calls[1][2], /https:\/\/github\.com\/pretendless\/Telegram2Telemost\/actions\/runs\/38602403732/);
   assert.equal(calls[1][2].match(/actions\/runs\/38602403732/g).length, 1);
 });
 
@@ -251,7 +251,7 @@ test('a failed Actions run sends one forwardable card and skips when the error w
     token: 'bot-token',
     statePath: 'logs/does-not-exist-admin.json',
     packs: '08',
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/1',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/1',
   });
   assert.equal(sent.length, 1);
   assert.match(sent[0], /сбой Actions/);
@@ -278,7 +278,7 @@ test('a failed Actions run sends one forwardable card and skips when the error w
     },
     token: 'bot-token',
     statePath: path,
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/1',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/1',
   });
   assert.equal(edited.length, 1);
   assert.match(edited[0].url, /editMessageText/);
@@ -301,7 +301,7 @@ test('a failed Actions run sends one forwardable card and skips when the error w
     },
     token: 'bot-token',
     statePath: path,
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/2',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/2',
   });
   assert.equal(updated.length, 1);
   assert.match(updated[0].url, /editMessageText/);
@@ -338,7 +338,7 @@ test('a failed restart names the step reason left by the container', async () =>
     mode: 'restart',
     packs: '',
     runId: '38873216831',
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/38873216831',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/38873216831',
   });
   assert.equal(sent.length, 1);
   assert.match(sent[0], /«перезапуск»/);
@@ -376,7 +376,7 @@ test('a quiet restart idle posts reason and next action to admin', async () => {
     token: 'bot-token',
     statePath: join(dir, 'missing-admin.json'),
     logsDir: dir,
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/38416619883',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/38416619883',
   });
   assert.equal(sent.length, 1);
   assert.match(sent[0], /«перезапуск»/);
@@ -405,7 +405,7 @@ test('a restart failure names the open pack, or says перезапуск when t
     packs: '',
     mode: 'restart',
     logsDir: 'logs/does-not-exist-restart',
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/38402599932',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/38402599932',
   });
   assert.match(sent[0], /«перезапуск»/);
   assert.equal(sent[0].includes('«пак»'), false);
@@ -422,7 +422,7 @@ test('a restart failure names the open pack, or says перезапуск when t
     packs: '',
     mode: 'restart',
     logsDir: dir,
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/38402599932',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/38402599932',
   });
   assert.match(sent[1], /«Север»/);
   assert.equal(sent[1].includes('«пак»'), false);
@@ -508,8 +508,8 @@ test('the admin feed sends the same card to every admin and edits each message i
   };
   const ids = ['8502935020', '5513343655'];
   const notify = createAdminFeed({ io, adminIds: ids.join(','), requester: '424242' });
-  await notify({ phase: 'sending', pack: 'Дьяволица', index: 1, total: 4, at: '20:33', runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/9' });
-  await notify({ phase: 'sending', pack: 'Дьяволица', index: 2, total: 4, at: '20:33', runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/9' });
+  await notify({ phase: 'sending', pack: 'Дьяволица', index: 1, total: 4, at: '20:33', runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/9' });
+  await notify({ phase: 'sending', pack: 'Дьяволица', index: 2, total: 4, at: '20:33', runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/9' });
   const sends = calls.filter((call) => call[0] === 'send');
   const edits = calls.filter((call) => call[0] === 'edit');
   assert.deepEqual(sends.map((call) => call[1]), ids);
@@ -562,7 +562,7 @@ test('a failed run reaches both admins, or the worker when progress is configure
     statePath: 'logs/does-not-exist-admin.json',
     packs: '08',
     adminIds: ids,
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/1',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/1',
     env: {},
   });
   assert.equal(direct.length, 2);
@@ -580,7 +580,7 @@ test('a failed run reaches both admins, or the worker when progress is configure
     statePath: 'logs/does-not-exist-admin.json',
     packs: '08',
     adminIds: ids,
-    runUrl: 'https://github.com/pretendless/tg2tm/actions/runs/2',
+    runUrl: 'https://github.com/pretendless/Telegram2Telemost/actions/runs/2',
     env: { TG2TM_PROGRESS_URL: 'https://tg2tmbot.example/progress', UPLOADER_SECRET: 'secret' },
   });
   assert.equal(posted.length, 1);

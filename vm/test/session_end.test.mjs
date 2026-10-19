@@ -16,7 +16,7 @@ function memoryKv() {
   };
 }
 
-const RUN = 'https://github.com/pretendless/tg2tm/actions/runs/38644156549';
+const RUN = 'https://github.com/pretendless/Telegram2Telemost/actions/runs/38644156549';
 
 test('empty queue does not restart', async () => {
   const kv = memoryKv();

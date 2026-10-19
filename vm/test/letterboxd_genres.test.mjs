@@ -49,7 +49,7 @@ test("isZipDocument and file_id", () => {
 
 test("buildLetterboxdDispatch", () => {
   const built = buildLetterboxdDispatch({
-    repo: "pretendless/tg2tm",
+    repo: "pretendless/Telegram2Telemost",
     workflow: "letterboxd.yml",
     ref: "main",
     jobId: "lb-1",
@@ -58,7 +58,7 @@ test("buildLetterboxdDispatch", () => {
   });
   assert.equal(
     built.url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/letterboxd.yml/dispatches",
+    "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/letterboxd.yml/dispatches",
   );
   assert.deepEqual(built.body, {
     ref: "main",

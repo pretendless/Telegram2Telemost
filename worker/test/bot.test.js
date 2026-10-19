@@ -207,7 +207,7 @@ test("nested pack.json telemost block is accepted", () => {
 
 test("request pack slugs from ISO ids are accepted and keep the run url", () => {
   const slug = "request-2026-10-13T180955555Z-2";
-  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38602403732";
+  const runUrl = "https://github.com/pretendless/Telegram2Telemost/actions/runs/38602403732";
   const normalized = normalizeProgress({
     slug,
     title: "Дьяволица",
@@ -1046,7 +1046,7 @@ test("an allowlisted /login and /connect dispatch the Telemost workflow", async 
   assert.equal(calls.length, 2);
   assert.equal(
     calls[0].url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/telemost-session.yml/dispatches",
+    "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/telemost-session.yml/dispatches",
   );
   assert.equal(calls[0].authorization, "Bearer dispatch-token");
   assert.equal(calls[0].body.ref, "main");
@@ -1086,8 +1086,8 @@ test("/restart is only for the admin chat, cancels the running job, and dispatch
     if (String(url).includes("/runs?")) {
       lists += 1;
       const runs = lists === 1
-        ? [{ id: 38392857620, status: "in_progress", html_url: "https://github.com/pretendless/tg2tm/actions/runs/38392857620", created_at: "2026-10-13T11:49:14Z" }]
-        : [{ id: 383999, status: "queued", html_url: "https://github.com/pretendless/tg2tm/actions/runs/383999", created_at: new Date().toISOString() }];
+        ? [{ id: 38392857620, status: "in_progress", html_url: "https://github.com/pretendless/Telegram2Telemost/actions/runs/38392857620", created_at: "2026-10-13T11:49:14Z" }]
+        : [{ id: 383999, status: "queued", html_url: "https://github.com/pretendless/Telegram2Telemost/actions/runs/383999", created_at: new Date().toISOString() }];
       return { status: 200, json: async () => ({ workflow_runs: runs }) };
     }
     return { status: init && init.method === "POST" && String(url).endsWith("/cancel") ? 202 : 204, json: async () => ({}) };
@@ -1556,7 +1556,7 @@ test("session-started notifies admin once per run id", async () => {
   const sent = [];
   const body = {
     runId: "999001",
-    url: "https://github.com/pretendless/tg2tm/actions/runs/999001",
+    url: "https://github.com/pretendless/Telegram2Telemost/actions/runs/999001",
     reason: "очередь: новый запрос принят — «Лис»",
   };
   const req = new Request("https://tg2tmbot.example/session-started", {
@@ -1654,7 +1654,7 @@ test("progress edits the queue requester card even when requester is the admin c
 });
 
 test("admin keeps the Actions run URL and the requester does not", async () => {
-  const RUN = "https://github.com/pretendless/tg2tm/actions/runs/38644156549";
+  const RUN = "https://github.com/pretendless/Telegram2Telemost/actions/runs/38644156549";
   const env = envWith();
   env.LOGIN_CHAT_IDS = "8502935020";
   env.BOT_KV.store.set("meta:seeded", "1");
@@ -1687,7 +1687,7 @@ test("admin keeps the Actions run URL and the requester does not", async () => {
   const adminStatus = sent.find((row) => row.chatId === "8502935020");
   const userStatus = sent.find((row) => row.chatId === "424242");
   assert.match(adminStatus.text, /Шерсть Ебаная/);
-  assert.match(adminStatus.text, /github\.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+  assert.match(adminStatus.text, /github\.com\/pretendless\/Telegram2Telemost\/actions\/runs\/38644156549/);
   assert.match(userStatus.text, /Шерсть Ебаная/);
   assert.match(userStatus.text, /109/);
   assert.doesNotMatch(userStatus.text, /github\.com/i);
@@ -1718,7 +1718,7 @@ test("admin keeps the Actions run URL and the requester does not", async () => {
   const userCard = sent.find((row) => row.chatId === "424242");
   assert.ok(adminCard);
   assert.ok(userCard);
-  assert.match(adminCard.text, /github\.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+  assert.match(adminCard.text, /github\.com\/pretendless\/Telegram2Telemost\/actions\/runs\/38644156549/);
   assert.match(userCard.text, /Шерсть Ебаная/);
   assert.match(userCard.text, /109/);
   assert.match(userCard.text, /таймаут шага/);
@@ -2098,7 +2098,7 @@ test("/skip stops a live upload, a just-dispatched run, and leaves a finished pa
   const run = {
     id: 38644156549,
     status: "in_progress",
-    html_url: "https://github.com/pretendless/tg2tm/actions/runs/38644156549",
+    html_url: "https://github.com/pretendless/Telegram2Telemost/actions/runs/38644156549",
   };
   async function skipCase(env, queueItems, pack) {
     env.BOT_KV.store.set("meta:seeded", "1");
@@ -2240,7 +2240,7 @@ test("/project is admin-only and dispatches cursor-agent workflow", async () => 
   await handle(telegramRequest(INITIAL_SUBSCRIBER, "/project"), env, { sendMessage, fetch });
   assert.match(sent[0].text, /\/project/);
   const runListUrl =
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/cursor-agent.yml/runs?per_page=20";
+    "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/cursor-agent.yml/runs?per_page=20";
   const fetchWithRuns = async (url, init) => {
     if (String(url) === runListUrl) {
       return {
@@ -2251,7 +2251,7 @@ test("/project is admin-only and dispatches cursor-agent workflow", async () => 
               id: 99,
               status: "queued",
               created_at: "2026-10-14T12:00:01.000Z",
-              html_url: "https://github.com/pretendless/tg2tm/actions/runs/99",
+              html_url: "https://github.com/pretendless/Telegram2Telemost/actions/runs/99",
             },
           ],
         }),
@@ -2268,7 +2268,7 @@ test("/project is admin-only and dispatches cursor-agent workflow", async () => 
   assert.equal(calls.length, 1);
   assert.equal(
     calls[0].url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/cursor-agent.yml/dispatches",
+    "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/cursor-agent.yml/dispatches",
   );
   assert.deepEqual(calls[0].body.inputs, {
     prompt_id: "tg-2026-10-14T12-00-00-000Z",
@@ -2410,7 +2410,7 @@ test("/ghrun is admin-only and dispatches with parsed inputs", async () => {
     GH_WORKFLOW_ALLOWLIST: "setup-bot.yml,check-bot.yml",
   };
   const runListUrl =
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/setup-bot.yml/runs?per_page=20";
+    "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/setup-bot.yml/runs?per_page=20";
   const fetch = async (url, init) => {
     const href = String(url);
     if (href === runListUrl) {
@@ -2421,7 +2421,7 @@ test("/ghrun is admin-only and dispatches with parsed inputs", async () => {
             {
               id: 42,
               created_at: "2026-10-14T12:00:01.000Z",
-              html_url: "https://github.com/pretendless/tg2tm/actions/runs/42",
+              html_url: "https://github.com/pretendless/Telegram2Telemost/actions/runs/42",
             },
           ],
         }),
@@ -2451,7 +2451,7 @@ test("/ghrun is admin-only and dispatches with parsed inputs", async () => {
   assert.equal(calls.length, 1);
   assert.equal(
     calls[0].url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/setup-bot.yml/dispatches",
+    "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/setup-bot.yml/dispatches",
   );
   assert.deepEqual(calls[0].body, { ref: "main", inputs: {} });
   assert.ok(sent.some((row) => /⏳/.test(row.text)));
@@ -2511,7 +2511,7 @@ test("both configured admins see every pack and admin commands; an unrelated cha
   const owner = 424242;
   const other = 31337;
   const stranger = 999001;
-  const run = "https://github.com/pretendless/tg2tm/actions/runs/38644156549";
+  const run = "https://github.com/pretendless/Telegram2Telemost/actions/runs/38644156549";
   const env = {
     ...envWith(),
     LOGIN_CHAT_IDS: `${existingAdmin},${addedAdmin}`,
@@ -2572,7 +2572,7 @@ test("both configured admins see every pack and admin commands; an unrelated cha
   const addedStatus = await reply(addedAdmin, "/status");
   assert.equal(addedStatus.join("\n"), existingStatus.join("\n"));
   assert.match(existingStatus.join("\n"), /Шерсть Ебаная/);
-  assert.match(existingStatus.join("\n"), /github\.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+  assert.match(existingStatus.join("\n"), /github\.com\/pretendless\/Telegram2Telemost\/actions\/runs\/38644156549/);
   const ownerStatus = await reply(owner, "/status");
   assert.match(ownerStatus.join("\n"), /Шерсть Ебаная/);
   assert.match(ownerStatus.join("\n"), /109/);
@@ -2617,7 +2617,7 @@ test("both configured admins see every pack and admin commands; an unrelated cha
   assert.equal(adminCards.length, 2);
   for (const card of adminCards) {
     assert.match(card.text, /Шерсть Ебаная/);
-    assert.match(card.text, /github\.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+    assert.match(card.text, /github\.com\/pretendless\/Telegram2Telemost\/actions\/runs\/38644156549/);
   }
   const ownerCard = sent.find((row) => row.chatId === String(owner));
   assert.ok(ownerCard);
@@ -2677,7 +2677,7 @@ test("background notices reach both admins, edits keep separate cards, and a req
   const adminB = "5513343655";
   const requester = "424242";
   const unrelated = "333";
-  const run = "https://github.com/pretendless/tg2tm/actions/runs/38644156549";
+  const run = "https://github.com/pretendless/Telegram2Telemost/actions/runs/38644156549";
   const env = envWith();
   env.LOGIN_CHAT_IDS = `${adminA},${adminB}`;
   env.BOT_KV.store.set("meta:seeded", "1");
@@ -2904,7 +2904,7 @@ test("/letterboxd ZIP dispatches letterboxd.yml for any chat", async () => {
             {
               id: 99,
               created_at: new Date().toISOString(),
-              html_url: "https://github.com/pretendless/tg2tm/actions/runs/99",
+              html_url: "https://github.com/pretendless/Telegram2Telemost/actions/runs/99",
             },
           ],
         }),

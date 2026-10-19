@@ -1,7 +1,7 @@
 // Telegram /login, /connect, /upload and /restart → GitHub workflow_dispatch.
 // No Node builtins: the Cloudflare Worker in PR #2 can import this file.
 
-export const DEFAULT_REPO = "pretendless/tg2tm";
+export const DEFAULT_REPO = "pretendless/Telegram2Telemost";
 export const DEFAULT_WORKFLOW = "telemost-session.yml";
 export const DEFAULT_REF = "main";
 

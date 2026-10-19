@@ -811,7 +811,7 @@ test("forward submenu matches Переслать and the exact chat title", () =
   assert.equal(flyoutAnchoredBeside({ x: 708, y: 110, width: 240, height: 280 }, anchor), true);
   assert.equal(flyoutAnchoredBeside({ x: 480, y: 80, width: 220, height: 360 }, anchor), false);
   assert.equal(flyoutAnchoredBeside({ x: 0, y: 0, width: 280, height: 800 }, anchor), false);
-  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38613076217";
+  const runUrl = "https://github.com/pretendless/Telegram2Telemost/actions/runs/38613076217";
   const closed = forwardFlyoutFailure({ opened: false, runUrl });
   assert.equal(closed, `staging forward: Переслать flyout did not open ${runUrl}`);
   assert.equal(closed.includes("Ещё"), false);
@@ -840,7 +840,7 @@ test("buffer clear empties TG2TM before upload and does not treat leftovers as t
   assert.equal(bufferClearDoneLine(), "buffer-clear done msgCount=0");
   assert.equal(bufferClearAllowed(true), true);
   assert.equal(bufferClearAllowed(false), false);
-  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38615179852";
+  const runUrl = "https://github.com/pretendless/Telegram2Telemost/actions/runs/38615179852";
   assert.equal(
     bufferClearFailed(6, runUrl),
     `staging upload: could not clear TG2TM (msgCount=6); not uploading ${runUrl}`,
@@ -949,7 +949,7 @@ test("Zoloto stall dump answers the emoji ask and does not abort on a later не
 
 test("«Это не картинка» stops the pack and only a real buffer image is forwarded", () => {
   const line = "Стикеры Это не картинка :) 19:01";
-  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38619533883";
+  const runUrl = "https://github.com/pretendless/Telegram2Telemost/actions/runs/38619533883";
   assert.equal(notAnImageReply(line), true);
   assert.equal(notAnImageReply("Отправьте картинку для стикера."), false);
   assert.equal(imageReply(line), "not-image");
@@ -971,7 +971,7 @@ test("«Это не картинка» stops the pack and only a real buffer ima
 });
 
 test("an open picture dialog gets one /done before /newpack, never a loop", () => {
-  const runUrl = "https://github.com/pretendless/tg2tm/actions/runs/38619533883";
+  const runUrl = "https://github.com/pretendless/Telegram2Telemost/actions/runs/38619533883";
   assert.equal(preNewpackAction("Отправьте картинку для стикера."), "done");
   assert.equal(preNewpackAction("Стикеры Это не картинка :) 19:01"), "done");
   assert.equal(preNewpackAction("Стикер готов. Отправьте картинку для следующего стикера."), "done");
