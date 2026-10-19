@@ -79,7 +79,7 @@ test("the title is escaped and a pack without sources omits that clause", () => 
     url: PACK_URL,
     total: 3,
     links: ["not-a-url", ""],
-    source: "https://github.com/pretendless/tg2tm/actions/runs/1",
+    source: "https://github.com/pretendless/Telegram2Telemost/actions/runs/1",
     requesterChatId: "8502935020",
   });
   assert.equal(
@@ -114,7 +114,7 @@ test("the queue title wins over a progress slug, in source order", () => {
       url: PACK_URL,
       requesterChatId: "777001",
       queueRequestId: item.id,
-      runUrl: "https://github.com/pretendless/tg2tm/actions/runs/9",
+      runUrl: "https://github.com/pretendless/Telegram2Telemost/actions/runs/9",
     },
     { items: [item] },
   );
@@ -158,7 +158,7 @@ test("a finished pack posts the compact channel message from the queue row", asy
         packUrl: PACK_URL,
         queueRequestId: item.id,
         requesterChatId: "777001",
-        runUrl: "https://github.com/pretendless/tg2tm/actions/runs/9",
+        runUrl: "https://github.com/pretendless/Telegram2Telemost/actions/runs/9",
         adminDelivered: true,
       }),
     }),

@@ -1,4 +1,4 @@
-# Telegram /project → Cursor Cloud Agent on pretendless/tg2tm, then a short POST /project/reply.
+# Telegram /project → Cursor Cloud Agent on pretendless/Telegram2Telemost, then a short POST /project/reply.
 # CURSOR_API_KEY stays in GitHub Actions. Do not print the key, Authorization, or response bodies.
 name: Cursor agent
 
@@ -30,6 +30,6 @@ jobs:
           UPLOADER_SECRET: ${{ secrets.UPLOADER_SECRET }}
           PROMPT_ID: ${{ inputs.prompt_id }}
           CHAT_ID: ${{ inputs.chat_id }}
-          CURSOR_REPO_URL: https://github.com/pretendless/tg2tm
+          CURSOR_REPO_URL: https://github.com/pretendless/Telegram2Telemost
           CURSOR_STARTING_REF: main
         run: node scripts/cursor_agent.mjs

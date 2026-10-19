@@ -9,7 +9,7 @@ import {
 } from "./project_prompt_run.mjs";
 
 export const CURSOR_API_BASE = "https://api.cursor.com";
-export const DEFAULT_REPO_URL = "https://github.com/pretendless/tg2tm";
+export const DEFAULT_REPO_URL = "https://github.com/pretendless/Telegram2Telemost";
 export const DEFAULT_STARTING_REF = "main";
 export const TERMINAL_RUN_STATUSES = Object.freeze(["FINISHED", "ERROR", "CANCELLED", "EXPIRED"]);
 export const SUMMARY_MAX = 3900;
@@ -43,7 +43,7 @@ export function composeAgentPrompt({ userPrompt, promptId, workerBase }) {
   const id = String(promptId || "").trim();
   const base = String(workerBase || "").replace(/\/$/, "");
   const lines = [
-    "You are answering a Telegram /project request for https://github.com/pretendless/tg2tm.",
+    "You are answering a Telegram /project request for https://github.com/pretendless/Telegram2Telemost.",
     "Write a short final reply (a few sentences). That text is copied into Telegram.",
     "Do not change repository files.",
     "Do not print API keys, bearer tokens, or Authorization headers.",

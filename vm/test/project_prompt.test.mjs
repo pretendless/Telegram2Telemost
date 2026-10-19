@@ -28,13 +28,13 @@ test("newPromptId is stable prefix", () => {
 
 test("buildProjectPromptDispatch targets cursor-agent workflow", () => {
   const built = buildProjectPromptDispatch({
-    repo: "pretendless/tg2tm",
+    repo: "pretendless/Telegram2Telemost",
     promptId: "tg-1",
     chatId: 8502935020,
   });
   assert.equal(
     built.url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/cursor-agent.yml/dispatches",
+    "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/cursor-agent.yml/dispatches",
   );
   assert.deepEqual(built.body.inputs, { prompt_id: "tg-1", chat_id: "8502935020" });
   assert.equal(optionalProjectIssueWorkflow("1"), "project-prompt.yml");
@@ -81,7 +81,7 @@ test("findProjectPromptRunUrl picks fresh run", async () => {
   });
   const url = await findProjectPromptRunUrl(fetchImpl, {
     token: "t",
-    repo: "pretendless/tg2tm",
+    repo: "pretendless/Telegram2Telemost",
     startedAt,
     attempts: 1,
   });

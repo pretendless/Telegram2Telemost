@@ -17,13 +17,13 @@ import {
 test("buildCreateAgentRequest matches Cloud Agents OpenAPI create shape", () => {
   const body = buildCreateAgentRequest({
     text: "answer briefly",
-    repoUrl: "https://github.com/pretendless/tg2tm",
+    repoUrl: "https://github.com/pretendless/Telegram2Telemost",
     startingRef: "main",
     name: "tg tg-1",
   });
   assert.deepEqual(body, {
     prompt: { text: "answer briefly" },
-    repos: [{ url: "https://github.com/pretendless/tg2tm", startingRef: "main" }],
+    repos: [{ url: "https://github.com/pretendless/Telegram2Telemost", startingRef: "main" }],
     autoCreatePR: false,
     workOnCurrentBranch: false,
     mode: "plan",

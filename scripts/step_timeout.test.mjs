@@ -12,7 +12,7 @@ import {
   withStepTimeout,
 } from './step_timeout.mjs';
 
-const RUN = 'https://github.com/pretendless/tg2tm/actions/runs/38644156549';
+const RUN = 'https://github.com/pretendless/Telegram2Telemost/actions/runs/38644156549';
 
 test('post-save bound is a minute, not an hour', () => {
   assert.equal(POST_SAVE_STEP_MS, 60_000);

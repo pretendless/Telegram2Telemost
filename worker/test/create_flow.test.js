@@ -511,7 +511,7 @@ test("admin /status names a starting run and an upload instead of idle", () => {
     ],
   };
   const session = {
-    url: "https://github.com/pretendless/tg2tm/actions/runs/38644156549",
+    url: "https://github.com/pretendless/Telegram2Telemost/actions/runs/38644156549",
     at: "2026-10-14T00:57:30.000Z",
   };
   const starting = adminLiveStatusText({ queue: queued, job: { running: false }, session });
@@ -533,7 +533,7 @@ test("admin /status names a starting run and an upload instead of idle", () => {
     job: { running: false },
     session,
   });
-  assert.match(busySession, /^линия в процессе\nhttps:\/\/github.com\/pretendless\/tg2tm\/actions\/runs\/38644156549/);
+  assert.match(busySession, /^линия в процессе\nhttps:\/\/github.com\/pretendless\/Telegram2Telemost\/actions\/runs\/38644156549/);
 });
 
 function stickerUpdate(chatId, sticker) {

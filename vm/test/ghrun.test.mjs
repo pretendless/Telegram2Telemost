@@ -46,14 +46,14 @@ test("parseGhrunCommand", () => {
 
 test("buildGhrunDispatch", () => {
   const built = buildGhrunDispatch({
-    repo: "pretendless/tg2tm",
+    repo: "pretendless/Telegram2Telemost",
     workflow: "setup-bot.yml",
     ref: "main",
     inputs: { dry: "1" },
   });
   assert.equal(
     built.url,
-    "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/setup-bot.yml/dispatches",
+    "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/setup-bot.yml/dispatches",
   );
   assert.deepEqual(built.body, { ref: "main", inputs: { dry: "1" } });
 });
@@ -74,7 +74,7 @@ test("findWorkflowRunUrl picks fresh run", async () => {
   });
   const url = await findWorkflowRunUrl(fetchImpl, {
     token: "t",
-    repo: "pretendless/tg2tm",
+    repo: "pretendless/Telegram2Telemost",
     workflow: "setup-bot.yml",
     startedAt,
   });

@@ -33,7 +33,7 @@
 
 Пока вебхук воркера не включён (на машине переноса ещё крутится long polling, его из‑за этого входа останавливать не нужно), бот команду не увидит. Тогда тот же запуск с телефона через приложение GitHub:
 
-1. Репозиторий `pretendless/tg2tm` → Actions → **Telemost session** → Run workflow.
+1. Репозиторий `pretendless/Telegram2Telemost` → Actions → **Telemost session** → Run workflow.
 2. Ветка — ветка по умолчанию. Mode `login`, account — метка, chat id — числовой id чата, куда слать QR.
 3. Дальше шаги 3–5 те же: QR приходит в этот чат.
 
@@ -167,10 +167,10 @@ Oracle: home region в ЕС, shape Ampere в пределах 2 OCPU и 12 ГБ,
 | --- | --- | --- | --- |
 | `TELEMOST_SESSION_KEY` | Секрет GitHub Actions | Человек, один раз: `openssl rand -base64 32` | Парольная фраза шифра сессии. Не короче 32 символов. На воркер не копировать: воркер куки не видит. |
 | `TG2TMBOT_TOKEN` | Секрет GitHub Actions. То же значение, что секрет воркера `TG2TMBOT_TOKEN` и локальный `config/tg2tmbot.token` | Уже есть у бота | Job шлёт QR и ссылку в Telegram. |
-| `GH_DISPATCH_TOKEN` | Секрет воркера | Fine-grained personal access token, только репозиторий `pretendless/tg2tm`, право Actions: Read and write | `POST /repos/.../actions/workflows/telemost-session.yml/dispatches`. Других прав токену не давать. |
+| `GH_DISPATCH_TOKEN` | Секрет воркера | Fine-grained personal access token, только репозиторий `pretendless/Telegram2Telemost`, право Actions: Read and write | `POST /repos/.../actions/workflows/telemost-session.yml/dispatches`. Других прав токену не давать. |
 | `LOGIN_CHAT_IDS` | Секрет воркера | Список числовых chat id через запятую | Кто может слать `/login`, `/connect`, `/upload`. Пустой список выключен: команда никому не отвечает запуском. Id есть в `config/tg2tmbot-subscribers.json` после `/start`. |
 | `TELEMOST_VM_REF` | Секрет или variable воркера | Имя ветки, которую checkout'ит job | В коде запасной вариант — `main`. Поставить то же имя, что у ветки по умолчанию, если это не `main`. |
-| `GH_REPO` | Variable воркера, можно не задавать | — | По умолчанию `pretendless/tg2tm`. |
+| `GH_REPO` | Variable воркера, можно не задавать | — | По умолчанию `pretendless/Telegram2Telemost`. |
 | `TELEMOST_WORKFLOW` | Variable воркера, можно не задавать | — | По умолчанию `telemost-session.yml`. |
 | `GITHUB_TOKEN` | Выдаёт сам GitHub внутри job | Не создавать | Чтение и запись artifact. В контейнер не передаётся. |
 | `NOVNC_PASSWORD` | Не обязателен | Если не задан, скрипт генерирует его на один запуск | Пароль экрана. В репозиторий не писать. |

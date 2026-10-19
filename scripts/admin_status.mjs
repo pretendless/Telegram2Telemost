@@ -53,7 +53,7 @@ export function actionsRunUrl(env = process.env) {
   const id = String(source.GITHUB_RUN_ID || source.RUN_ID || '').trim();
   if (!/^[0-9]+$/.test(id)) return '';
   const server = String(source.GITHUB_SERVER_URL || 'https://github.com').replace(/\/+$/, '');
-  const repo = String(source.GITHUB_REPOSITORY || '').trim() || 'pretendless/tg2tm';
+  const repo = String(source.GITHUB_REPOSITORY || '').trim() || 'pretendless/Telegram2Telemost';
   return `${server}/${repo}/actions/runs/${id}`;
 }
 

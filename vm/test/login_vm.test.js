@@ -70,7 +70,7 @@ test("dispatch body stays on the workflow API and omits the token", async () => 
     },
     {
       token: "ghp_example",
-      repo: "pretendless/tg2tm",
+      repo: "pretendless/Telegram2Telemost",
       workflow: "telemost-session.yml",
       ref: "main",
       mode: "login",
@@ -80,7 +80,7 @@ test("dispatch body stays on the workflow API and omits the token", async () => 
     },
   );
   assert.equal(result.ok, true);
-  assert.equal(seen.url, "https://api.github.com/repos/pretendless/tg2tm/actions/workflows/telemost-session.yml/dispatches");
+  assert.equal(seen.url, "https://api.github.com/repos/pretendless/Telegram2Telemost/actions/workflows/telemost-session.yml/dispatches");
   assert.equal(seen.init.headers.authorization, "Bearer ghp_example");
   const body = JSON.parse(seen.init.body);
   assert.equal(body.ref, "main");
@@ -93,7 +93,7 @@ test("dispatch body stays on the workflow API and omits the token", async () => 
 test("only an allowlisted chat can start the browser", async () => {
   const sent = [];
   let fetched = 0;
-  const env = { LOGIN_CHAT_IDS: "42, 77", GH_DISPATCH_TOKEN: "token", GH_REPO: "pretendless/tg2tm", TELEMOST_VM_REF: "main" };
+  const env = { LOGIN_CHAT_IDS: "42, 77", GH_DISPATCH_TOKEN: "token", GH_REPO: "pretendless/Telegram2Telemost", TELEMOST_VM_REF: "main" };
   const deps = {
     send: async (_env, chatId, text) => sent.push({ chatId, text }),
     fetch: async () => {
@@ -358,7 +358,7 @@ test("artifact restore keeps the newest ciphertext and follows the zip redirect 
   const payload = Buffer.from("ciphertext-bytes");
   const calls = [];
   const result = await restoreArtifact(
-    { ACCOUNT: "work", SESSION_DIR: dir, GH_TOKEN: "job-token", GH_REPO: "pretendless/tg2tm" },
+    { ACCOUNT: "work", SESSION_DIR: dir, GH_TOKEN: "job-token", GH_REPO: "pretendless/Telegram2Telemost" },
     {
       workdir: join(dir, "work"),
       unzip: async (buffer, root) => {
