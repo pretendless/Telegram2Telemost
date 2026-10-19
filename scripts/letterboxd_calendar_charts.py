@@ -10,7 +10,6 @@ Writes into the current working directory:
   extra_stats_decade_rating.png
   average_rating_by_year.png
   average_rating_by_release_decade.png
-  worst_average_rating_by_release_decade.png
   top_rewatches.png
   watches_by_release_year.png
   average_rating_by_release_year.png
@@ -49,9 +48,7 @@ from letterboxd_palette import (  # noqa: E402
     watch_year_palette,
 )
 from letterboxd_top_charts import (  # noqa: E402
-    TOP_N_DEFAULT,
     add_rating_colorbar,
-    chart_rating_vbar,
     chart_release_years_by_count,
     chart_release_years_by_rating,
     color_bars_by_rating,
@@ -575,51 +572,6 @@ def chart_average_rating_by_release_decade(
     return True
 
 
-def chart_worst_average_rating_by_release_decade(
-    diary: pd.DataFrame,
-    path: Path,
-    film_ratings: pd.DataFrame | None = None,
-    catalog: pd.DataFrame | None = None,
-    limit: int = TOP_N_DEFAULT,
-) -> bool:
-    """Worst decades by mean rating (rated > 3), vertical bars ascending."""
-    cat = catalog if catalog is not None else diary
-    if film_ratings is None:
-        from letterboxd_export import merged_film_ratings
-
-        film_ratings = merged_film_ratings(None, diary)
-    work = ratings_for_catalog(cat, film_ratings)
-    if work.empty:
-        return False
-    work = work[work["Year"].notna()].copy()
-    if work.empty:
-        return False
-    work["decade"] = work["Year"].map(release_decade_label)
-    work = work[work["decade"].notna()]
-    if work.empty:
-        return False
-    grouped = work.groupby("decade")["Rating"].agg(avg="mean", rated="count")
-    rows = []
-    for decade, row in grouped.iterrows():
-        rated_n = int(row["rated"])
-        if not passes_rated_threshold(rated_n):
-            continue
-        rows.append(
-            {
-                "name": str(decade),
-                "avg": round(float(row["avg"]), 2),
-                "rated": rated_n,
-            }
-        )
-    return chart_rating_vbar(
-        rows,
-        path,
-        title="Десятилетия выхода — ниже оценка (больше 3 оценённых фильмов)",
-        limit=limit,
-        ascending=True,
-    )
-
-
 def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 20) -> bool:
     """Horizontal stacked bars of rewatched films, colored by watch year."""
     names = df["Name"].fillna("").astype(str).str.strip()
@@ -707,12 +659,6 @@ def main(argv: list[str] | None = None) -> int:
             film_ratings=film_ratings,
             catalog=catalog,
         )
-        made_decade_worst = chart_worst_average_rating_by_release_decade(
-            diary,
-            Path("worst_average_rating_by_release_decade.png"),
-            film_ratings=film_ratings,
-            catalog=catalog,
-        )
         made_rewatch = chart_top_rewatches(diary, Path("top_rewatches.png"))
         summary = build_diary_summary(
             diary, catalog=catalog, watched_only=watched_only, film_ratings=film_ratings
@@ -732,7 +678,6 @@ def main(argv: list[str] | None = None) -> int:
         summary["charts"] = {
             "average_rating_by_year": bool(made_rating),
             "average_rating_by_release_decade": bool(made_decade_avg),
-            "worst_average_rating_by_release_decade": bool(made_decade_worst),
             "top_rewatches": bool(made_rewatch),
             "watches_by_release_year": bool(made_release_count),
             "average_rating_by_release_year": bool(made_release_rating),
@@ -749,7 +694,6 @@ def main(argv: list[str] | None = None) -> int:
     for name in (
         "average_rating_by_year.png",
         "average_rating_by_release_decade.png",
-        "worst_average_rating_by_release_decade.png",
         "top_rewatches.png",
         "watches_by_release_year.png",
         "average_rating_by_release_year.png",

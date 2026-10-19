@@ -129,24 +129,16 @@ def chart_stacked_count_hbar(
     return True
 
 
-def chart_rating_vbar(
+def _prepare_rating_rows(
     rows: list[dict],
-    path: Path,
     *,
-    title: str,
     label_key: str = "name",
     avg_key: str = "avg",
     rated_key: str = "rated",
     label_fn: Callable[[object], str] | None = None,
-    footer: str | None = None,
-    ylabel: str = "Средняя оценка (из 5)",
     limit: int = TOP_N_DEFAULT,
     ascending: bool = False,
-) -> bool:
-    """Vertical bars: X = category, Y = mean rating; color blue→green→red.
-
-    ascending=False → best first («выше оценка»); True → worst first («ниже оценка»).
-    """
+) -> list[tuple[str, float, int | None]]:
     usable = []
     for row in rows or []:
         avg = row.get(avg_key)
@@ -165,16 +157,54 @@ def chart_rating_vbar(
             rated_n = None
         usable.append((label, avg_f, rated_n))
     if not usable:
-        return False
-
+        return []
     if ascending:
-        # Worst average on the left.
         usable.sort(key=lambda r: (r[1], -(r[2] or 0), r[0]))
     else:
-        # Highest average on the left (descending).
         usable.sort(key=lambda r: (-r[1], -(r[2] or 0), r[0]))
     if limit and len(usable) > limit:
         usable = usable[:limit]
+    return usable
+
+
+def _rating_colorbar(fig, ax) -> None:
+    sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.025, pad=0.02)
+    cbar.set_label(RATING_COLORBAR_LABEL, color=FG, fontsize=8)
+    cbar.ax.yaxis.set_tick_params(color=FG)
+    plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
+
+
+def chart_rating_vbar(
+    rows: list[dict],
+    path: Path,
+    *,
+    title: str,
+    label_key: str = "name",
+    avg_key: str = "avg",
+    rated_key: str = "rated",
+    label_fn: Callable[[object], str] | None = None,
+    footer: str | None = None,
+    ylabel: str = "Средняя оценка (из 5)",
+    limit: int = TOP_N_DEFAULT,
+    ascending: bool = False,
+) -> bool:
+    """Vertical bars: X = category, Y = mean rating; color blue→green→red.
+
+    Used for calendar release-year avg tops. ascending=True → worst first.
+    """
+    usable = _prepare_rating_rows(
+        rows,
+        label_key=label_key,
+        avg_key=avg_key,
+        rated_key=rated_key,
+        label_fn=label_fn,
+        limit=limit,
+        ascending=ascending,
+    )
+    if not usable:
+        return False
     labels = [_short_label(lab, limit=18) for lab, _, _ in usable]
     avgs = [a for _, a, _ in usable]
     colors = rating_colors(avgs)
@@ -201,12 +231,7 @@ def chart_rating_vbar(
             fontsize=7,
             color=FG,
         )
-    sm = plt.cm.ScalarMappable(cmap=rating_colormap(), norm=rating_norm())
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.025, pad=0.02)
-    cbar.set_label(RATING_COLORBAR_LABEL, color=FG, fontsize=8)
-    cbar.ax.yaxis.set_tick_params(color=FG)
-    plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color=FG)
+    _rating_colorbar(fig, ax)
     if footer:
         fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
         fig.tight_layout(rect=[0, 0.03, 1, 1])
@@ -217,8 +242,108 @@ def chart_rating_vbar(
     return True
 
 
-# Back-compat alias for older call sites / tests.
-chart_rating_hbar = chart_rating_vbar
+def chart_rating_hbar(
+    rows: list[dict],
+    path: Path,
+    *,
+    title: str,
+    label_key: str = "name",
+    avg_key: str = "avg",
+    rated_key: str = "rated",
+    label_fn: Callable[[object], str] | None = None,
+    footer: str | None = None,
+    xlabel: str = "Средняя оценка (из 5)",
+    limit: int = TOP_N_DEFAULT,
+    ascending: bool = False,
+) -> bool:
+    """Horizontal bars for TMDB avg tops: rank+name inside bar (black + white stroke).
+
+    ascending=False → best at top; True → worst at top («ниже оценка»).
+    Mean/(n) drawn at the bar end so it does not collide with the rank label.
+    """
+    import matplotlib.patheffects as path_effects
+
+    usable = _prepare_rating_rows(
+        rows,
+        label_key=label_key,
+        avg_key=avg_key,
+        rated_key=rated_key,
+        label_fn=label_fn,
+        limit=limit,
+        ascending=ascending,
+    )
+    if not usable:
+        return False
+
+    # barh draws first row at bottom — reverse so rank 1 sits at top.
+    display = list(reversed(list(enumerate(usable, start=1))))
+    ranks = [rank for rank, _ in display]
+    labels = [_short_label(lab, limit=28) for _, (lab, _, _) in display]
+    avgs = [avg for _, (_, avg, _) in display]
+    rateds = [rated for _, (_, _, rated) in display]
+    colors = rating_colors(avgs)
+
+    fig, ax = plt.subplots(figsize=(11, max(4.5, len(labels) * 0.48)))
+    y = np.arange(len(labels))
+    bars = ax.barh(y, avgs, color=colors, height=0.72, edgecolor="none")
+    ax.set_yticks([])
+    ax.set_xlim(0, 5.35)
+    ax.set_xlabel(xlabel)
+    ax.set_title(title)
+    ax.xaxis.grid(True, color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    style_axes(ax)
+
+    stroke = [
+        path_effects.Stroke(linewidth=3.2, foreground="white"),
+        path_effects.Normal(),
+    ]
+    for yi, bar, rank, label, avg, rated in zip(y, bars, ranks, labels, avgs, rateds):
+        # Rank + name inside the bar (left), black with white outline.
+        ax.text(
+            0.08,
+            yi,
+            f"{rank}. {label}",
+            ha="left",
+            va="center",
+            fontsize=11,
+            fontweight="bold",
+            color="#000000",
+            path_effects=stroke,
+            clip_on=True,
+        )
+        # Mean / n at the right end of the bar (outside if short).
+        mean_txt = f"{avg:.2f}" + (f"  n={rated}" if rated is not None else "")
+        if avg >= 1.6:
+            ax.text(
+                avg - 0.06,
+                yi,
+                mean_txt,
+                ha="right",
+                va="center",
+                fontsize=9,
+                color="#000000",
+                path_effects=stroke,
+            )
+        else:
+            ax.text(
+                avg + 0.06,
+                yi,
+                mean_txt,
+                ha="left",
+                va="center",
+                fontsize=9,
+                color=FG,
+            )
+    _rating_colorbar(fig, ax)
+    if footer:
+        fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
+        fig.tight_layout(rect=[0, 0.03, 1, 1])
+    else:
+        fig.tight_layout()
+    save_dark_figure(fig, path, dpi=160)
+    plt.close(fig)
+    return True
 
 
 def chart_diary_entity_stacked(

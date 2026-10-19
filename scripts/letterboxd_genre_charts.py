@@ -53,7 +53,7 @@ from letterboxd_ratings import (  # noqa: E402
 from letterboxd_top_charts import (  # noqa: E402
     TOP_N_DEFAULT,
     chart_diary_entity_stacked,
-    chart_rating_vbar,
+    chart_rating_hbar,
     display_lang,
 )
 
@@ -690,7 +690,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
 
 
 def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
-    """Blue→green→red vertical avg charts for TMDB «выше» + «ниже оценка» tops."""
+    """Blue→green→red horizontal avg charts for TMDB «выше» + «ниже оценка» tops."""
     footer = "Source: Letterboxd diary/watched + TMDB metadata"
     made = {}
     specs = [
@@ -769,7 +769,7 @@ def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
         path = paths.get(key)
         if not path:
             continue
-        made[key] = chart_rating_vbar(
+        made[key] = chart_rating_hbar(
             deep.get(src) or [],
             Path(path),
             title=f"{title} (больше 3 оценённых фильмов)",
@@ -933,7 +933,7 @@ def main():
         limit_count=TOP_N_DEFAULT,
         limit_rating=TOP_N_DEFAULT,
     )
-    made_genre_best = chart_rating_vbar(
+    made_genre_best = chart_rating_hbar(
         genres_by_rating,
         Path("average_rating_by_genre.png"),
         title="Жанры — выше оценка (больше 3 оценённых фильмов)",
@@ -941,7 +941,7 @@ def main():
         limit=TOP_N_DEFAULT,
         ascending=False,
     )
-    made_genre_worst = chart_rating_vbar(
+    made_genre_worst = chart_rating_hbar(
         genres_by_rating_worst,
         Path("worst_average_rating_by_genre.png"),
         title="Жанры — ниже оценка (больше 3 оценённых фильмов)",
