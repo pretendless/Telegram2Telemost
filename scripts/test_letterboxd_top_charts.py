@@ -142,6 +142,41 @@ def test_rating_hbar_worst_ascending(tmp_path: Path | None = None):
     assert path.is_file() and path.stat().st_size > 0
 
 
+def test_rating_hbar_long_names_no_overlap(tmp_path: Path | None = None):
+    """Long studio-style names + short bars: chart still builds (stats outside bar)."""
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "studios_worst_long.png"
+    names = [
+        "Bazelevs",
+        "Columbia Pictures",
+        "Robert Simonds Productions",
+        "Happy Madison Productions",
+        "Sidney Kimmel Entertainment",
+        "Gary Sanchez Productions",
+        "FilmNation Entertainment",
+        "Twentieth Century Fox",
+        "Warner Bros. Pictures",
+        "Universal Pictures",
+        "Paramount Pictures",
+        "Lionsgate Films",
+        "New Line Cinema",
+        "Miramax Films",
+        "Focus Features",
+        "A24 Films",
+        "Blumhouse Productions",
+        "Legendary Pictures",
+        "Working Title Films",
+        "StudioCanal",
+    ]
+    rows = [
+        {"name": names[i], "avg": 1.5 + i * 0.04, "rated": 4 + (i % 5)}
+        for i in range(TOP_N_DEFAULT)
+    ]
+    assert chart_rating_hbar(rows, path, title="Студии — ниже оценка", ascending=True) is True
+    assert path.is_file() and path.stat().st_size > 0
+
+
 def test_rating_hbar_worst_skips_short_slate(tmp_path: Path | None = None):
     out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
     out.mkdir(parents=True, exist_ok=True)
@@ -171,5 +206,6 @@ if __name__ == "__main__":
     test_rating_vbar_skips_bad_avg()
     test_rating_hbar_with_in_bar_labels()
     test_rating_hbar_worst_ascending()
+    test_rating_hbar_long_names_no_overlap()
     test_rating_hbar_worst_skips_short_slate()
     print("ok")
