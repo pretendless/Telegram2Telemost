@@ -80,6 +80,8 @@ CONFIRM_STOP_POLLING=1 \
   node set-webhook.mjs
 ```
 
+`allowed_updates` — `message` и `callback_query` (кнопки мастера Letterboxd). После смены списка нужен повторный запуск **Set webhook**; **Setup bot** webhook не ставит.
+
 ### Доступ к api.telegram.org с корпоративной машины
 
 Скрипты `setup-bot.mjs` и `set-webhook.mjs` ходят в Bot API через `telegram_fetch.mjs`. Если `PROXY_HOST` не задан (как на GitHub Actions), используется обычный `fetch`.

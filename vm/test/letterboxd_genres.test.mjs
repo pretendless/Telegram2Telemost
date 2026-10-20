@@ -7,6 +7,13 @@ import {
   encodeAwaitLetterboxd,
   isZipDocument,
   normalizeTelegramFileId,
+  letterboxdMinKeyboard,
+  letterboxdModeKeyboard,
+  letterboxdModePrompt,
+  letterboxdPeriodKeyboard,
+  letterboxdTopKeyboard,
+  letterboxdUndatedKeyboard,
+  letterboxdYesNoKeyboard,
   parseLetterboxdCallback,
   parseLetterboxdCommand,
   parseWatchBound,
@@ -109,6 +116,75 @@ test("top size is any integer from 1 to 100", () => {
   const zero = advanceLetterboxdWizard(state, { kind: "text", text: "0" });
   assert.equal(zero.state.step, "top_n");
   assert.match(zero.messages[0].text, /от 1 до 100/);
+});
+
+test("wizard prompts are html, with a default line and examples", () => {
+  const mode = letterboxdModePrompt();
+  assert.match(mode.text, /<b>Настроить вывод или по умолчанию\?<\/b>/);
+  assert.match(mode.text, /По умолчанию: по умолчанию/);
+  assert.match(mode.text, /Например: по умолчанию, настроить/);
+  const now = new Date("2026-10-20T00:00:00Z");
+  const range = advanceLetterboxdWizard(
+    { step: "period", fileId: "BQACAgIAAxkBAAI1234567890" },
+    { kind: "callback", step: "period", choice: "custom" },
+    now,
+  );
+  assert.match(range.messages[0].text, /<b>Какой период взять\?<\/b>/);
+  assert.match(range.messages[0].text, /15\.06\.2012 - 20\.08\.2013/);
+  assert.match(range.messages[0].text, /По умолчанию: весь период/);
+  const labels = range.messages[0].reply_markup.inline_keyboard.flat().map((button) => button.text);
+  assert.deepEqual(labels, [
+    "2026",
+    "2025",
+    "2024",
+    "2023",
+    "2022",
+    "Последние 3 года",
+    "Последние 5 лет",
+    "По умолчанию: весь период",
+  ]);
+  const top = advanceLetterboxdWizard(
+    { step: "top_n", fileId: "BQACAgIAAxkBAAI1234567890" },
+    { kind: "callback", step: "top_n", value: 20 },
+    now,
+  );
+  assert.equal(top.state.topN, 20);
+  assert.equal(top.state.step, "min_rated");
+  assert.equal(top.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "✅ По умолчанию (3)");
+  const year = advanceLetterboxdWizard(
+    range.state,
+    { kind: "callback", step: "range_start", year: 2024 },
+    now,
+  );
+  assert.equal(year.state.step, "undated");
+  assert.equal(year.state.dateFrom, "2024-01-01");
+  assert.equal(year.state.dateTo, "2024-12-31");
+  assert.equal(year.dispatch, undefined);
+  const trailing = advanceLetterboxdWizard(
+    range.state,
+    { kind: "callback", step: "range_start", preset: 3 },
+    now,
+  );
+  assert.equal(trailing.state.dateFrom, "2023-10-20");
+  assert.equal(trailing.state.dateTo, "2026-10-20");
+  const full = advanceLetterboxdWizard(
+    range.state,
+    { kind: "callback", step: "range_start", choice: "full" },
+    now,
+  );
+  assert.equal(full.dispatch.options.dateFrom, "");
+  assert.equal(full.dispatch.options.dateTo, "");
+});
+
+test("every wizard keyboard has a one-tap default button", () => {
+  const last = (keyboard) => keyboard.inline_keyboard.at(-1)[0].text;
+  assert.equal(letterboxdModeKeyboard().inline_keyboard[0][0].text, "✅ По умолчанию");
+  assert.equal(last(letterboxdTopKeyboard()), "✅ По умолчанию (20)");
+  assert.equal(last(letterboxdMinKeyboard()), "✅ По умолчанию (3)");
+  assert.equal(last(letterboxdYesNoKeyboard("lb:usa")), "По умолчанию: да");
+  assert.equal(last(letterboxdYesNoKeyboard("lb:en")), "По умолчанию: да");
+  assert.equal(last(letterboxdPeriodKeyboard()), "По умолчанию: весь период");
+  assert.equal(last(letterboxdUndatedKeyboard()), "По умолчанию: нет");
 });
 
 test("isZipDocument and file_id", () => {
