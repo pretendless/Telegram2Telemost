@@ -81,6 +81,13 @@ test("watch bounds are month-before-year; one value is the whole interval", () =
   assert.deepEqual(parseWatchInterval("март 2012"), { dateFrom: "2012-03-01", dateTo: "2012-03-31" });
   assert.equal(parseWatchInterval("2012-06"), null);
   assert.equal(parseWatchInterval("2012-06-15"), null);
+  assert.equal(parseWatchInterval("2021.06"), null);
+  assert.deepEqual(parseWatchInterval("2021-06.2022"), { dateFrom: "2021-01-01", dateTo: "2022-06-30" });
+  assert.deepEqual(parseWatchInterval("06.2021-2022"), { dateFrom: "2021-06-01", dateTo: "2022-12-31" });
+  assert.deepEqual(parseWatchInterval("15.06.2021 - 20.08.2022"), {
+    dateFrom: "2021-06-15",
+    dateTo: "2022-08-20",
+  });
 });
 
 test("one typed period skips the second bound and asks about undated films", () => {
@@ -134,7 +141,8 @@ test("wizard prompts are html, with a default line and examples", () => {
     now,
   );
   assert.match(range.messages[0].text, /<b>Какой период взять\?<\/b>/);
-  assert.match(range.messages[0].text, /15\.06\.2012 - 20\.08\.2013/);
+  assert.match(range.messages[0].text, /2021-06\.2022/);
+  assert.match(range.messages[0].text, /15\.06\.2021 - 20\.08\.2022/);
   assert.match(range.messages[0].text, /По умолчанию: весь период/);
   const labels = range.messages[0].reply_markup.inline_keyboard.flat().map((button) => button.text);
   assert.deepEqual(labels, [
