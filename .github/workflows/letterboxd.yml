@@ -17,6 +17,41 @@ on:
         description: Telegram document file_id of the Letterboxd export ZIP
         required: true
         type: string
+      top_n:
+        description: Positions in ranking charts (5–30; stacked hbars unreadable past 30)
+        required: false
+        default: "20"
+        type: string
+      min_rated:
+        description: Min unique rated films for average tops (1–50)
+        required: false
+        default: "3"
+        type: string
+      include_usa:
+        description: Include USA in country tops (true/false)
+        required: false
+        default: "true"
+        type: string
+      include_english:
+        description: Include English (en) in language tops (true/false)
+        required: false
+        default: "true"
+        type: string
+      date_from:
+        description: Inclusive watch-date start YYYY-MM-DD (empty = full span)
+        required: false
+        default: ""
+        type: string
+      date_to:
+        description: Inclusive watch-date end YYYY-MM-DD (empty = full span)
+        required: false
+        default: ""
+        type: string
+      include_undated:
+        description: Custom range only — also include watched/ratings films with no diary date (true/false)
+        required: false
+        default: "false"
+        type: string
 
 permissions:
   contents: read
@@ -39,5 +74,12 @@ jobs:
           CHAT_ID: ${{ inputs.chat_id }}
           FILE_ID: ${{ inputs.file_id }}
           JOB_ID: ${{ inputs.job_id }}
+          LETTERBOXD_TOP_N: ${{ inputs.top_n }}
+          LETTERBOXD_MIN_RATED: ${{ inputs.min_rated }}
+          LETTERBOXD_INCLUDE_USA: ${{ inputs.include_usa }}
+          LETTERBOXD_INCLUDE_ENGLISH: ${{ inputs.include_english }}
+          LETTERBOXD_DATE_FROM: ${{ inputs.date_from }}
+          LETTERBOXD_DATE_TO: ${{ inputs.date_to }}
+          LETTERBOXD_INCLUDE_UNDATED: ${{ inputs.include_undated }}
           MPLBACKEND: Agg
         run: node scripts/letterboxd_genres_run.mjs

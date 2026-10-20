@@ -16,10 +16,20 @@ from letterboxd_calendar_charts import (
     chart_viewing_pace,
     diary_rating_means_by_watch_year,
     format_ru_calendar_date,
+    resolve_watch_bounds,
     viewing_pace_stats,
+    watch_time_grain,
     main as cal_main,
 )
-from letterboxd_export import latest_rated_union, load_export, load_ratings, merged_film_ratings
+from letterboxd_export import (
+    latest_rated_union,
+    load_export,
+    load_ratings,
+    merged_film_ratings,
+    scope_letterboxd_frames,
+)
+from letterboxd_genre_charts import _filter_entity_names
+from letterboxd_options import format_count_avg_label, is_english_language, is_usa_country
 
 
 def _write_zip(
@@ -228,6 +238,84 @@ def test_diary_fallback_when_no_ratings_csv(tmp: Path) -> None:
     )
 
 
+def test_watch_window_keeps_undated_out_unless_asked() -> None:
+    """Custom range: in-window diary only. Undated flag adds films with no diary date."""
+    diary = pd.DataFrame(
+        [
+            {"Name": "In Range", "Year": 2010, "Rating": 4.0, "Watched Date": "2024-06-15", "source": "diary"},
+            {"Name": "Outside", "Year": 2011, "Rating": 2.0, "Watched Date": "2020-01-01", "source": "diary"},
+        ]
+    )
+    diary["Watched Date"] = pd.to_datetime(diary["Watched Date"])
+    watched = pd.DataFrame(
+        [
+            {"Name": "Watched Only", "Year": 2012, "Rating": pd.NA, "Watched Date": pd.NaT, "source": "watched"},
+            {"Name": "In Range", "Year": 2010, "Rating": pd.NA, "Watched Date": pd.NaT, "source": "watched"},
+        ]
+    )
+    ratings = pd.DataFrame(
+        [
+            {"Name": "Ratings Only", "Year": 2013, "Rating": 5.0, "Watched Date": pd.NaT, "source": "ratings"},
+            {"Name": "Outside", "Year": 2011, "Rating": 3.5, "Watched Date": pd.NaT, "source": "ratings"},
+        ]
+    )
+    _diary, catalog, _only, film_ratings = scope_letterboxd_frames(
+        diary, watched, ratings, date_from="2024-06-01", date_to="2024-06-30", include_undated=False
+    )
+    assert set(catalog["Name"]) == {"In Range"}
+    assert set(film_ratings["Name"]) == {"In Range"}
+
+    _diary, catalog, only, film_ratings = scope_letterboxd_frames(
+        diary, watched, ratings, date_from="2024-06-01", date_to="2024-06-30", include_undated=True
+    )
+    assert set(catalog["Name"]) == {"In Range", "Watched Only", "Ratings Only"}
+    assert set(only["Name"]) == {"Watched Only", "Ratings Only"}
+    undated = catalog[catalog["Name"] != "In Range"]
+    assert undated["Watched Date"].isna().all()
+    assert "Outside" not in set(catalog["Name"])
+    assert set(film_ratings["Name"]) == {"In Range", "Ratings Only"}
+
+
+def test_watch_time_grain_cutoffs() -> None:
+    assert watch_time_grain("2024-01-01", "2024-02-14") == "day"  # 45 inclusive days
+    assert watch_time_grain("2024-01-01", "2024-02-15") == "month"  # 46 days, 2 months
+    assert watch_time_grain("2024-01-01", "2025-06-01") == "month"  # 18 inclusive months
+    assert watch_time_grain("2024-01-01", "2025-07-01") == "year"
+    short = pd.DataFrame(
+        [
+            {"Name": "A", "Year": 2020, "Rating": 4.0, "Watched Date": "2024-03-01"},
+            {"Name": "B", "Year": 2019, "Rating": 3.0, "Watched Date": "2024-03-10"},
+        ]
+    )
+    short["Watched Date"] = pd.to_datetime(short["Watched Date"])
+    start, end = resolve_watch_bounds(short)
+    assert watch_time_grain(start, end) == "day"
+    win_start, win_end = resolve_watch_bounds(short, "2010-01-01", "2020-12-31")
+    assert watch_time_grain(win_start, win_end) == "year"
+
+    stats = viewing_pace_stats(
+        short, grain="day", span_start="2024-03-01", span_end="2024-03-05"
+    )
+    assert stats["counts"][:5] == [1, 0, 0, 0, 0]
+    assert stats["span_days"] == 5
+    means = diary_rating_means_by_watch_year(short, grain="day")
+    assert len(means) == 2  # rated buckets only, no zero days
+
+
+def test_count_avg_label_and_usa_english_filter() -> None:
+    assert format_count_avg_label(4.25, 3, 3) == "4.25  n=3"
+    assert format_count_avg_label(4.25, 2, 3) == "—"
+    assert format_count_avg_label(None, 5, 3) == "—"
+    assert is_usa_country("U.S.A.")
+    assert is_usa_country("United States")
+    assert not is_usa_country("France")
+    assert is_english_language("en")
+    assert is_english_language("английский")
+    assert not is_english_language("fr")
+    assert _filter_entity_names("countries", ["France", "USA"], include_usa=False) == ["France"]
+    assert _filter_entity_names("languages", ["en", "ja"], include_english=False) == ["ja"]
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as raw:
         tmp = Path(raw)
@@ -239,6 +327,9 @@ def main() -> int:
         test_diary_latest_beats_older_diary_and_ratings_csv()
         test_diary_wins_over_ratings_csv()
         test_diary_fallback_when_no_ratings_csv(tmp)
+        test_watch_window_keeps_undated_out_unless_asked()
+        test_watch_time_grain_cutoffs()
+        test_count_avg_label_and_usa_english_filter()
     print("test_letterboxd_export: ok")
     return 0
 

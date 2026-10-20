@@ -41,6 +41,17 @@ const CALENDAR_PNGS = [
   "worst_average_rating_by_release_year.png",
 ];
 
+export function calendarCaptions(summary) {
+  const grain = summary && summary.watch_time_grain;
+  const phrase = grain === "day" ? "по дням" : grain === "month" ? "по месяцам" : "по годам";
+  return {
+    ...CALENDAR_CAPTIONS,
+    "views_by_year.png": `Просмотры ${phrase}`,
+    "average_rating_by_year.png": `Средняя оценка ${phrase}`,
+    "viewing_pace.png": grain === "day" ? "Темп просмотров по дням" : "Темп просмотров по месяцам",
+  };
+}
+
 const CALENDAR_CAPTIONS = {
   "views_by_weekday_month.png": "Дни недели и месяцы — стек по годам просмотра",
   "views_by_year.png": "Просмотры по годам",
@@ -182,6 +193,16 @@ export function buildCalendarReportHtml(summary) {
     "<b>Letterboxd</b>",
     `Дневник: <b>${escapeHtml(entries)}</b> записей · <b>${escapeHtml(films)}</b> фильмов · ${escapeHtml(years)}`,
   ];
+  if (s.date_from && s.date_to) {
+    lines.push(
+      `Период: <b>${escapeHtml(String(s.date_from))}</b> — <b>${escapeHtml(String(s.date_to))}</b>`,
+    );
+    lines.push(
+      s.include_undated
+        ? "Без даты в дневнике: в каталоге, не в календаре."
+        : "Только дневник с датой внутри периода.",
+    );
+  }
 
   // Peak calendar day first (diary Watched Date row count).
   if (s.peak_day_label && s.peak_day_count != null) {
@@ -276,6 +297,9 @@ export function mapScriptError(stderr, stdout, status) {
   }
   if (/BadZipFile|не похож на ZIP/i.test(text)) {
     return "Файл не похож на ZIP Letterboxd.";
+  }
+  if (/выбранном диапазоне нет записей/i.test(text)) {
+    return "В выбранном диапазоне нет записей дневника с датой просмотра.";
   }
   if (/401|unauthorized|invalid api/i.test(text)) {
     return "TMDB отклонил токен. Проверьте TMDB_BEARER_TOKEN (не печатайте его в чат).";
@@ -546,7 +570,7 @@ export async function main() {
 
   const diarySummary = readJsonFile(join(workdir, "diary_summary.json"));
   await sendTelegramHtml(token, chatId, buildCalendarReportHtml(diarySummary || {}));
-  await sendCaptionedPhotos(token, chatId, workdir, calendarPngs, CALENDAR_CAPTIONS);
+  await sendCaptionedPhotos(token, chatId, workdir, calendarPngs, calendarCaptions(diarySummary || {}));
   await sendTelegramText(token, chatId, calendarReadyText());
 
   // 2) Slow TMDB genre enrichment — script edits one progress message, then genre report + PNGs.

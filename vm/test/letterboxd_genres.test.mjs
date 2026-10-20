@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  advanceLetterboxdWizard,
   buildLetterboxdDispatch,
   decodeAwaitLetterboxd,
   encodeAwaitLetterboxd,
   isZipDocument,
   normalizeTelegramFileId,
   parseLetterboxdCommand,
+  parseWatchBound,
+  parseWatchInterval,
 } from "../letterboxd_genres.js";
 import {
   buildCalendarReportHtml,
   buildGenreReportHtml,
   buildGenreReportMessages,
+  calendarCaptions,
   calendarReadyText,
   escapeHtml,
   formatTelegramError,
@@ -33,10 +37,58 @@ test("parseLetterboxdCommand", () => {
 
 test("await letterboxd encode/decode", () => {
   const raw = encodeAwaitLetterboxd({ since: "2026-10-17T00:00:00.000Z" });
-  assert.deepEqual(decodeAwaitLetterboxd(raw), { kind: "letterboxd", since: "2026-10-17T00:00:00.000Z" });
-  assert.deepEqual(decodeAwaitLetterboxd('{"kind":"genres","since":"x"}'), { kind: "letterboxd", since: "x" });
+  const decoded = decodeAwaitLetterboxd(raw);
+  assert.equal(decoded.kind, "letterboxd");
+  assert.equal(decoded.since, "2026-10-17T00:00:00.000Z");
+  assert.equal(decoded.step, "zip");
+  assert.equal(decodeAwaitLetterboxd('{"kind":"genres","since":"x"}').step, "zip");
   assert.equal(decodeAwaitLetterboxd(""), null);
   assert.equal(decodeAwaitLetterboxd('{"step":"name"}'), null);
+});
+
+test("watch bounds are month-before-year; one value is the whole interval", () => {
+  assert.equal(parseWatchBound("2012", "start"), "2012-01-01");
+  assert.equal(parseWatchBound("2012", "end"), "2012-12-31");
+  assert.equal(parseWatchBound("06-2012", "start"), "2012-06-01");
+  assert.equal(parseWatchBound("06-2012", "end"), "2012-06-30");
+  assert.equal(parseWatchBound("06.2012", "end"), "2012-06-30");
+  assert.equal(parseWatchBound("15-06-2012", "start"), "2012-06-15");
+  assert.equal(parseWatchBound("15.06.2012", "end"), "2012-06-15");
+  assert.equal(parseWatchBound("2012-06", "start"), "");
+  assert.equal(parseWatchBound("2012-06-15", "start"), "");
+  assert.deepEqual(parseWatchInterval("2012"), { dateFrom: "2012-01-01", dateTo: "2012-12-31" });
+  assert.deepEqual(parseWatchInterval("06-2012"), { dateFrom: "2012-06-01", dateTo: "2012-06-30" });
+  assert.deepEqual(parseWatchInterval("15-06-2012"), { dateFrom: "2012-06-15", dateTo: "2012-06-15" });
+  assert.deepEqual(parseWatchInterval("2018 2020"), { dateFrom: "2018-01-01", dateTo: "2020-12-31" });
+  assert.deepEqual(parseWatchInterval("01-2019 06-2019"), { dateFrom: "2019-01-01", dateTo: "2019-06-30" });
+  assert.deepEqual(parseWatchInterval("15-01-2019-31-03-2019"), {
+    dateFrom: "2019-01-15",
+    dateTo: "2019-03-31",
+  });
+  assert.deepEqual(parseWatchInterval("15.01.2019-31.03.2019"), {
+    dateFrom: "2019-01-15",
+    dateTo: "2019-03-31",
+  });
+  assert.deepEqual(parseWatchInterval("06.2012"), { dateFrom: "2012-06-01", dateTo: "2012-06-30" });
+  assert.deepEqual(parseWatchInterval("март 2012"), { dateFrom: "2012-03-01", dateTo: "2012-03-31" });
+  assert.equal(parseWatchInterval("2012-06"), null);
+  assert.equal(parseWatchInterval("2012-06-15"), null);
+});
+
+test("one typed period skips the second bound and asks about undated films", () => {
+  const state = { step: "range_start", fileId: "BQACAgIAAxkBAAI1234567890", topN: 20, minRated: 3, includeUSA: true, includeEnglish: true };
+  const next = advanceLetterboxdWizard(state, { kind: "text", text: "2019" });
+  assert.equal(next.state.step, "undated");
+  assert.equal(next.state.dateFrom, "2019-01-01");
+  assert.equal(next.state.dateTo, "2019-12-31");
+  assert.equal(next.dispatch, undefined);
+  const bad = advanceLetterboxdWizard(state, { kind: "text", text: "2012-06" });
+  assert.equal(bad.state.step, "range_start");
+  assert.equal(bad.dispatch, undefined);
+  assert.match(bad.messages[0].text, /06-2012/);
+  const backwards = advanceLetterboxdWizard(state, { kind: "text", text: "2020 2018" });
+  assert.equal(backwards.state.step, "range_start");
+  assert.equal(backwards.dispatch, undefined);
 });
 
 test("isZipDocument and file_id", () => {
@@ -62,13 +114,41 @@ test("buildLetterboxdDispatch", () => {
   );
   assert.deepEqual(built.body, {
     ref: "main",
-    inputs: { job_id: "lb-1", chat_id: "7", file_id: "BQACAgIAAxkBAAI1234567890" },
+    inputs: {
+      job_id: "lb-1",
+      chat_id: "7",
+      file_id: "BQACAgIAAxkBAAI1234567890",
+      top_n: "20",
+      min_rated: "3",
+      include_usa: "true",
+      include_english: "true",
+      date_from: "",
+      date_to: "",
+      include_undated: "false",
+    },
   });
 });
 
 test("mapScriptError covers diary and bearer", () => {
   assert.match(mapScriptError("Не задан TMDB_BEARER_TOKEN", "", 2), /TMDB_BEARER_TOKEN/);
   assert.match(mapScriptError("В ZIP не найден diary.csv", "", 1), /diary\.csv/);
+  assert.match(
+    mapScriptError("В выбранном диапазоне нет записей дневника с датой просмотра.", "", 2),
+    /выбранном диапазоне/,
+  );
+});
+
+test("calendar captions name the watch-time grain", () => {
+  const days = calendarCaptions({ watch_time_grain: "day" });
+  assert.equal(days["views_by_year.png"], "Просмотры по дням");
+  assert.equal(days["average_rating_by_year.png"], "Средняя оценка по дням");
+  assert.equal(days["viewing_pace.png"], "Темп просмотров по дням");
+  const months = calendarCaptions({ watch_time_grain: "month" });
+  assert.equal(months["views_by_year.png"], "Просмотры по месяцам");
+  assert.equal(months["viewing_pace.png"], "Темп просмотров по месяцам");
+  const years = calendarCaptions({});
+  assert.equal(years["views_by_year.png"], "Просмотры по годам");
+  assert.equal(years["viewing_pace.png"], "Темп просмотров по месяцам");
 });
 
 test("formatTelegramError expands cause chain", () => {

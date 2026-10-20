@@ -2879,7 +2879,7 @@ test("/letterboxd is runnable by users, hidden from user menu, waits for ZIP, /s
 
   sent.length = 0;
   await handle(telegramRequest(7, "/stop"), env, { sendMessage });
-  assert.match(sent[0].text, /ожидание ZIP Letterboxd сброшено/);
+  assert.match(sent[0].text, /ожидание Letterboxd сброшено/);
   assert.equal(env.BOT_KV.store.get("await:letterboxd:7"), undefined);
 });
 
@@ -2924,8 +2924,12 @@ test("/letterboxd ZIP dispatches letterboxd.yml for any chat", async () => {
     env,
     { sendMessage, fetch },
   );
-  assert.match(sent.map((row) => row.text).join("\n"), /ZIP принят/);
-  assert.equal(env.BOT_KV.store.get("await:letterboxd:111"), undefined);
+  assert.match(sent.map((row) => row.text).join("\n"), /Настроить вывод или по умолчанию/);
+  assert.ok(env.BOT_KV.store.get("await:letterboxd:111"));
+  assert.equal(calls.find((call) => String(call.url).includes("letterboxd.yml/dispatches")), undefined);
+
+  sent.length = 0;
+  await handle(telegramRequest(111, "по умолчанию"), env, { sendMessage, fetch });
   const dispatch = calls.find((call) => String(call.url).includes("letterboxd.yml/dispatches"));
   assert.ok(dispatch);
   assert.equal(dispatch.body.inputs.chat_id, "111");

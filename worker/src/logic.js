@@ -325,7 +325,7 @@ export const NEED_CREATE =
   "Сначала /create. Спрошу название, затем стикер из набора или ссылки t.me/addstickers/…. /done ставит в очередь.\n\nПодробнее — /format.";
 
 const STOP_CLEARED_HEAD = "Ввод прерван, незаконченный /create сброшен.";
-const STOP_LETTERBOXD_CLEARED_HEAD = "Ввод прерван, ожидание ZIP Letterboxd сброшено.";
+const STOP_LETTERBOXD_CLEARED_HEAD = "Ввод прерван, ожидание Letterboxd сброшено.";
 const STOP_IDLE_HEAD = "Линия свободна: сейчас нечего прерывать.";
 
 export const AWAIT_CREATE_PREFIX = "await:";

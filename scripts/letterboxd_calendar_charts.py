@@ -40,6 +40,7 @@ from letterboxd_export import (  # noqa: E402
     load_export,
     ratings_for_catalog,
 )
+from letterboxd_options import read_chart_options  # noqa: E402
 from letterboxd_palette import (  # noqa: E402
     FG,
     GRID,
@@ -90,11 +91,31 @@ def format_ru_calendar_date(ts) -> str:
     return f"{day} {month} {year}"
 
 
+def release_year_avg_lookup(rated_rows: pd.DataFrame | None) -> dict[str, tuple]:
+    """Year string → (mean, unique rated films), including years under the gate."""
+    if rated_rows is None or rated_rows.empty or "Year" not in rated_rows.columns:
+        return {}
+    work = rated_rows[rated_rows["Year"].notna() & rated_rows["Rating"].notna()].copy()
+    if work.empty:
+        return {}
+    work["release_year"] = work["Year"].astype(int)
+    grouped = work.groupby("release_year")["Rating"].agg(avg="mean", rated="count")
+    out: dict[str, tuple] = {}
+    for year, row in grouped.iterrows():
+        rated_n = int(row["rated"])
+        avg = round(float(row["avg"]), 2) if rated_n else None
+        out[str(int(year))] = (avg, rated_n)
+    return out
+
+
 def build_diary_summary(
     diary: pd.DataFrame,
     catalog: pd.DataFrame | None = None,
     watched_only: pd.DataFrame | None = None,
     film_ratings: pd.DataFrame | None = None,
+    *,
+    top_n: int = TOP_N_DEFAULT,
+    min_rated: int = MIN_RATED_FOR_TOP,
 ) -> dict:
     """Compact stats for the Telegram HTML report (no TMDB).
 
@@ -207,7 +228,7 @@ def build_diary_summary(
             )
             for year, row in rated_by_year.iterrows():
                 rated_n = int(row["rated"])
-                if not passes_rated_threshold(rated_n):
+                if not passes_rated_threshold(rated_n, min_rated=min_rated):
                     continue
                 top_rated_release_years.append(
                     {
@@ -219,20 +240,20 @@ def build_diary_summary(
                 )
             top_rated_release_years.sort(key=lambda r: (-r["avg"], -r["rated"], -r["year"]))
             # Anti-rating only when a full top-M of qualifying years exists.
-            if len(top_rated_release_years) >= TOP_N_DEFAULT:
+            if len(top_rated_release_years) >= top_n:
                 worst_rated_release_years = sorted(
                     top_rated_release_years,
                     key=lambda r: (r["avg"], -r["rated"], r["year"]),
-                )[:TOP_N_DEFAULT]
+                )[:top_n]
             else:
                 worst_rated_release_years = []
-            top_rated_release_years = top_rated_release_years[:TOP_N_DEFAULT]
+            top_rated_release_years = top_rated_release_years[:top_n]
         else:
             worst_rated_release_years = []
 
         # Counts: every diary row + one per watched-only film (no fake dates).
         watch_by_release = with_release.groupby("release_year").size().sort_values(ascending=False)
-        for year, count in watch_by_release.head(TOP_N_DEFAULT).items():
+        for year, count in watch_by_release.head(top_n).items():
             top_release_years_by_count.append({"year": int(year), "count": int(count)})
     else:
         worst_rated_release_years = []
@@ -262,7 +283,8 @@ def build_diary_summary(
         "top_rated_release_years": top_rated_release_years,
         "worst_rated_release_years": worst_rated_release_years,
         "top_release_years_by_count": top_release_years_by_count,
-        "min_rated_for_top": MIN_RATED_FOR_TOP,
+        "min_rated_for_top": int(min_rated),
+        "top_n": int(top_n),
     }
 
 
@@ -342,37 +364,140 @@ def chart_weekday_month(df: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
-def chart_views_by_year(df: pd.DataFrame, path: Path) -> None:
-    years = df["Watched Date"].dt.year.dropna().astype(int)
-    counts = years.value_counts().sort_index()
-    labels = counts.index.tolist()
-    values = counts.values.astype(int)
-    colors = year_colors(labels, palette_years=labels)
-    bar_colors = [colors.get(y, "#4C78A8") for y in labels]
+# Watch-time axis: short spans must not collapse into one or two year bars.
+# ≤45 inclusive days → days; ≤18 inclusive calendar months → months; else years.
+WATCH_GRAIN_DAY_MAX = 45
+WATCH_GRAIN_MONTH_MAX = 18
+GRAIN_PHRASE = {"day": "по дням", "month": "по месяцам", "year": "по годам"}
+GRAIN_XLABEL = {
+    "day": "День просмотра",
+    "month": "Месяц просмотра",
+    "year": "Год просмотра",
+}
 
-    fig, ax = plt.subplots(figsize=(12, 6))
-    x = np.arange(len(labels))
+
+def watch_time_grain(start, end) -> str:
+    """Grain for charts whose x-axis is watch time."""
+    if start is None or end is None or pd.isna(start) or pd.isna(end):
+        return "year"
+    start_ts = pd.Timestamp(start).normalize()
+    end_ts = pd.Timestamp(end).normalize()
+    if end_ts < start_ts:
+        start_ts, end_ts = end_ts, start_ts
+    days = int((end_ts - start_ts).days) + 1
+    months = (end_ts.year - start_ts.year) * 12 + (end_ts.month - start_ts.month) + 1
+    if days <= WATCH_GRAIN_DAY_MAX:
+        return "day"
+    if months <= WATCH_GRAIN_MONTH_MAX:
+        return "month"
+    return "year"
+
+
+def resolve_watch_bounds(df: pd.DataFrame, date_from: str | None = None, date_to: str | None = None):
+    """Custom window if set; otherwise first→last Watched Date in the frame."""
+    if date_from and date_to:
+        return pd.Timestamp(date_from), pd.Timestamp(date_to)
+    if df is None or df.empty or "Watched Date" not in df.columns:
+        return None, None
+    dates = df["Watched Date"].dropna()
+    if dates.empty:
+        return None, None
+    return pd.Timestamp(dates.min()), pd.Timestamp(dates.max())
+
+
+def _grain_tick_labels(index, grain: str) -> list[str]:
+    labels = []
+    multi_year = False
+    if grain == "day" and len(index):
+        years = {pd.Timestamp(v).year for v in index}
+        multi_year = len(years) > 1
+    for value in index:
+        if grain == "year":
+            labels.append(str(int(value)))
+        elif grain == "month":
+            per = value if isinstance(value, pd.Period) else pd.Period(value, freq="M")
+            labels.append(f"{MONTHS[int(per.month) - 1]} {per.year}")
+        else:
+            ts = pd.Timestamp(value)
+            if multi_year:
+                labels.append(f"{ts.day:02d}.{ts.month:02d}.{str(ts.year)[2:]}")
+            else:
+                labels.append(f"{ts.day} {MONTHS[ts.month - 1]}")
+    return labels
+
+
+def _watch_count_series(dates: pd.Series, grain: str, start, end) -> pd.Series:
+    if grain == "day":
+        idx = pd.date_range(pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize(), freq="D")
+        counts = dates.dt.normalize().value_counts()
+        return counts.reindex(idx, fill_value=0).astype(int)
+    if grain == "month":
+        counts = dates.dt.to_period("M").value_counts()
+        full = pd.period_range(pd.Timestamp(start).to_period("M"), pd.Timestamp(end).to_period("M"), freq="M")
+        return counts.reindex(full, fill_value=0).astype(int)
+    years = dates.dt.year.dropna().astype(int)
+    return years.value_counts().sort_index()
+
+
+def chart_views_by_year(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    grain: str = "year",
+    span_start=None,
+    span_end=None,
+) -> None:
+    dates = df["Watched Date"].dropna()
+    if dates.empty:
+        return
+    if span_start is None or span_end is None:
+        span_start, span_end = dates.min(), dates.max()
+    counts = _watch_count_series(dates, grain, span_start, span_end)
+    labels = _grain_tick_labels(counts.index, grain)
+    values = counts.values.astype(int)
+    color_years = []
+    for value in counts.index:
+        if grain == "year":
+            color_years.append(int(value))
+        elif grain == "month":
+            per = value if isinstance(value, pd.Period) else pd.Period(value, freq="M")
+            color_years.append(int(per.year))
+        else:
+            color_years.append(int(pd.Timestamp(value).year))
+    colors = year_colors(sorted(set(color_years)), palette_years=sorted(set(color_years)))
+    bar_colors = [colors.get(y, "#4C78A8") for y in color_years]
+    phrase = GRAIN_PHRASE.get(grain, "по годам")
+
+    n = len(labels)
+    fig_w = 12 if grain == "year" else max(10.0, min(16.0, n * 0.28))
+    fig, ax = plt.subplots(figsize=(fig_w, 6))
+    x = np.arange(n)
     bars = ax.bar(x, values, color=bar_colors, width=0.8)
-    ax.set_title("Количество просмотров фильмов по годам")
-    ax.set_xlabel("Год просмотра")
+    ax.set_title(f"Количество просмотров фильмов {phrase}")
+    ax.set_xlabel(GRAIN_XLABEL.get(grain, "Год просмотра"))
     ax.set_ylabel("Количество записей о просмотрах")
-    ax.set_xticks(x)
-    ax.set_xticklabels([str(y) for y in labels], rotation=45, ha="right")
+    step = 1 if n <= 16 else max(1, n // 14)
+    tick_idx = list(range(0, n, step))
+    if tick_idx and tick_idx[-1] != n - 1:
+        tick_idx.append(n - 1)
+    ax.set_xticks(tick_idx or x)
+    ax.set_xticklabels([labels[i] for i in tick_idx] if tick_idx else labels, rotation=45, ha="right")
     ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
     ymax = max(values) if len(values) else 1
     ax.set_ylim(0, ymax * 1.12)
-    for bar, value in zip(bars, values):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + ymax * 0.015,
-            str(int(value)),
-            ha="center",
-            va="bottom",
-            fontsize=8,
-            color=FG,
-        )
+    if n <= 18:
+        for bar, value in zip(bars, values):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + ymax * 0.015,
+                str(int(value)),
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color=FG,
+            )
     fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
@@ -512,16 +637,17 @@ def _chart_average_rating_line(
     ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
-    for xi, value, count in zip(x, values, counts):
-        ax.text(
-            xi,
-            value + 0.12,
-            f"{value:.2f}\n(n={count})",
-            ha="center",
-            va="bottom",
-            fontsize=7,
-            color=FG,
-        )
+    if len(labels) <= 18:
+        for xi, value, count in zip(x, values, counts):
+            ax.text(
+                xi,
+                value + 0.12,
+                f"{value:.2f}\n(n={count})",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                color=FG,
+            )
     add_rating_colorbar(fig, ax)
     fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)
@@ -529,11 +655,27 @@ def _chart_average_rating_line(
     return True
 
 
-def viewing_pace_stats(df: pd.DataFrame) -> dict:
-    """Diary watch pace from Watched Date: monthly counts + overall films/month.
+def _pace_bounds(dates: pd.Series, span_start, span_end):
+    if span_start is not None and span_end is not None:
+        start = pd.Timestamp(span_start).normalize()
+        end = pd.Timestamp(span_end).normalize()
+        if end < start:
+            start, end = end, start
+        return start, end
+    return dates.min().normalize(), dates.max().normalize()
 
-    films_per_month = diary rows / inclusive calendar months from first→last watch.
-    Empty months in the span count as 0 on the chart (pace dips show).
+
+def viewing_pace_stats(
+    df: pd.DataFrame,
+    grain: str = "month",
+    span_start=None,
+    span_end=None,
+) -> dict:
+    """Diary watch pace from Watched Date.
+
+    Default bounds are first→last watch. A custom window passes span_start/span_end
+    so empty days or months inside that window stay on the chart as zeros.
+    films_per_month = diary rows / inclusive calendar months of that span.
     """
     out: dict = {
         "films_per_month": None,
@@ -546,39 +688,75 @@ def viewing_pace_stats(df: pd.DataFrame) -> dict:
     dates = df["Watched Date"].dropna()
     if dates.empty:
         return out
+    total = int(len(dates))
+    start, end = _pace_bounds(dates, span_start, span_end)
+    if grain == "day":
+        idx = pd.date_range(start, end, freq="D")
+        series = dates.dt.normalize().value_counts().reindex(idx, fill_value=0).astype(int)
+        span = int(len(series))
+        out["span_days"] = span
+        out["periods"] = [pd.Timestamp(p).strftime("%Y-%m-%d") for p in series.index]
+        out["counts"] = [int(v) for v in series.tolist()]
+        out["grain"] = "day"
+        if span > 0:
+            out["films_per_day"] = round(total / span, 2)
+        month_span = int(len(pd.period_range(start.to_period("M"), end.to_period("M"), freq="M")))
+        out["span_months"] = month_span
+        if month_span > 0:
+            out["films_per_month"] = round(total / month_span, 1)
+        return out
+
     periods = dates.dt.to_period("M")
     counts = periods.value_counts().sort_index()
-    if counts.empty:
+    if counts.empty and span_start is None:
         return out
-    full = pd.period_range(counts.index.min(), counts.index.max(), freq="M")
+    full = pd.period_range(start.to_period("M"), end.to_period("M"), freq="M")
     series = counts.reindex(full, fill_value=0).astype(int)
     span = int(len(series))
-    total = int(len(dates))
     out["span_months"] = span
     out["periods"] = [str(p) for p in series.index.tolist()]
     out["counts"] = [int(v) for v in series.tolist()]
+    out["grain"] = "month"
     if span > 0:
         out["films_per_month"] = round(total / span, 1)
     return out
 
 
-def chart_viewing_pace(df: pd.DataFrame, path: Path) -> bool:
-    """Line: diary watches per calendar month; dashed mean pace.
+def chart_viewing_pace(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    grain: str = "month",
+    span_start=None,
+    span_end=None,
+) -> bool:
+    """Line of diary watches. Daily when the watch span is ≤45 days; otherwise months.
 
-    Title: «Темп просмотров — фильмов в месяц».
+    Long diaries stay monthly — this chart was never a yearly bar chart.
+    span_start/span_end fill zero buckets across a custom window.
     """
-    stats = viewing_pace_stats(df)
+    pace_grain = "day" if grain == "day" else "month"
+    stats = viewing_pace_stats(df, grain=pace_grain, span_start=span_start, span_end=span_end)
     periods = stats.get("periods") or []
     counts = stats.get("counts") or []
-    avg = stats.get("films_per_month")
+    avg = stats.get("films_per_day") if pace_grain == "day" else stats.get("films_per_month")
     if len(periods) < 2:
         return False
 
-    # Tick labels: short month + year; thin out when many months.
+    # Tick labels: day or short month + year; thin out when many buckets.
     labels = []
-    for p in periods:
-        per = pd.Period(p, freq="M")
-        labels.append(f"{MONTHS[int(per.month) - 1]} {per.year}")
+    if pace_grain == "day":
+        stamps = [pd.Timestamp(p) for p in periods]
+        multi_year = len({ts.year for ts in stamps}) > 1
+        for ts in stamps:
+            if multi_year:
+                labels.append(f"{ts.day:02d}.{ts.month:02d}.{str(ts.year)[2:]}")
+            else:
+                labels.append(f"{ts.day} {MONTHS[ts.month - 1]}")
+    else:
+        for p in periods:
+            per = pd.Period(p, freq="M")
+            labels.append(f"{MONTHS[int(per.month) - 1]} {per.year}")
     n = len(labels)
     step = max(1, n // 14)
     tick_idx = list(range(0, n, step))
@@ -614,15 +792,20 @@ def chart_viewing_pace(df: pd.DataFrame, path: Path) -> bool:
             linestyle="--",
             linewidth=1.4,
             zorder=2,
-            label=f"среднее {avg:.1f}/мес",
+            label=(f"среднее {avg:.1f}/день" if pace_grain == "day" else f"среднее {avg:.1f}/мес"),
         )
         leg = ax.legend(loc="upper right", frameon=False, labelcolor=FG, fontsize=10)
         if leg is not None:
             for text in leg.get_texts():
                 text.set_color(FG)
-    ax.set_title("Темп просмотров — фильмов в месяц")
-    ax.set_xlabel("Месяц просмотра")
-    ax.set_ylabel("Фильмов за месяц")
+    if pace_grain == "day":
+        ax.set_title("Темп просмотров по дням")
+        ax.set_xlabel("День просмотра")
+        ax.set_ylabel("Фильмов за день")
+    else:
+        ax.set_title("Темп просмотров по месяцам")
+        ax.set_xlabel("Месяц просмотра")
+        ax.set_ylabel("Фильмов за месяц")
     ax.set_xticks(tick_idx)
     ax.set_xticklabels([labels[i] for i in tick_idx], rotation=45, ha="right")
     ymax = max(counts) if counts else 1
@@ -636,11 +819,11 @@ def chart_viewing_pace(df: pd.DataFrame, path: Path) -> bool:
     return True
 
 
-def diary_rating_means_by_watch_year(df: pd.DataFrame) -> pd.DataFrame:
-    """Mean Rating per watch year from **each** rated diary row (no film collapse).
+def diary_rating_means_by_watch_year(df: pd.DataFrame, grain: str = "year") -> pd.DataFrame:
+    """Mean Rating per watch bucket from **each** rated diary row (no film collapse).
 
-    Rewatches with ratings in different years contribute to those years.
-    Does not use ratings.csv / latest-per-film merge.
+    Rewatches with ratings in different buckets contribute to those buckets.
+    Does not use ratings.csv / latest-per-film merge. Default grain is year.
     """
     empty = pd.DataFrame(columns=["mean", "count"])
     if df is None or df.empty or "Rating" not in df.columns or "Watched Date" not in df.columns:
@@ -652,8 +835,13 @@ def diary_rating_means_by_watch_year(df: pd.DataFrame) -> pd.DataFrame:
     work = work[work["Rating"].notna() & (work["Rating"] > 0)].copy()
     if work.empty:
         return empty
-    work["watch_year"] = work["Watched Date"].dt.year.astype(int)
-    grouped = work.groupby("watch_year")["Rating"].agg(["mean", "count"]).sort_index()
+    if grain == "day":
+        work["bucket"] = work["Watched Date"].dt.normalize()
+    elif grain == "month":
+        work["bucket"] = work["Watched Date"].dt.to_period("M")
+    else:
+        work["bucket"] = work["Watched Date"].dt.year.astype(int)
+    grouped = work.groupby("bucket")["Rating"].agg(["mean", "count"]).sort_index()
     return grouped[grouped["count"] >= 1]
 
 
@@ -661,28 +849,31 @@ def chart_average_rating_by_year(
     df: pd.DataFrame,
     path: Path,
     film_ratings: pd.DataFrame | None = None,
+    *,
+    grain: str = "year",
 ) -> bool:
-    """Mean diary Rating per watch year — each rated diary row in its Watched Date year.
+    """Mean diary Rating per watch bucket — each rated diary row in its Watched Date bucket.
 
     Exception to the usual latest-rating-per-film rule: rewatches contribute to
-    the year they were watched (not collapsed to one film score). ``film_ratings``
+    the bucket they were watched (not collapsed to one film score). ``film_ratings``
     / ratings.csv are ignored here (kept as a no-op kwarg for call-site compat).
     """
     del film_ratings  # intentional: do not collapse to latest film rating
-    grouped = diary_rating_means_by_watch_year(df)
+    grouped = diary_rating_means_by_watch_year(df, grain=grain)
     if grouped.empty:
         return False
 
-    labels = grouped.index.tolist()
+    labels = _grain_tick_labels(grouped.index, grain)
     values = grouped["mean"].astype(float).tolist()
     counts = grouped["count"].astype(int).tolist()
+    phrase = GRAIN_PHRASE.get(grain, "по годам")
     return _chart_average_rating_line(
         labels,
         values,
         counts,
         path,
-        title="Средняя оценка по годам просмотра",
-        xlabel="Год просмотра",
+        title=f"Средняя оценка {phrase}",
+        xlabel=GRAIN_XLABEL.get(grain, "Год просмотра"),
     )
 
 
@@ -805,14 +996,34 @@ def main(argv: list[str] | None = None) -> int:
         print("Usage: python letterboxd_calendar_charts.py path/to/letterboxd-export.zip")
         return 2
     zip_path = Path(args[0])
+    opts = read_chart_options()
     try:
-        diary, catalog, watched_only, film_ratings = load_export(zip_path)
+        diary, catalog, watched_only, film_ratings = load_export(
+            zip_path,
+            date_from=opts.date_from,
+            date_to=opts.date_to,
+            include_undated=opts.include_undated,
+        )
+        if opts.has_window and diary.empty:
+            print(
+                "В выбранном диапазоне нет записей дневника с датой просмотра.",
+                file=sys.stderr,
+            )
+            return 2
         # Date-sensitive charts: diary only (need Watched Date).
+        span_start, span_end = resolve_watch_bounds(diary, opts.date_from, opts.date_to)
+        grain = watch_time_grain(span_start, span_end)
         chart_weekday_month(diary, Path("views_by_weekday_month.png"))
-        chart_views_by_year(diary, Path("views_by_year.png"))
+        chart_views_by_year(
+            diary,
+            Path("views_by_year.png"),
+            grain=grain,
+            span_start=span_start,
+            span_end=span_end,
+        )
         chart_decade_rating(diary, Path("extra_stats_decade_rating.png"))
         made_rating = chart_average_rating_by_year(
-            diary, Path("average_rating_by_year.png"), film_ratings=film_ratings
+            diary, Path("average_rating_by_year.png"), film_ratings=film_ratings, grain=grain
         )
         made_decade_avg = chart_average_rating_by_release_decade(
             diary,
@@ -822,22 +1033,46 @@ def main(argv: list[str] | None = None) -> int:
             catalog=catalog,
         )
         # Monthly pace (not a rescaled views_by_year) — dips/gaps between months.
-        made_pace = chart_viewing_pace(diary, Path("viewing_pace.png"))
-        made_rewatch = chart_top_rewatches(diary, Path("top_rewatches.png"))
-        summary = build_diary_summary(
-            diary, catalog=catalog, watched_only=watched_only, film_ratings=film_ratings
+        made_pace = chart_viewing_pace(
+            diary,
+            Path("viewing_pace.png"),
+            grain=grain,
+            span_start=span_start,
+            span_end=span_end,
         )
+        made_rewatch = chart_top_rewatches(diary, Path("top_rewatches.png"), limit=opts.top_n)
+        summary = build_diary_summary(
+            diary,
+            catalog=catalog,
+            watched_only=watched_only,
+            film_ratings=film_ratings,
+            top_n=opts.top_n,
+            min_rated=opts.min_rated,
+        )
+        summary["date_from"] = opts.date_from or ""
+        summary["date_to"] = opts.date_to or ""
+        summary["include_undated"] = bool(opts.include_undated and opts.has_window)
+        summary["watch_time_grain"] = grain
+        year_avgs = release_year_avg_lookup(ratings_for_catalog(catalog, film_ratings))
         made_release_count = chart_release_years_by_count(
-            diary, Path("watches_by_release_year.png")
+            diary,
+            Path("watches_by_release_year.png"),
+            top_n=opts.top_n,
+            avg_by_name=year_avgs,
+            min_rated=opts.min_rated,
         )
         made_release_rating = chart_release_years_by_rating(
             summary.get("top_rated_release_years") or [],
             Path("average_rating_by_release_year.png"),
+            limit=opts.top_n,
+            min_rated=opts.min_rated,
         )
         made_release_worst = chart_release_years_by_rating(
             summary.get("worst_rated_release_years") or [],
             Path("worst_average_rating_by_release_year.png"),
+            limit=opts.top_n,
             ascending=True,
+            min_rated=opts.min_rated,
         )
         summary["charts"] = {
             "average_rating_by_year": bool(made_rating),

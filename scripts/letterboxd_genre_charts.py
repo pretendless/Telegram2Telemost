@@ -41,6 +41,12 @@ from letterboxd_export import (  # noqa: E402
     load_export,
     ratings_for_catalog,
 )
+from letterboxd_options import (  # noqa: E402
+    is_english_language,
+    is_usa_country,
+    rated_gate_phrase,
+    read_chart_options,
+)
 from letterboxd_palette import (  # noqa: E402
     FG,
     apply_dark_chart_theme,
@@ -418,11 +424,27 @@ def _qualifying_rated_n(stats, min_rated=MIN_RATED_FOR_TOP) -> int:
     return n
 
 
-def _paired_ranks(stats, min_count, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT):
-    """Count top + best rating top + worst rating top (rated ≥ MIN_RATED_FOR_TOP).
+def _rating_lookup(stats) -> dict:
+    """name → (mean, unique rated films), including entities under the gate."""
+    out = {}
+    for name, st in stats.items():
+        rated = int(st.get("rated") or 0)
+        avg = round(float(st["rating_sum"]) / rated, 2) if rated else None
+        out[name] = (avg, rated)
+    return out
+
+
+def _paired_ranks(
+    stats,
+    min_count,
+    limit_count=TOP_N_DEFAULT,
+    limit_rating=TOP_N_DEFAULT,
+    min_rated=MIN_RATED_FOR_TOP,
+):
+    """Count top + best rating top + worst rating top (rated ≥ min_rated).
 
     Anti-rating («ниже оценка») is omitted unless ≥ limit_rating entities qualify —
-    no short worst lists (M ≈ TOP_N_DEFAULT).
+    no short worst lists (M ≈ top size).
     """
     by_count = _rank_named(stats, min_count=min_count, limit=limit_count, by_avg=False)
     by_rating = _rank_named(
@@ -430,17 +452,17 @@ def _paired_ranks(stats, min_count, limit_count=TOP_N_DEFAULT, limit_rating=TOP_
         min_count=1,
         limit=limit_rating,
         by_avg=True,
-        min_rated=MIN_RATED_FOR_TOP,
+        min_rated=min_rated,
         ascending=False,
     )
     by_rating_worst: list = []
-    if _qualifying_rated_n(stats) >= limit_rating:
+    if _qualifying_rated_n(stats, min_rated=min_rated) >= limit_rating:
         by_rating_worst = _rank_named(
             stats,
             min_count=1,
             limit=limit_rating,
             by_avg=True,
-            min_rated=MIN_RATED_FOR_TOP,
+            min_rated=min_rated,
             ascending=True,
         )
     return by_count, by_rating, by_rating_worst
@@ -450,7 +472,18 @@ def _cache_key(row):
     return f"{row['Name']}|||{int(row['Year']) if pd.notna(row['Year']) else ''}"
 
 
-def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watched_only=None):
+def aggregate_person_stats(
+    catalog,
+    cache,
+    film_ratings=None,
+    diary=None,
+    watched_only=None,
+    *,
+    top_n=TOP_N_DEFAULT,
+    min_rated=MIN_RATED_FOR_TOP,
+    include_usa=True,
+    include_english=True,
+):
     """Catalog counts (diary∪watched); avgs from ratings.csv ∪ diary joined to catalog."""
     countries = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
     directors = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
@@ -480,7 +513,8 @@ def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watche
 
     def apply_meta(buckets_fn, row, meta):
         for c in meta.get("countries") or []:
-            buckets_fn(countries, c, row)
+            if include_usa or not is_usa_country(c):
+                buckets_fn(countries, c, row)
         for d in meta.get("directors") or []:
             buckets_fn(directors, d, row)
         for a in meta.get("cast") or []:
@@ -488,7 +522,7 @@ def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watche
         for co in meta.get("companies") or []:
             buckets_fn(companies, co, row)
         lang = (meta.get("original_language") or "").strip()
-        if lang:
+        if lang and (include_english or not is_english_language(lang)):
             buckets_fn(languages, lang, row)
 
     # Counts: diary viewings + watched-only films (catalog).
@@ -515,28 +549,31 @@ def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watche
         apply_meta(rating_only, row, meta)
 
     countries_c, countries_r, countries_w = _paired_ranks(
-        countries, min_count=1, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT
+        countries, min_count=1, limit_count=top_n, limit_rating=top_n, min_rated=min_rated
     )
     directors_c, directors_r, directors_w = _paired_ranks(
         directors,
         min_count=MIN_PERSON_COUNT,
-        limit_count=TOP_N_DEFAULT,
-        limit_rating=TOP_N_DEFAULT,
+        limit_count=top_n,
+        limit_rating=top_n,
+        min_rated=min_rated,
     )
     actors_c, actors_r, actors_w = _paired_ranks(
         actors,
         min_count=MIN_PERSON_COUNT,
-        limit_count=TOP_N_DEFAULT,
-        limit_rating=TOP_N_DEFAULT,
+        limit_count=top_n,
+        limit_rating=top_n,
+        min_rated=min_rated,
     )
     languages_c, languages_r, languages_w = _paired_ranks(
-        languages, min_count=1, limit_count=TOP_N_DEFAULT, limit_rating=TOP_N_DEFAULT
+        languages, min_count=1, limit_count=top_n, limit_rating=top_n, min_rated=min_rated
     )
     companies_c, companies_r, companies_w = _paired_ranks(
         companies,
         min_count=MIN_COMPANY_COUNT,
-        limit_count=TOP_N_DEFAULT,
-        limit_rating=TOP_N_DEFAULT,
+        limit_count=top_n,
+        limit_rating=top_n,
+        min_rated=min_rated,
     )
     return {
         "countries": countries_c,
@@ -554,6 +591,13 @@ def aggregate_person_stats(catalog, cache, film_ratings=None, diary=None, watche
         "companies": companies_c,
         "companies_by_rating": companies_r,
         "companies_by_rating_worst": companies_w,
+        "avg_maps": {
+            "countries": _rating_lookup(countries),
+            "directors": _rating_lookup(directors),
+            "cast": _rating_lookup(actors),
+            "languages": _rating_lookup(languages),
+            "companies": _rating_lookup(companies),
+        },
     }
 
 
@@ -564,6 +608,7 @@ def rank_genres(
     watched_only=None,
     limit_count=TOP_N_DEFAULT,
     limit_rating=TOP_N_DEFAULT,
+    min_rated=MIN_RATED_FOR_TOP,
 ):
     """Genre tops: catalog hits; avg from ratings.csv ∪ diary joined to catalog."""
     stats = defaultdict(lambda: {"count": 0, "rating_sum": 0.0, "rated": 0})
@@ -597,12 +642,16 @@ def rank_genres(
             st["rating_sum"] += r
             st["rated"] += 1
     by_count, by_rating, by_rating_worst = _paired_ranks(
-        stats, min_count=1, limit_count=limit_count, limit_rating=limit_rating
+        stats,
+        min_count=1,
+        limit_count=limit_count,
+        limit_rating=limit_rating,
+        min_rated=min_rated,
     )
     total_hits = sum(int(st["count"]) for st in stats.values()) or 1
     for row in by_count:
         row["pct"] = round(100.0 * row["count"] / total_hits, 1)
-    return by_count, by_rating, by_rating_worst
+    return by_count, by_rating, by_rating_worst, _rating_lookup(stats)
 
 
 def _cache_meta_for_row(row, cache):
@@ -628,20 +677,48 @@ def chart_watches_by_country(diary, cache, path: Path, top_n: int = TOP_N_DEFAUL
     )
 
 
-def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
+def _filter_entity_names(field, names, *, include_usa=True, include_english=True):
+    kept = []
+    for name in names or []:
+        if not name:
+            continue
+        if field == "countries" and not include_usa and is_usa_country(name):
+            continue
+        if field == "languages" and not include_english and is_english_language(name):
+            continue
+        kept.append(name)
+    return kept
+
+
+def chart_deep_count_tops(
+    diary,
+    cache,
+    paths: dict,
+    *,
+    top_n=TOP_N_DEFAULT,
+    min_rated=MIN_RATED_FOR_TOP,
+    avg_maps=None,
+    include_usa=True,
+    include_english=True,
+) -> dict:
     """Watch-year stacked count charts for TMDB deep entities."""
     footer = "Source: Letterboxd diary + TMDB metadata"
     made = {}
+    maps = avg_maps or {}
 
     def names(field):
         def _fn(row):
             meta = _cache_meta_for_row(row, cache)
             if field == "languages":
                 lang = (meta.get("original_language") or "").strip()
-                return [lang] if lang else []
-            if field == "cast":
-                return list(meta.get("cast") or [])
-            return list(meta.get(field) or [])
+                raw = [lang] if lang else []
+            elif field == "cast":
+                raw = list(meta.get("cast") or [])
+            else:
+                raw = list(meta.get(field) or [])
+            return _filter_entity_names(
+                field, raw, include_usa=include_usa, include_english=include_english
+            )
 
         return _fn
 
@@ -650,7 +727,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_genre",
             "genres",
             "Жанры — цвет = год просмотра",
-            TOP_N_DEFAULT,
+            top_n,
             1,
             None,
         ),
@@ -658,7 +735,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_country",
             "countries",
             "Страны производства — цвет = год просмотра",
-            TOP_N_DEFAULT,
+            top_n,
             1,
             None,
         ),
@@ -666,7 +743,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_director",
             "directors",
             "Режиссёры — цвет = год просмотра",
-            TOP_N_DEFAULT,
+            top_n,
             MIN_PERSON_COUNT,
             None,
         ),
@@ -674,7 +751,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_actor",
             "cast",
             "Актёры (top-billed) — цвет = год просмотра",
-            TOP_N_DEFAULT,
+            top_n,
             MIN_PERSON_COUNT,
             None,
         ),
@@ -682,7 +759,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_language",
             "languages",
             "Язык оригинала — цвет = год просмотра",
-            TOP_N_DEFAULT,
+            top_n,
             1,
             display_lang,
         ),
@@ -690,7 +767,7 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             "watches_by_studio",
             "companies",
             "Студии — цвет = год просмотра",
-            TOP_N_DEFAULT,
+            top_n,
             MIN_COMPANY_COUNT,
             None,
         ),
@@ -722,11 +799,13 @@ def chart_deep_count_tops(diary, cache, paths: dict) -> dict:
             min_count=min_count,
             label_fn=label_fn,
             footer=footer,
+            avg_by_name=maps.get(field),
+            min_rated=min_rated,
         )
     return made
 
 
-def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
+def chart_deep_rating_tops(deep: dict, paths: dict, *, top_n=TOP_N_DEFAULT, min_rated=MIN_RATED_FOR_TOP) -> dict:
     """Blue→green→red horizontal avg charts for TMDB «выше» + «ниже оценка» tops."""
     footer = "Source: Letterboxd diary/watched + TMDB metadata"
     made = {}
@@ -809,10 +888,10 @@ def chart_deep_rating_tops(deep: dict, paths: dict) -> dict:
         made[key] = chart_rating_hbar(
             deep.get(src) or [],
             Path(path),
-            title=f"{title} (не меньше 3 оценённых фильмов)",
+            title=f"{title} ({rated_gate_phrase(min_rated)})",
             label_fn=label_fn,
             footer=footer,
-            limit=TOP_N_DEFAULT,
+            limit=top_n,
             ascending=ascending,
         )
     return made
@@ -842,7 +921,16 @@ def main():
         print("Не задан TMDB_BEARER_TOKEN. Получите Read Access Token в Settings → API на TMDB и задайте переменную окружения.")
         sys.exit(2)
 
-    diary, catalog, watched_only, film_ratings = load_export(sys.argv[1])
+    opts = read_chart_options()
+    diary, catalog, watched_only, film_ratings = load_export(
+        sys.argv[1],
+        date_from=opts.date_from,
+        date_to=opts.date_to,
+        include_undated=opts.include_undated,
+    )
+    if opts.has_window and diary.empty:
+        print("В выбранном диапазоне нет записей дневника с датой просмотра.", file=sys.stderr)
+        sys.exit(2)
     cache = json.loads(CACHE_PATH.read_text(encoding="utf-8")) if CACHE_PATH.exists() else {}
     # Enrich unique titles across diary ∪ watched.
     films = catalog[["Name", "Year"]].drop_duplicates().reset_index(drop=True)
@@ -962,33 +1050,43 @@ def main():
 
     # Rating tops: catalog counts + ratings.csv ∪ diary (best + worst).
     # (genre_share_by_viewing_year.png removed — not sent to Telegram.)
-    top_for_report, genres_by_rating, genres_by_rating_worst = rank_genres(
+    top_for_report, genres_by_rating, genres_by_rating_worst, genre_avgs = rank_genres(
         catalog,
         film_ratings=film_ratings,
         diary=diary,
         watched_only=watched_only,
-        limit_count=TOP_N_DEFAULT,
-        limit_rating=TOP_N_DEFAULT,
+        limit_count=opts.top_n,
+        limit_rating=opts.top_n,
+        min_rated=opts.min_rated,
     )
+    gate = rated_gate_phrase(opts.min_rated)
     made_genre_best = chart_rating_hbar(
         genres_by_rating,
         Path("average_rating_by_genre.png"),
-        title="Жанры — выше оценка (не меньше 3 оценённых фильмов)",
+        title=f"Жанры — выше оценка ({gate})",
         footer=footer,
-        limit=TOP_N_DEFAULT,
+        limit=opts.top_n,
         ascending=False,
     )
     made_genre_worst = chart_rating_hbar(
         genres_by_rating_worst,
         Path("worst_average_rating_by_genre.png"),
-        title="Жанры — ниже оценка (не меньше 3 оценённых фильмов)",
+        title=f"Жанры — ниже оценка ({gate})",
         footer=footer,
-        limit=TOP_N_DEFAULT,
+        limit=opts.top_n,
         ascending=True,
     )
 
     deep = aggregate_person_stats(
-        catalog, cache, film_ratings=film_ratings, diary=diary, watched_only=watched_only
+        catalog,
+        cache,
+        film_ratings=film_ratings,
+        diary=diary,
+        watched_only=watched_only,
+        top_n=opts.top_n,
+        min_rated=opts.min_rated,
+        include_usa=opts.include_usa,
+        include_english=opts.include_english,
     )
     # Count tops: diary watches stacked by watch year (same spirit as countries).
     count_paths = {
@@ -999,7 +1097,18 @@ def main():
         "watches_by_language": "watches_by_language.png",
         "watches_by_studio": "watches_by_studio.png",
     }
-    made_counts = chart_deep_count_tops(diary, cache, count_paths)
+    avg_maps = dict(deep.get("avg_maps") or {})
+    avg_maps["genres"] = genre_avgs
+    made_counts = chart_deep_count_tops(
+        diary,
+        cache,
+        count_paths,
+        top_n=opts.top_n,
+        min_rated=opts.min_rated,
+        avg_maps=avg_maps,
+        include_usa=opts.include_usa,
+        include_english=opts.include_english,
+    )
     rating_paths = {
         "average_rating_by_country": "average_rating_by_country.png",
         "worst_average_rating_by_country": "worst_average_rating_by_country.png",
@@ -1012,7 +1121,9 @@ def main():
         "average_rating_by_studio": "average_rating_by_studio.png",
         "worst_average_rating_by_studio": "worst_average_rating_by_studio.png",
     }
-    made_ratings = chart_deep_rating_tops(deep, rating_paths)
+    made_ratings = chart_deep_rating_tops(
+        deep, rating_paths, top_n=opts.top_n, min_rated=opts.min_rated
+    )
 
     genre_summary = {
         "unique_titles": int(total),
@@ -1039,7 +1150,13 @@ def main():
         "companies_by_rating": deep.get("companies_by_rating") or [],
         "companies_by_rating_worst": deep.get("companies_by_rating_worst") or [],
         "min_person_count": int(MIN_PERSON_COUNT),
-        "min_rated_for_top": int(MIN_RATED_FOR_TOP),
+        "min_rated_for_top": int(opts.min_rated),
+        "top_n": int(opts.top_n),
+        "include_usa": bool(opts.include_usa),
+        "include_english": bool(opts.include_english),
+        "date_from": opts.date_from or "",
+        "date_to": opts.date_to or "",
+        "include_undated": bool(opts.include_undated and opts.has_window),
         "charts": {
             "average_rating_by_genre": bool(made_genre_best),
             "worst_average_rating_by_genre": bool(made_genre_worst),
