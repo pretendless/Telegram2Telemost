@@ -462,6 +462,10 @@ function wizardPrompt(heading, body, example, fallback) {
   return [`<b>${heading}</b>`, "", body, "", `Например: ${example}`, "", `По умолчанию: ${fallback}`].join("\n");
 }
 
+function choicePrompt(heading, body) {
+  return [`<b>${heading}</b>`, "", body].join("\n");
+}
+
 export function letterboxdModePrompt() {
   return {
     text: [
@@ -501,33 +505,27 @@ function promptFor(step, state, now = new Date()) {
   }
   if (step === "usa") {
     return {
-      text: wizardPrompt(
+      text: choicePrompt(
         "Показывать USA в топе стран?",
         "США часто занимают первую строку. «Нет» уберёт их из топа стран.",
-        "да, нет",
-        "да",
       ),
       reply_markup: letterboxdYesNoKeyboard("lb:usa"),
     };
   }
   if (step === "english") {
     return {
-      text: wizardPrompt(
+      text: choicePrompt(
         "Показывать английский в топе языков?",
         "Английский часто на первом месте. «Нет» уберёт его из топа языков.",
-        "да, нет",
-        "да",
       ),
       reply_markup: letterboxdYesNoKeyboard("lb:en"),
     };
   }
   if (step === "period") {
     return {
-      text: wizardPrompt(
+      text: choicePrompt(
         "Весь период или свой диапазон?",
         "Весь период — от первого просмотра до последнего. Свой диапазон — только выбранные даты, включительно.",
-        "весь период, свой диапазон",
-        "весь период",
       ),
       reply_markup: letterboxdPeriodKeyboard(),
     };
@@ -558,11 +556,9 @@ function promptFor(step, state, now = new Date()) {
   }
   if (step === "undated") {
     return {
-      text: wizardPrompt(
+      text: choicePrompt(
         "Добавить фильмы без даты в дневнике?",
         "Нет — только записи с датой внутри периода. Да — ещё фильмы из watched и ratings, у которых в дневнике даты нет. В календарные графики они не попадут.",
-        "нет, да",
-        "нет",
       ),
       reply_markup: letterboxdUndatedKeyboard(),
     };

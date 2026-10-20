@@ -180,6 +180,33 @@ test("wizard prompts are html, with a default line and examples", () => {
   assert.equal(full.dispatch.options.dateTo, "");
 });
 
+test("binary steps keep the default button and drop the repeated lines", () => {
+  const fileId = "BQACAgIAAxkBAAI1234567890";
+  const usa = advanceLetterboxdWizard(
+    { step: "min_rated", fileId },
+    { kind: "callback", step: "min_rated", value: 3 },
+  );
+  const english = advanceLetterboxdWizard(usa.state, { kind: "callback", step: "usa", value: true });
+  const period = advanceLetterboxdWizard(english.state, { kind: "callback", step: "english", value: true });
+  const undated = advanceLetterboxdWizard(
+    { step: "range_start", fileId, dateFrom: "2024-01-01", dateTo: "2024-12-31" },
+    { kind: "callback", step: "range_start", year: 2024 },
+  );
+  for (const message of [usa, english, period, undated]) {
+    assert.doesNotMatch(message.messages[0].text, /Например:/);
+    assert.doesNotMatch(message.messages[0].text, /По умолчанию:/);
+  }
+  assert.match(usa.messages[0].text, /<b>Показывать USA в топе стран\?<\/b>/);
+  assert.match(english.messages[0].text, /<b>Показывать английский в топе языков\?<\/b>/);
+  assert.match(period.messages[0].text, /<b>Весь период или свой диапазон\?<\/b>/);
+  assert.match(undated.messages[0].text, /<b>Добавить фильмы без даты в дневнике\?<\/b>/);
+  assert.equal(usa.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "По умолчанию: да");
+  assert.equal(english.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "По умолчанию: да");
+  assert.equal(period.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "По умолчанию: весь период");
+  assert.equal(undated.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "По умолчанию: нет");
+  assert.match(period.messages[0].text, /Весь период — от первого просмотра/);
+});
+
 test("every wizard keyboard has a one-tap default button", () => {
   const last = (keyboard) => keyboard.inline_keyboard.at(-1)[0].text;
   assert.equal(letterboxdModeKeyboard().inline_keyboard[0][0].text, "✅ По умолчанию");
