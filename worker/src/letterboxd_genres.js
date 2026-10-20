@@ -14,10 +14,9 @@ import {
   letterboxdInvalidZipText,
   letterboxdJobKey,
   letterboxdModePrompt,
+  letterboxdMovedReply,
   letterboxdNeedZipText,
-  letterboxdPromptText,
   letterboxdStartingText,
-  letterboxdUsageText,
   isZipDocument,
   LETTERBOXD_WORKFLOW,
   newLetterboxdJobId,
@@ -25,7 +24,6 @@ import {
   parseLetterboxdCallback,
   parseLetterboxdCommand,
 } from "../../vm/letterboxd_genres.js";
-import { awaitCreateKey } from "./logic.js";
 
 export async function finishLetterboxdDispatch(env, { jobId, chatId, fileId, options, deps = {} }) {
   const send = deps.send;
@@ -82,18 +80,11 @@ export async function handleLetterboxdCommand(env, message, deps = {}) {
   const send = deps.send;
   if (!send) throw new Error("send");
   const chatId = message.chat && message.chat.id;
-  if (parsed.error) {
-    await send(env, chatId, letterboxdUsageText());
-    return true;
-  }
-  const kv = env.BOT_KV;
-  if (!kv) {
-    await send(env, chatId, "KV недоступен — не могу ждать ZIP.");
-    return true;
-  }
-  await kv.delete(awaitCreateKey(chatId));
-  await kv.put(awaitLetterboxdKey(chatId), encodeAwaitLetterboxd({ since: new Date().toISOString() }));
-  await send(env, chatId, letterboxdPromptText());
+  const card = letterboxdMovedReply();
+  await send(env, chatId, card.text, {
+    parse_mode: card.parse_mode,
+    reply_markup: card.reply_markup,
+  });
   return true;
 }
 

@@ -160,6 +160,21 @@ export function normalizeTelegramFileId(raw) {
   return id;
 }
 
+export const LETTERBOXD_MOVED_TEXT = "Отчёты Letterboxd теперь в отдельном боте.";
+export const LETTERBOXD_MOVED_BUTTON = "Открыть @lebxdbot";
+export const LETTERBOXD_MOVED_URL = "https://t.me/lebxdbot?start=letterboxd";
+
+/** Visiting card for /letterboxd. The local wizard is no longer started from this command. */
+export function letterboxdMovedReply() {
+  return {
+    text: LETTERBOXD_MOVED_TEXT,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[{ text: LETTERBOXD_MOVED_BUTTON, url: LETTERBOXD_MOVED_URL }]],
+    },
+  };
+}
+
 export function letterboxdPromptText() {
   return (
     "Пришлите ZIP экспорта Letterboxd одним документом.\n\n" +

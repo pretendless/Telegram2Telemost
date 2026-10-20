@@ -146,7 +146,8 @@ async function defaultSend(env, chatId, text, extra) {
     text: body.text,
     link_preview_options: { is_disabled: true },
   };
-  if (body.parse_mode) payload.parse_mode = body.parse_mode;
+  const parseMode = (extra && extra.parse_mode) || body.parse_mode;
+  if (parseMode) payload.parse_mode = parseMode;
   if (extra && extra.reply_markup) payload.reply_markup = extra.reply_markup;
   return telegram(env, "sendMessage", payload);
 }

@@ -10,6 +10,7 @@ import {
   letterboxdMinKeyboard,
   letterboxdModeKeyboard,
   letterboxdModePrompt,
+  letterboxdMovedReply,
   letterboxdPeriodKeyboard,
   letterboxdTopKeyboard,
   letterboxdUndatedKeyboard,
@@ -37,6 +38,15 @@ import {
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+test("letterboxdMovedReply is a card for @lebxdbot", () => {
+  const card = letterboxdMovedReply();
+  assert.equal(card.text, "Отчёты Letterboxd теперь в отдельном боте.");
+  assert.equal(card.parse_mode, "HTML");
+  assert.deepEqual(card.reply_markup, {
+    inline_keyboard: [[{ text: "Открыть @lebxdbot", url: "https://t.me/lebxdbot?start=letterboxd" }]],
+  });
+});
 
 test("parseLetterboxdCommand", () => {
   assert.equal(parseLetterboxdCommand("/start"), null);

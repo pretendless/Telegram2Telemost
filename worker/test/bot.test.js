@@ -936,7 +936,7 @@ test("/start and /stop list that chat's commands, one per line", async () => {
 
   sent.length = 0;
   await handle(packMessage(8502935020, "/start"), env, { sendMessage });
-  assert.match(sent[0].text, /\/stop — прервать ввод\n\/queue — очередь\n\/skip — пропустить пак\n\/restart — перезапустить загрузку\n\/project — задача для агента\n\/ghrun — запустить workflow\n\/letterboxd — Letterboxd\n\/login — войти в Яндекс$/);
+  assert.match(sent[0].text, /\/stop — прервать ввод\n\/queue — очередь\n\/skip — пропустить пак\n\/restart — перезапустить загрузку\n\/project — задача для агента\n\/ghrun — запустить workflow\n\/letterboxd — @lebxdbot\n\/login — войти в Яндекс$/);
   assert.doesNotMatch(sent[0].text, /\/unstick|\/upload|\/connect/);
   assert.equal((sent[0].text.match(/TG2TM на связи/g) || []).length, 1);
 
@@ -2841,13 +2841,19 @@ function documentRequest(chatId, document) {
   });
 }
 
-test("/letterboxd is runnable by users, hidden from user menu, waits for ZIP, /stop clears", async () => {
+function seedLetterboxdAwait(env, chatId, step = "zip") {
+  env.BOT_KV.store.set(
+    `await:letterboxd:${chatId}`,
+    JSON.stringify({ kind: "letterboxd", since: "2026-10-17T00:00:00.000Z", step }),
+  );
+}
+
+test("/letterboxd replies with a card for @lebxdbot and does not start the wizard", async () => {
   const env = envWith();
   env.LOGIN_CHAT_IDS = "8502935020";
-  env.GH_DISPATCH_TOKEN = "dispatch-token";
   const sent = [];
-  const sendMessage = async (_env, chatId, text) => {
-    sent.push({ chatId, text });
+  const sendMessage = async (_env, chatId, text, extra) => {
+    sent.push({ chatId, text, extra });
     return { message_id: sent.length };
   };
 
@@ -2856,15 +2862,47 @@ test("/letterboxd is runnable by users, hidden from user menu, waits for ZIP, /s
 
   sent.length = 0;
   await handle(telegramRequest(8502935020, "/start"), env, { sendMessage });
-  assert.match(sent[0].text, /\/letterboxd — Letterboxd/);
-  assert.doesNotMatch(sent[0].text, /\/genres/);
+  assert.match(sent[0].text, /\/letterboxd — @lebxdbot/);
+  assert.doesNotMatch(sent[0].text, /ZIP|мастер|график/i);
+
+  sent.length = 0;
+  await handle(telegramRequest(8502935020, "/help"), env, { sendMessage });
+  assert.match(sent[0].text, /\/letterboxd — @lebxdbot/);
+  assert.doesNotMatch(sent[0].text, /ZIP|мастер|график/i);
+
+  await handle(telegramRequest(7, "/create"), env, { sendMessage });
+  sent.length = 0;
+  await handle(telegramRequest(7, "/letterboxd extra"), env, { sendMessage });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].text, "Отчёты Letterboxd теперь в отдельном боте.");
+  assert.equal(sent[0].extra.parse_mode, "HTML");
+  assert.deepEqual(sent[0].extra.reply_markup, {
+    inline_keyboard: [[{ text: "Открыть @lebxdbot", url: "https://t.me/lebxdbot?start=letterboxd" }]],
+  });
+  assert.equal(env.BOT_KV.store.get("await:letterboxd:7"), undefined);
+  assert.ok(env.BOT_KV.store.get("await:7"));
 
   sent.length = 0;
   await handle(telegramRequest(7, "/letterboxd"), env, { sendMessage });
-  assert.match(sent[0].text, /ZIP экспорта Letterboxd/);
-  assert.ok(env.BOT_KV.store.get("await:letterboxd:7"));
+  assert.equal(sent[0].text, "Отчёты Letterboxd теперь в отдельном боте.");
+  assert.equal(env.BOT_KV.store.get("await:letterboxd:7"), undefined);
 
   sent.length = 0;
+  await handle(telegramRequest(7, "/stop"), env, { sendMessage });
+  assert.match(sent[0].text, /незаконченный \/create сброшен/);
+  assert.doesNotMatch(sent[0].text, /Letterboxd сброшено/);
+});
+
+test("a pending Letterboxd ZIP still rejects other files and /stop clears it", async () => {
+  const env = envWith();
+  env.LOGIN_CHAT_IDS = "8502935020";
+  const sent = [];
+  const sendMessage = async (_env, chatId, text) => {
+    sent.push({ chatId, text });
+    return { message_id: sent.length };
+  };
+  seedLetterboxdAwait(env, 7);
+
   await handle(telegramRequest(7, "не zip"), env, { sendMessage });
   assert.match(sent[0].text, /Нужен файл \.zip/);
 
@@ -2913,8 +2951,7 @@ test("/letterboxd ZIP dispatches letterboxd.yml for any chat", async () => {
     return new Response(null, { status: 204 });
   };
 
-  await handle(telegramRequest(111, "/letterboxd"), env, { sendMessage, fetch });
-  sent.length = 0;
+  seedLetterboxdAwait(env, 111);
   await handle(
     documentRequest(111, {
       file_name: "letterboxd-2026.zip",
@@ -2987,7 +3024,7 @@ test("letterboxd inline button answers the callback and advances the wizard", as
     return new Response(null, { status: 204 });
   };
   try {
-    await handle(telegramRequest(111, "/letterboxd"), env, { sendMessage, fetch });
+    seedLetterboxdAwait(env, 111);
     await handle(
       documentRequest(111, {
         file_name: "letterboxd-2026.zip",
@@ -3008,7 +3045,7 @@ test("letterboxd inline button answers the callback and advances the wizard", as
     assert.equal(dispatch.body.inputs.top_n, "20");
     assert.equal(env.BOT_KV.store.get("await:letterboxd:111"), undefined);
 
-    await handle(telegramRequest(222, "/letterboxd"), env, { sendMessage, fetch });
+    seedLetterboxdAwait(env, 222);
     await handle(
       documentRequest(222, {
         file_name: "letterboxd-2026.zip",
