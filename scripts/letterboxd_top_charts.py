@@ -412,23 +412,39 @@ def chart_rating_vbar(
     bars = ax.bar(x, avgs, color=colors, width=0.78, edgecolor="none")
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.set_ylim(0, 5.2)
+    ax.set_ylim(0, 5.55)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
     for bar, avg, rated in zip(bars, avgs, [n for _, _, n in usable]):
-        suffix = f"\nn={rated}" if rated is not None else ""
+        x = bar.get_x() + bar.get_width() / 2
+        label = f"{avg:.2f}"
+        style = count_avg_text_style(label)
+        y = avg + (0.28 if rated is not None else 0.08)
         ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            avg + 0.08,
-            f"{avg:.2f}{suffix}",
+            x,
+            y,
+            label,
             ha="center",
             va="bottom",
             fontsize=7,
-            color=FG,
+            color=style["color"],
+            fontweight=style["fontweight"],
+            path_effects=style["path_effects"],
         )
+        if rated is not None:
+            ax.text(
+                x,
+                avg + 0.06,
+                f"({rated})",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                color=FG,
+                fontweight="normal",
+            )
     _rating_colorbar(fig, ax)
     if footer:
         fig.text(0.01, 0.01, footer, fontsize=7, color=FG)
@@ -457,8 +473,9 @@ def chart_rating_hbar(
     """Horizontal bars for TMDB avg tops: rank+name inside bar (white + black stroke).
 
     ascending=False → best at top; True → worst at top («ниже оценка»).
-    Mean/n always sits to the right of the bar; in-bar names are ellipsized to
-    the bar width so they never collide with the trailing stats.
+    The mean to the right is bold and colored on the rating scale. The rated-film
+    count sits beside it in regular light text as ``(12)``. In-bar names are
+    ellipsized so they never meet the stats.
     """
     import matplotlib.patheffects as path_effects
 
@@ -487,8 +504,8 @@ def chart_rating_hbar(
     y = np.arange(len(labels))
     bars = ax.barh(y, avgs, color=colors, height=0.72, edgecolor="none")
     ax.set_yticks([])
-    # Extra room on the right for mean/n outside the bar.
-    ax.set_xlim(0, 5.65)
+    # Extra room on the right for the colored mean and the light ``(k)``.
+    ax.set_xlim(0, 6.15)
     ax.set_xlabel(xlabel)
     ax.set_title(title)
     ax.xaxis.grid(True, color=GRID, linewidth=0.8)
@@ -514,6 +531,7 @@ def chart_rating_hbar(
     pad_left = 0.08
     # Keep a generous empty tip so stroked names never crowd mean/n outside.
     tip_gap = 0.4
+    pending: list[tuple] = []
     for yi, bar, rank, label, avg, rated in zip(y, bars, ranks, labels, avgs, rateds):
         raw = f"{rank}. {label}"
         fitted = _fit_text_to_data_width(
@@ -541,18 +559,41 @@ def chart_rating_hbar(
         )
         # Hard clip to the bar rectangle — name cannot draw past the tip.
         txt.set_clip_path(bar)
-        # Mean / n always outside the bar to the right — no overlap with name.
-        mean_txt = f"{avg:.2f}" + (f"  n={rated}" if rated is not None else "")
-        ax.text(
+        # Mean is bold and rating-colored; ``(k)`` stays regular light text beside it.
+        mean_label = f"{avg:.2f}"
+        style = count_avg_text_style(mean_label)
+        mean_artist = ax.text(
             float(avg) + 0.14,
             yi,
-            mean_txt,
+            mean_label,
             ha="left",
             va="center",
             fontsize=9,
-            color=FG,
+            color=style["color"],
+            fontweight=style["fontweight"],
+            path_effects=style["path_effects"],
             clip_on=False,
         )
+        pending.append((mean_artist, rated))
+    if any(rated is not None for _, rated in pending):
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        for artist, rated in pending:
+            if rated is None:
+                continue
+            bbox = artist.get_window_extent(renderer=renderer)
+            x_data, _y = ax.transData.inverted().transform((bbox.x1 + 8, bbox.y0))
+            ax.text(
+                x_data,
+                artist.get_position()[1],
+                f"({rated})",
+                ha="left",
+                va="center",
+                fontsize=9,
+                color=FG,
+                fontweight="normal",
+                clip_on=False,
+            )
     save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
     return True
@@ -677,7 +718,8 @@ def chart_release_years_by_rating(
     """«Годы выхода — выше/ниже оценка» as TMDB-style horizontal avg bars.
 
     Same layout as deep-stats hbars: left «оценка» colorbar, in-bar ``N. Year``
-    (white + black stroke), ``mean n=`` to the right of the bar. Not the
+    (white + black stroke). The mean to the right is bold and rating-colored;
+    the rated-film count is regular light text in parentheses. Not the
     watch-year / release-decade line charts.
     """
     normalized = []
