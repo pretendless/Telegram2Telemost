@@ -48,8 +48,8 @@ export function letterboxdJobKey(jobId) {
 export const genresJobKey = letterboxdJobKey;
 
 export const LETTERBOXD_TOP_N_DEFAULT = 20;
-export const LETTERBOXD_TOP_N_MIN = 5;
-export const LETTERBOXD_TOP_N_MAX = 30;
+export const LETTERBOXD_TOP_N_MIN = 1;
+export const LETTERBOXD_TOP_N_MAX = 100;
 export const LETTERBOXD_MIN_RATED_DEFAULT = 3;
 export const LETTERBOXD_MIN_RATED_MIN = 1;
 export const LETTERBOXD_MIN_RATED_MAX = 50;
@@ -381,7 +381,14 @@ export function letterboxdModeKeyboard() {
 }
 
 export function letterboxdTopKeyboard() {
-  return { inline_keyboard: [[button("10", "lb:n:10"), button("20", "lb:n:20"), button("30", "lb:n:30")]] };
+  return {
+    inline_keyboard: [[
+      button("10", "lb:n:10"),
+      button("20", "lb:n:20"),
+      button("30", "lb:n:30"),
+      button("50", "lb:n:50"),
+    ]],
+  };
 }
 
 export function letterboxdMinKeyboard() {
@@ -422,7 +429,7 @@ function promptFor(step, state) {
     return {
       text:
         "Сколько позиций в топах?\n\n" +
-        "По умолчанию 20. Кнопки 10, 20, 30 — или число от 5 до 30.",
+        "По умолчанию 20. Кнопки 10, 20, 30, 50 — или число от 1 до 100.",
       reply_markup: letterboxdTopKeyboard(),
     };
   }
@@ -493,7 +500,7 @@ export function parseLetterboxdCallback(data) {
   const raw = String(data || "");
   if (raw === "lb:def") return { step: "mode", choice: "defaults" };
   if (raw === "lb:cus") return { step: "mode", choice: "custom" };
-  let match = raw.match(/^lb:n:(10|20|30)$/);
+  let match = raw.match(/^lb:n:(10|20|30|50)$/);
   if (match) return { step: "top_n", value: Number(match[1]) };
   match = raw.match(/^lb:m:(3|5|10)$/);
   if (match) return { step: "min_rated", value: Number(match[1]) };
@@ -580,7 +587,7 @@ export function advanceLetterboxdWizard(state, input, now = new Date()) {
   }
   if (step === "top_n") {
     const value = kind === "callback" ? input.value : parseBounded(input.text, LETTERBOXD_TOP_N_MIN, LETTERBOXD_TOP_N_MAX);
-    if (value == null) return retry(state, "Нужно число от 5 до 30. Кнопки: 10, 20, 30. Запуск не начат.");
+    if (value == null) return retry(state, "Нужно число от 1 до 100. Кнопки: 10, 20, 30, 50. Запуск не начат.");
     return go({ ...state, topN: value }, "min_rated");
   }
   if (step === "min_rated") {

@@ -7,6 +7,7 @@ import {
   encodeAwaitLetterboxd,
   isZipDocument,
   normalizeTelegramFileId,
+  parseLetterboxdCallback,
   parseLetterboxdCommand,
   parseWatchBound,
   parseWatchInterval,
@@ -89,6 +90,25 @@ test("one typed period skips the second bound and asks about undated films", () 
   const backwards = advanceLetterboxdWizard(state, { kind: "text", text: "2020 2018" });
   assert.equal(backwards.state.step, "range_start");
   assert.equal(backwards.dispatch, undefined);
+});
+
+test("top size is any integer from 1 to 100", () => {
+  const state = { step: "top_n", fileId: "BQACAgIAAxkBAAI1234567890" };
+  const hundred = advanceLetterboxdWizard(state, { kind: "text", text: "100" });
+  assert.equal(hundred.state.step, "min_rated");
+  assert.equal(hundred.state.topN, 100);
+  const one = advanceLetterboxdWizard(state, { kind: "text", text: "1" });
+  assert.equal(one.state.topN, 1);
+  const fifty = advanceLetterboxdWizard(state, { kind: "callback", step: "top_n", value: 50 });
+  assert.equal(fifty.state.topN, 50);
+  assert.equal(parseLetterboxdCallback("lb:n:50").value, 50);
+  const bad = advanceLetterboxdWizard(state, { kind: "text", text: "9999" });
+  assert.equal(bad.state.step, "top_n");
+  assert.equal(bad.dispatch, undefined);
+  assert.match(bad.messages[0].text, /от 1 до 100/);
+  const zero = advanceLetterboxdWizard(state, { kind: "text", text: "0" });
+  assert.equal(zero.state.step, "top_n");
+  assert.match(zero.messages[0].text, /от 1 до 100/);
 });
 
 test("isZipDocument and file_id", () => {
