@@ -50,6 +50,7 @@ from letterboxd_options import (  # noqa: E402
 from letterboxd_palette import (  # noqa: E402
     FG,
     apply_dark_chart_theme,
+    categorical_colors,
     save_dark_figure,
     style_axes,
 )
@@ -990,7 +991,7 @@ def main():
         yearly[y] = {g: int(subset["Genre list"].apply(lambda gs: g in gs).sum()) for g in top_genres}
     fig, ax = plt.subplots(figsize=(15, 7))
     bottom = np.zeros(len(years))
-    colors = plt.cm.turbo(np.linspace(0.03, 0.97, max(1, len(top_genres))))
+    colors = categorical_colors(len(top_genres))
     for idx, genre in enumerate(top_genres):
         vals = np.array([yearly[y][genre] for y in years])
         ax.bar(years, vals, bottom=bottom, label=genre, color=colors[idx], width=0.82)
@@ -1031,7 +1032,13 @@ def main():
         common = decade_df.groupby("Genre")["Views"].sum().nlargest(10).index
         p = decade_df[decade_df["Genre"].isin(common)].pivot_table(index="Decade", columns="Genre", values="Views", aggfunc="sum", fill_value=0).sort_index()
         fig, ax = plt.subplots(figsize=(13, 6))
-        p.plot(kind="bar", stacked=True, ax=ax, colormap="turbo", width=0.82)
+        p.plot(
+            kind="bar",
+            stacked=True,
+            ax=ax,
+            color=categorical_colors(p.shape[1]),
+            width=0.82,
+        )
         ax.set_title("Просмотры по десятилетию выхода фильма и жанру")
         ax.set_xlabel("Десятилетие выхода"); ax.set_ylabel("Количество просмотров")
         leg = ax.legend(

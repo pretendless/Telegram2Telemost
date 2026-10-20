@@ -17,19 +17,35 @@ LEGEND_BG = "#0A0A0A"
 LEGEND_EDGE = "#3A3A3A"
 
 
+def categorical_positions(n: int) -> list[float]:
+    """Midpoint of each equal bin on a normalized colormap.
+
+    N categories never sample the endpoints: N=1 → 0.5, N=2 → 0.25 and 0.75.
+    """
+    count = int(n)
+    if count <= 0:
+        return []
+    return [(i + 0.5) / count for i in range(count)]
+
+
+def categorical_colors(n: int, cmap=None) -> list[tuple]:
+    """Turbo colors for N discrete ordered categories (years, ranked genres).
+
+    Continuous rating colors do not use this — they map the numeric rating.
+    """
+    import matplotlib.pyplot as plt
+
+    gradient = plt.cm.turbo if cmap is None else cmap
+    return [tuple(float(c) for c in gradient(t)) for t in categorical_positions(n)]
+
+
 def watch_year_palette(all_watch_years) -> dict[int, tuple]:
-    """Map each watch year to a turbo color on the full diary year span."""
+    """Map each watch year to a turbo color, one bin midpoint per year."""
     years = sorted({int(y) for y in (all_watch_years or []) if y is not None})
     if not years:
         return {}
-    # Import lazily so callers without a display still work under Agg.
-    import matplotlib.pyplot as plt
-
-    cmap = plt.cm.turbo
-    if len(years) == 1:
-        return {years[0]: cmap(0.55)}
-    last = len(years) - 1
-    return {y: cmap(i / last) for i, y in enumerate(years)}
+    colors = categorical_colors(len(years))
+    return {year: colors[i] for i, year in enumerate(years)}
 
 
 def color_for_year(palette: dict[int, tuple], year: int, fallback=(0.3, 0.47, 0.66, 1.0)):
