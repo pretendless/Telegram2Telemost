@@ -368,7 +368,7 @@ const COMMAND_LABELS = {
   restart: "перезапустить загрузку",
   project: "задача для агента",
   ghrun: "запустить workflow",
-  letterboxd: "Letterboxd",
+  letterboxd: "@lebxdbot",
   login: "войти в Яндекс",
 };
 
