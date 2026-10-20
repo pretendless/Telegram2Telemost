@@ -93,6 +93,8 @@ test("the title is escaped and a pack without sources omits that clause", () => 
   assert.doesNotMatch(text, /actions\/runs/);
   assert.equal(telegramParseMode(text), "HTML");
   assert.equal(telegramParseMode("просто текст"), undefined);
+  assert.equal(telegramParseMode("<b>Сколько позиций в топах?</b>\n\nПо умолчанию: 20"), "HTML");
+  assert.equal(telegramParseMode("Нужно число от 1 до 100. Запуск не начат."), undefined);
 });
 
 test("the queue title wins over a progress slug, in source order", () => {

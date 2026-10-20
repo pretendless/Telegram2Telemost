@@ -965,6 +965,7 @@ def chart_top_rewatches(df: pd.DataFrame, path: Path, limit: int = 20) -> bool:
     for _, row in work[work["_key"].isin(keys)].iterrows():
         matrix[year_index[int(row["watch_year"])], key_index[row["_key"]]] += 1
 
+    # Row pitch stays ~0.42 in so a longer rewatch list gets a taller figure.
     fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.42)))
     y = np.arange(len(labels))
     left = np.zeros(len(labels))

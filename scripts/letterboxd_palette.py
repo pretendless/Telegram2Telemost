@@ -170,8 +170,21 @@ def style_figure(fig) -> None:
         style_axes(ax)
 
 
+# sendPhoto rejects width+height above 10000 px. Leave a margin for the tight bbox.
+_TG_PHOTO_PX_BUDGET = 9600
+
+
 def save_dark_figure(fig, path, **kwargs) -> None:
-    """savefig with black facecolor so tight bbox stays dark."""
+    """savefig with black facecolor so tight bbox stays dark.
+
+    A long top is a tall figure at the caller's point size. If that raster
+    would exceed Telegram's photo dimension budget, dpi drops and the layout
+    in inches stays the same.
+    """
     opts = {"bbox_inches": "tight", "facecolor": BG, "edgecolor": BG}
     opts.update(kwargs)
+    w_in, h_in = fig.get_size_inches()
+    dpi = float(opts.get("dpi") or getattr(fig, "dpi", None) or 100)
+    if w_in > 0 and h_in > 0 and (w_in + h_in) * dpi > _TG_PHOTO_PX_BUDGET:
+        opts["dpi"] = _TG_PHOTO_PX_BUDGET / (w_in + h_in)
     fig.savefig(path, **opts)
