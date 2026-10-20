@@ -78,7 +78,13 @@ import {
 import { loadAdminQueueState, reconcileTerminalUploadingFromProgress } from "./queue_view.js";
 import { applyProjectReply, handleProjectCommand, readProjectPrompt } from "./project_prompt.js";
 import { handleGhrunCommand } from "./ghrun.js";
-import { clearLetterboxdAwait, handleLetterboxdCommand, handleLetterboxdDocument } from "./letterboxd_genres.js";
+import {
+  clearLetterboxdAwait,
+  handleLetterboxdCallback,
+  handleLetterboxdCommand,
+  handleLetterboxdDocument,
+  handleLetterboxdText,
+} from "./letterboxd_genres.js";
 import { awaitLetterboxdKey, decodeAwaitLetterboxd, letterboxdNeedZipText } from "../../vm/letterboxd_genres.js";
 import { normalizeProjectReplyBody } from "../../vm/project_prompt.js";
 
@@ -133,7 +139,7 @@ function outgoingText(text) {
   return { text: value };
 }
 
-async function defaultSend(env, chatId, text) {
+async function defaultSend(env, chatId, text, extra) {
   const body = outgoingText(text);
   const payload = {
     chat_id: chatId,
@@ -141,7 +147,26 @@ async function defaultSend(env, chatId, text) {
     link_preview_options: { is_disabled: true },
   };
   if (body.parse_mode) payload.parse_mode = body.parse_mode;
+  if (extra && extra.reply_markup) payload.reply_markup = extra.reply_markup;
   return telegram(env, "sendMessage", payload);
+}
+
+async function defaultAnswerCallback(env, id, text) {
+  const payload = { callback_query_id: id };
+  if (text) payload.text = String(text).slice(0, 200);
+  return telegram(env, "answerCallbackQuery", payload);
+}
+
+async function defaultClearKeyboard(env, chatId, messageId) {
+  try {
+    await telegram(env, "editMessageReplyMarkup", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: [] },
+    });
+  } catch (err) {
+    console.error("clear letterboxd keyboard", err && err.message);
+  }
 }
 
 function adminIo(env, deps) {
@@ -719,6 +744,19 @@ async function acceptCountedRequest(env, chatId, { title, names, rows, total }, 
 }
 
 async function answer(env, update, send, stickerCount, deps = {}) {
+  if (update && update.callback_query) {
+    if (env.BOT_KV) await ensureSeed(env.BOT_KV);
+    await handleLetterboxdCallback(env, update.callback_query, {
+      send,
+      fetch: deps.fetch,
+      now: deps.now,
+      waitUntil: deps.waitUntil,
+      sleep: deps.sleep,
+      answerCallback: deps.answerCallback || ((target, id, text) => defaultAnswerCallback(target, id, text)),
+      clearKeyboard: deps.clearKeyboard || ((target, chatId, messageId) => defaultClearKeyboard(target, chatId, messageId)),
+    });
+    return;
+  }
   const message = update && update.message;
   if (!message) return;
   const text = typeof message.text === "string" ? message.text : "";
@@ -886,6 +924,16 @@ async function answer(env, update, send, stickerCount, deps = {}) {
     return;
   } else {
     const letterboxdAwaiting = decodeAwaitLetterboxd(await env.BOT_KV.get(awaitLetterboxdKey(chatId)));
+    if (letterboxdAwaiting && letterboxdAwaiting.step !== "zip") {
+      await handleLetterboxdText(env, message, {
+        send,
+        fetch: deps.fetch,
+        now: deps.now,
+        waitUntil: deps.waitUntil,
+        sleep: deps.sleep,
+      });
+      return;
+    }
     if (letterboxdAwaiting) {
       out = letterboxdNeedZipText();
     } else {

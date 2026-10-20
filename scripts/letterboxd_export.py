@@ -267,16 +267,108 @@ def latest_rated_union(
     return merged_film_ratings(ratings, diary)
 
 
+def _film_keys(df: pd.DataFrame | None) -> set[str]:
+    if df is None or df.empty:
+        return set()
+    return set(film_name_year_key(df).tolist())
+
+
+def _undated_catalog_rows(diary_all: pd.DataFrame, watched: pd.DataFrame, ratings: pd.DataFrame) -> pd.DataFrame:
+    """watched/ratings films that never have a dated diary row. No invented dates."""
+    parts: list[pd.DataFrame] = []
+    watched_undated = watched_only_films(diary_all, watched)
+    if watched_undated is not None and not watched_undated.empty:
+        parts.append(watched_undated)
+    taken = _film_keys(watched_undated)
+    full_diary = _film_keys(diary_all)
+    if ratings is not None and not ratings.empty:
+        extra = ratings.copy()
+        extra["_k"] = film_name_year_key(extra)
+        extra = extra[~extra["_k"].isin(full_diary | taken)].copy()
+        if not extra.empty:
+            extra = extra.drop(columns=["_k"])
+            extra["Watched Date"] = pd.NaT
+            extra["source"] = "ratings"
+            parts.append(extra)
+    if not parts:
+        return pd.DataFrame(columns=["Name", "Year", "Rating", "Watched Date", "source"])
+    return pd.concat(parts, ignore_index=True, sort=False)
+
+
+def scope_letterboxd_frames(
+    diary: pd.DataFrame,
+    watched: pd.DataFrame,
+    ratings: pd.DataFrame,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    include_undated: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return (diary, catalog, watched_only, film_ratings).
+
+    No window: diary ∪ watched-only, ratings as today (undated films included).
+
+    Custom inclusive window:
+      diary = rows whose Watched Date falls on date_from..date_to.
+      Ratings = latest in-range diary rating, else ratings.csv, for those films.
+      include_undated False (default): drop watched/ratings films with no in-range diary row.
+      include_undated True: also keep films that have **no diary date at all**
+      (watched.csv / ratings.csv). Their Watched Date stays empty, so weekday /
+      month / year stacks (diary only) skip them; catalog and TMDB stats see them.
+      A film that has diary dates outside the window is not "undated" and stays out.
+    """
+    if not date_from or not date_to:
+        catalog, only = union_catalog(diary, watched)
+        return diary, catalog, only, merged_film_ratings(ratings, diary)
+
+    start = pd.Timestamp(date_from).normalize()
+    end_excl = pd.Timestamp(date_to).normalize() + pd.Timedelta(days=1)
+    dates = diary["Watched Date"]
+    diary_win = diary[(dates >= start) & (dates < end_excl)].copy()
+
+    if include_undated:
+        only = _undated_catalog_rows(diary, watched, ratings)
+        catalog = (
+            pd.concat([diary_win, only], ignore_index=True, sort=False)
+            if not only.empty
+            else diary_win.copy()
+        )
+    else:
+        only = diary_win.iloc[0:0].copy()
+        catalog = diary_win.copy()
+
+    allowed = _film_keys(diary_win)
+    if include_undated:
+        allowed |= _film_keys(only)
+    film_ratings = merged_film_ratings(ratings, diary_win)
+    if film_ratings is not None and not film_ratings.empty:
+        if "_film_key" not in film_ratings.columns:
+            film_ratings = film_ratings.copy()
+            film_ratings["_film_key"] = film_name_year_key(film_ratings)
+        film_ratings = film_ratings[film_ratings["_film_key"].isin(allowed)].copy()
+    return diary_win, catalog, only, film_ratings
+
+
 def load_export(
     zip_path: Path | str,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    include_undated: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return (diary, catalog, watched_only, film_ratings).
 
     film_ratings = diary latest-rated ∪ ratings.csv gaps (diary wins).
+    Optional inclusive watch window — see scope_letterboxd_frames.
     """
     diary = load_diary(zip_path, require_dates=True)
     watched = load_watched(zip_path)
     ratings = load_ratings(zip_path)
-    catalog, only = union_catalog(diary, watched)
-    film_ratings = merged_film_ratings(ratings, diary)
-    return diary, catalog, only, film_ratings
+    return scope_letterboxd_frames(
+        diary,
+        watched,
+        ratings,
+        date_from=date_from,
+        date_to=date_to,
+        include_undated=include_undated,
+    )

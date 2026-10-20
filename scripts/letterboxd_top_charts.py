@@ -17,6 +17,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from letterboxd_options import (
+    TOP_N_DEFAULT,
+    format_count_avg_label,
+    rated_gate_phrase,
+)
 from letterboxd_palette import (
     FG,
     GRID,
@@ -29,9 +34,7 @@ from letterboxd_palette import (
     style_axes,
     watch_year_palette,
 )
-
-# Default size for ranking charts (count + avg-rating tops).
-TOP_N_DEFAULT = 20
+from letterboxd_ratings import MIN_RATED_FOR_TOP
 
 LANG_LABELS = {
     "en": "английский",
@@ -155,6 +158,7 @@ def chart_stacked_count_hbar(
     title: str,
     xlabel: str = "Просмотры",
     footer: str | None = None,
+    avg_labels: list[str] | None = None,
 ) -> bool:
     """matrix shape (len(years), len(labels)); labels ordered bottom→top.
 
@@ -166,7 +170,8 @@ def chart_stacked_count_hbar(
     n = len(labels)
     # Compact rows — plot fills most of the canvas (not a tall sparse strip).
     fig_h = max(4.0, n * 0.40)
-    fig_w = 10.5
+    # Extra width when each bar also carries a mean (count stays at the tip).
+    fig_w = 12.2 if avg_labels else 10.5
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     y = np.arange(n)
     left_stack = np.zeros(n)
@@ -189,16 +194,20 @@ def chart_stacked_count_hbar(
     ax.xaxis.label.set_fontsize(10)
     ax.set_title(title, fontsize=12, pad=6, color=FG)
     xmax = float(left_stack.max()) if len(left_stack) else 1.0
-    ax.set_xlim(0, xmax * 1.12)
+    # Room past the bar for the count and, when present, «4.25  n=k» / «—».
+    ax.set_xlim(0, xmax * (1.55 if avg_labels else 1.12))
+    count_artists = []
     for yi, total in enumerate(left_stack):
-        ax.text(
+        artist = ax.text(
             total + xmax * 0.012,
             yi,
             str(int(total)),
             va="center",
             fontsize=8,
             color=FG,
+            clip_on=False,
         )
+        count_artists.append(artist)
     # Legend attached to axes (not fig@0.92) so bbox_inches=tight stays dense.
     handles = [plt.Rectangle((0, 0), 1, 1, color=palette[y]) for y in years]
     ncol = 1 if len(years) <= 14 else 2
@@ -226,6 +235,25 @@ def chart_stacked_count_hbar(
         fig.tight_layout(rect=[0.0, 0.025, 1.0, 1.0])
     else:
         fig.tight_layout()
+    if avg_labels:
+        # Count stays at the bar tip; mean sits just to its right (no overlap).
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        for artist, label in zip(count_artists, avg_labels):
+            if not label:
+                continue
+            bbox = artist.get_window_extent(renderer=renderer)
+            x_data, _y = ax.transData.inverted().transform((bbox.x1 + 10, bbox.y1))
+            ax.text(
+                x_data,
+                artist.get_position()[1],
+                label,
+                va="center",
+                ha="left",
+                fontsize=8,
+                color=FG,
+                clip_on=False,
+            )
     save_dark_figure(fig, path, dpi=160, pad_inches=0.05)
     plt.close(fig)
     return True
@@ -504,6 +532,8 @@ def chart_diary_entity_stacked(
     min_count: int = 1,
     label_fn: Callable[[str], str] | None = None,
     footer: str | None = None,
+    avg_by_name: dict | None = None,
+    min_rated: int = MIN_RATED_FOR_TOP,
 ) -> bool:
     """Top entities by diary watch hits; stack segments by watch year."""
     work = diary.copy()
@@ -544,9 +574,18 @@ def chart_diary_entity_stacked(
             matrix[year_index[wy], name_index[n]] += 1
 
     labels = []
+    avg_labels = None
+    if avg_by_name is not None:
+        avg_labels = []
     for n in top:
         raw = label_fn(n) if label_fn else n
         labels.append(_short_label(raw, limit=40))
+        if avg_labels is not None:
+            pair = avg_by_name.get(n)
+            if pair is None:
+                avg_labels.append(format_count_avg_label(None, 0, min_rated))
+            else:
+                avg_labels.append(format_count_avg_label(pair[0], pair[1], min_rated))
     return chart_stacked_count_hbar(
         labels,
         all_years,
@@ -555,11 +594,17 @@ def chart_diary_entity_stacked(
         path,
         title=title,
         footer=footer,
+        avg_labels=avg_labels,
     )
 
 
 def chart_release_years_by_count(
-    diary: pd.DataFrame, path: Path, top_n: int = TOP_N_DEFAULT
+    diary: pd.DataFrame,
+    path: Path,
+    top_n: int = TOP_N_DEFAULT,
+    *,
+    avg_by_name: dict | None = None,
+    min_rated: int = MIN_RATED_FOR_TOP,
 ) -> bool:
     """Release-year count top stacked by watch year (diary only)."""
 
@@ -579,6 +624,8 @@ def chart_release_years_by_count(
         title="Годы выхода — больше просмотров (цвет = год просмотра)",
         top_n=top_n,
         min_count=1,
+        avg_by_name=avg_by_name,
+        min_rated=min_rated,
     )
 
 
@@ -589,6 +636,7 @@ def chart_release_years_by_rating(
     *,
     ascending: bool = False,
     title: str | None = None,
+    min_rated: int = MIN_RATED_FOR_TOP,
 ) -> bool:
     """«Годы выхода — выше/ниже оценка» as TMDB-style horizontal avg bars.
 
@@ -609,10 +657,11 @@ def chart_release_years_by_rating(
             }
         )
     if title is None:
+        gate = rated_gate_phrase(min_rated)
         title = (
-            "Годы выхода — ниже оценка (не меньше 3 оценённых фильмов)"
+            f"Годы выхода — ниже оценка ({gate})"
             if ascending
-            else "Годы выхода — выше оценка (не меньше 3 оценённых фильмов)"
+            else f"Годы выхода — выше оценка ({gate})"
         )
     return chart_rating_hbar(
         normalized,

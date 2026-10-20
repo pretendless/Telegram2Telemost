@@ -47,11 +47,63 @@ export function letterboxdJobKey(jobId) {
 /** @deprecated use letterboxdJobKey */
 export const genresJobKey = letterboxdJobKey;
 
+export const LETTERBOXD_TOP_N_DEFAULT = 20;
+export const LETTERBOXD_TOP_N_MIN = 5;
+export const LETTERBOXD_TOP_N_MAX = 30;
+export const LETTERBOXD_MIN_RATED_DEFAULT = 3;
+export const LETTERBOXD_MIN_RATED_MIN = 1;
+export const LETTERBOXD_MIN_RATED_MAX = 50;
+
+export function defaultLetterboxdOptions() {
+  return {
+    topN: LETTERBOXD_TOP_N_DEFAULT,
+    minRated: LETTERBOXD_MIN_RATED_DEFAULT,
+    includeUSA: true,
+    includeEnglish: true,
+    dateFrom: "",
+    dateTo: "",
+    includeUndated: false,
+  };
+}
+
+function clampInt(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isInteger(n)) return fallback;
+  if (n < min || n > max) return fallback;
+  return n;
+}
+
+export function normalizeLetterboxdOptions(options) {
+  const src = options && typeof options === "object" ? options : {};
+  const dateFrom = /^\d{4}-\d{2}-\d{2}$/.test(String(src.dateFrom || "")) ? String(src.dateFrom) : "";
+  const dateTo = /^\d{4}-\d{2}-\d{2}$/.test(String(src.dateTo || "")) ? String(src.dateTo) : "";
+  const windowOk = Boolean(dateFrom && dateTo && dateTo >= dateFrom);
+  return {
+    topN: clampInt(src.topN, LETTERBOXD_TOP_N_MIN, LETTERBOXD_TOP_N_MAX, LETTERBOXD_TOP_N_DEFAULT),
+    minRated: clampInt(src.minRated, LETTERBOXD_MIN_RATED_MIN, LETTERBOXD_MIN_RATED_MAX, LETTERBOXD_MIN_RATED_DEFAULT),
+    includeUSA: src.includeUSA == null ? true : Boolean(src.includeUSA),
+    includeEnglish: src.includeEnglish == null ? true : Boolean(src.includeEnglish),
+    dateFrom: windowOk ? dateFrom : "",
+    dateTo: windowOk ? dateTo : "",
+    includeUndated: windowOk ? Boolean(src.includeUndated) : false,
+  };
+}
+
 export function encodeAwaitLetterboxd(state = {}) {
-  return JSON.stringify({
+  const out = {
     kind: "letterboxd",
     since: state.since || new Date().toISOString(),
-  });
+    step: state.step || "zip",
+  };
+  if (state.fileId) out.fileId = String(state.fileId);
+  if (state.topN != null) out.topN = state.topN;
+  if (state.minRated != null) out.minRated = state.minRated;
+  if (state.includeUSA != null) out.includeUSA = Boolean(state.includeUSA);
+  if (state.includeEnglish != null) out.includeEnglish = Boolean(state.includeEnglish);
+  if (state.dateFrom) out.dateFrom = String(state.dateFrom);
+  if (state.dateTo) out.dateTo = String(state.dateTo);
+  if (state.includeUndated != null) out.includeUndated = Boolean(state.includeUndated);
+  return JSON.stringify(out);
 }
 
 /** @deprecated use encodeAwaitLetterboxd */
@@ -64,7 +116,19 @@ export function decodeAwaitLetterboxd(raw) {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     // Accept legacy "genres" kind from older workers during rollout.
     if (parsed.kind !== "letterboxd" && parsed.kind !== "genres") return null;
-    return { kind: "letterboxd", since: String(parsed.since || "") };
+    return {
+      kind: "letterboxd",
+      since: String(parsed.since || ""),
+      step: parsed.step || "zip",
+      fileId: String(parsed.fileId || ""),
+      topN: parsed.topN == null ? null : parsed.topN,
+      minRated: parsed.minRated == null ? null : parsed.minRated,
+      includeUSA: parsed.includeUSA == null ? null : Boolean(parsed.includeUSA),
+      includeEnglish: parsed.includeEnglish == null ? null : Boolean(parsed.includeEnglish),
+      dateFrom: String(parsed.dateFrom || ""),
+      dateTo: String(parsed.dateTo || ""),
+      includeUndated: parsed.includeUndated == null ? null : Boolean(parsed.includeUndated),
+    };
   } catch {
     return null;
   }
@@ -121,11 +185,20 @@ export function letterboxdInvalidZipText() {
 /** @deprecated use letterboxdInvalidZipText */
 export const genresInvalidZipText = letterboxdInvalidZipText;
 
-export function letterboxdAckText(jobId) {
+export function letterboxdAckText(jobId, options) {
+  const opts = normalizeLetterboxdOptions(options);
+  const period = opts.dateFrom ? `${opts.dateFrom} — ${opts.dateTo}` : "весь";
+  const undated = opts.dateFrom
+    ? `\nБез даты в дневнике: ${opts.includeUndated ? "да" : "нет"}.`
+    : "";
   return (
     "ZIP принят. Строю графики Letterboxd через GitHub Actions — пришлю PNG в этот чат " +
     "(календарь, доп. статистика, жанры).\n\n" +
-    `id: ${jobId}`
+    `Топы: ${opts.topN}. Минимум оценок: ${opts.minRated}. ` +
+    `USA: ${opts.includeUSA ? "да" : "нет"}. Английский: ${opts.includeEnglish ? "да" : "нет"}. ` +
+    `Период: ${period}.` +
+    undated +
+    `\n\nid: ${jobId}`
   );
 }
 
@@ -164,19 +237,414 @@ export function letterboxdUsageText() {
 export const genresUsageText = letterboxdUsageText;
 
 export function letterboxdStopClearedHead() {
-  return "Ввод прерван, ожидание ZIP Letterboxd сброшено.";
+  return "Ввод прерван, ожидание Letterboxd сброшено.";
 }
 
 /** @deprecated use letterboxdStopClearedHead */
 export const genresStopClearedHead = letterboxdStopClearedHead;
 
-export function buildLetterboxdDispatch({ repo, workflow, ref, jobId, chatId, fileId }) {
+function normReply(text) {
+  return String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+const RU_MONTHS = {
+  январь: 1,
+  янв: 1,
+  февраль: 2,
+  фев: 2,
+  март: 3,
+  мар: 3,
+  апрель: 4,
+  апр: 4,
+  май: 5,
+  июнь: 6,
+  июн: 6,
+  июль: 7,
+  июл: 7,
+  август: 8,
+  авг: 8,
+  сентябрь: 9,
+  сен: 9,
+  октябрь: 10,
+  окт: 10,
+  ноябрь: 11,
+  ноя: 11,
+  декабрь: 12,
+  дек: 12,
+};
+
+function isoDate(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function daysInMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function yearOk(year) {
+  return year >= 1900 && year <= 2100;
+}
+
+export const LETTERBOXD_DATE_RETRY =
+  "Дата не разобрана. Год: 2012. Месяц: 06-2012. День: 15-06-2012 или 15.06.2012. Два края через пробел: 2018 2020. Запуск не начат.";
+
+/**
+ * One typed bound → inclusive YYYY-MM-DD edge.
+ * Month is always before year: MM-YYYY, MM.YYYY, «март 2012».
+ * Day is day-month-year: DD-MM-YYYY or DD.MM.YYYY.
+ * Year-first forms (2012-06, 2012-06-15) are rejected.
+ * edge "start" is the first day of that period; "end" is the last day.
+ */
+export function parseWatchBound(text, edge = "start") {
+  const raw = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const end = edge === "end";
+  const emit = (year, month, day, precision) => {
+    if (!yearOk(year) || month < 1 || month > 12) return "";
+    if (precision === "year") return end ? isoDate(year, 12, 31) : isoDate(year, 1, 1);
+    if (precision === "month") {
+      return end ? isoDate(year, month, daysInMonth(year, month)) : isoDate(year, month, 1);
+    }
+    if (day < 1 || day > daysInMonth(year, month)) return "";
+    return isoDate(year, month, day);
+  };
+
+  let match = raw.match(/^(\d{4})$/);
+  if (match) return emit(Number(match[1]), 1, 1, "year");
+
+  match = raw.match(/^(\d{2})[-.](\d{4})$/);
+  if (match) return emit(Number(match[2]), Number(match[1]), 1, "month");
+
+  match = raw.match(/^([а-яё]+)\s+(\d{4})$/);
+  if (match && RU_MONTHS[match[1]]) return emit(Number(match[2]), RU_MONTHS[match[1]], 1, "month");
+
+  match = raw.match(/^(\d{2})[-.](\d{2})[-.](\d{4})$/);
+  if (match) return emit(Number(match[3]), Number(match[2]), Number(match[1]), "day");
+
+  return "";
+}
+
+/** One value is the whole interval. Two bounds are an explicit start–end. */
+export function parseWatchInterval(text) {
+  const raw = String(text || "").trim().replace(/\s+/g, " ");
+  if (!raw) return null;
+  const single = parseWatchBound(raw, "start");
+  if (single) {
+    return { dateFrom: single, dateTo: parseWatchBound(raw, "end") };
+  }
+  const pair = (left, right) => {
+    const dateFrom = parseWatchBound(left, "start");
+    const dateTo = parseWatchBound(right, "end");
+    if (!dateFrom || !dateTo) return null;
+    return { dateFrom, dateTo };
+  };
+  let match = raw.match(/^(\d{2}[-.]\d{2}[-.]\d{4})\s*[-–—]\s*(\d{2}[-.]\d{2}[-.]\d{4})$/);
+  if (match) return pair(match[1], match[2]);
+  match = raw.match(/^(\d{4})\s*[-–—]\s*(\d{4})$/);
+  if (match) return pair(match[1], match[2]);
+  const bits = raw.split(" ");
+  if (bits.length === 2) return pair(bits[0], bits[1]);
+  return null;
+}
+
+export function utcDateStamp(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export function shiftUtcYears(date, deltaYears) {
+  const year = date.getUTCFullYear() + deltaYears;
+  const month = date.getUTCMonth();
+  const day = date.getUTCDate();
+  const dim = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(year, month, Math.min(day, dim)));
+}
+
+export function presetWatchRange(years, now = new Date()) {
+  return {
+    dateFrom: utcDateStamp(shiftUtcYears(now, -years)),
+    dateTo: utcDateStamp(now),
+  };
+}
+
+function button(text, data) {
+  return { text, callback_data: data };
+}
+
+export function letterboxdModeKeyboard() {
+  return { inline_keyboard: [[button("По умолчанию", "lb:def"), button("Настроить", "lb:cus")]] };
+}
+
+export function letterboxdTopKeyboard() {
+  return { inline_keyboard: [[button("10", "lb:n:10"), button("20", "lb:n:20"), button("30", "lb:n:30")]] };
+}
+
+export function letterboxdMinKeyboard() {
+  return { inline_keyboard: [[button("3", "lb:m:3"), button("5", "lb:m:5"), button("10", "lb:m:10")]] };
+}
+
+export function letterboxdYesNoKeyboard(prefix) {
+  return { inline_keyboard: [[button("Да", `${prefix}:1`), button("Нет", `${prefix}:0`)]] };
+}
+
+export function letterboxdPeriodKeyboard() {
+  return { inline_keyboard: [[button("Весь период", "lb:span"), button("Свой диапазон", "lb:rng")]] };
+}
+
+export function letterboxdRangeKeyboard() {
+  return {
+    inline_keyboard: [[button("Последний год", "lb:y:1"), button("Последние 5 лет", "lb:y:5")]],
+  };
+}
+
+export function letterboxdUndatedKeyboard() {
+  return { inline_keyboard: [[button("Нет", "lb:und:0"), button("Да", "lb:und:1")]] };
+}
+
+export function letterboxdModePrompt() {
+  return {
+    text:
+      "ZIP принят.\n\n" +
+      "Настроить вывод или по умолчанию?\n\n" +
+      "Кнопки ниже или ответ текстом. Отмена — /stop.",
+    reply_markup: letterboxdModeKeyboard(),
+  };
+}
+
+function promptFor(step, state) {
+  if (step === "mode") return letterboxdModePrompt();
+  if (step === "top_n") {
+    return {
+      text:
+        "Сколько позиций в топах?\n\n" +
+        "По умолчанию 20. Кнопки 10, 20, 30 — или число от 5 до 30.",
+      reply_markup: letterboxdTopKeyboard(),
+    };
+  }
+  if (step === "min_rated") {
+    return {
+      text:
+        "Минимум оценённых фильмов для топов средних.\n\n" +
+        "По умолчанию 3. Кнопки 3, 5, 10 — или число от 1 до 50.",
+      reply_markup: letterboxdMinKeyboard(),
+    };
+  }
+  if (step === "usa") {
+    return {
+      text: "Выводить USA в топе стран?\n\nПо умолчанию да.",
+      reply_markup: letterboxdYesNoKeyboard("lb:usa"),
+    };
+  }
+  if (step === "english") {
+    return {
+      text: "Выводить английский в топе языков?\n\nПо умолчанию да.",
+      reply_markup: letterboxdYesNoKeyboard("lb:en"),
+    };
+  }
+  if (step === "period") {
+    return {
+      text:
+        "Весь период или свой диапазон?\n\n" +
+        "Весь период — от первого просмотра до последнего. Свой — даты включительно.",
+      reply_markup: letterboxdPeriodKeyboard(),
+    };
+  }
+  if (step === "range_start") {
+    return {
+      text:
+        "Период одной строкой, даты включительно.\n\n" +
+        "Кнопки: последний год, последние 5 лет.\n" +
+        "Одно значение — весь интервал: 2012, 06-2012, 15-06-2012.\n" +
+        "Два края: 2018 2020, 01-2019 06-2019, 15-01-2019 31-03-2019.",
+      reply_markup: letterboxdRangeKeyboard(),
+    };
+  }
+  if (step === "range_end") {
+    return {
+      text:
+        `Конец диапазона, включительно.\n\nНачало ${state.dateFrom}. ` +
+        "Точность может отличаться: год, месяц или день.",
+      reply_markup: { inline_keyboard: [] },
+    };
+  }
+  if (step === "undated") {
+    return {
+      text:
+        "В этом интервале добавлять фильмы без датированной записи в дневнике?\n\n" +
+        "Нет — только дневник с датой внутри диапазона. " +
+        "Да — ещё фильмы из watched/ratings без даты в дневнике (в календарные графики они не попадут).",
+      reply_markup: letterboxdUndatedKeyboard(),
+    };
+  }
+  return letterboxdModePrompt();
+}
+
+function withText(step, state, text) {
+  const base = promptFor(step, state);
+  return { text, reply_markup: base.reply_markup };
+}
+
+export function parseLetterboxdCallback(data) {
+  const raw = String(data || "");
+  if (raw === "lb:def") return { step: "mode", choice: "defaults" };
+  if (raw === "lb:cus") return { step: "mode", choice: "custom" };
+  let match = raw.match(/^lb:n:(10|20|30)$/);
+  if (match) return { step: "top_n", value: Number(match[1]) };
+  match = raw.match(/^lb:m:(3|5|10)$/);
+  if (match) return { step: "min_rated", value: Number(match[1]) };
+  if (raw === "lb:usa:1" || raw === "lb:usa:0") return { step: "usa", value: raw.endsWith("1") };
+  if (raw === "lb:en:1" || raw === "lb:en:0") return { step: "english", value: raw.endsWith("1") };
+  if (raw === "lb:span") return { step: "period", choice: "full" };
+  if (raw === "lb:rng") return { step: "period", choice: "custom" };
+  if (raw === "lb:y:1" || raw === "lb:y:5") return { step: "range_start", preset: raw === "lb:y:1" ? 1 : 5 };
+  if (raw === "lb:und:1" || raw === "lb:und:0") return { step: "undated", value: raw.endsWith("1") };
+  return null;
+}
+
+function parseModeText(text) {
+  const t = normReply(text);
+  if (["по умолчанию", "умолчанию", "default", "defaults"].includes(t)) return "defaults";
+  if (["настроить", "настройка", "customize"].includes(t)) return "custom";
+  return "";
+}
+
+function parseYesNoText(text) {
+  const t = normReply(text);
+  if (["да", "yes", "y"].includes(t)) return true;
+  if (["нет", "no", "n"].includes(t)) return false;
+  return null;
+}
+
+function parsePeriodText(text) {
+  const t = normReply(text);
+  if (["весь период", "весь", "все", "полный", "full"].includes(t)) return "full";
+  if (["свой диапазон", "свой", "диапазон", "custom"].includes(t)) return "custom";
+  return "";
+}
+
+function parsePresetYears(text) {
+  const t = normReply(text);
+  if (["последний год", "за год", "last year", "1"].includes(t)) return 1;
+  if (["последние 5 лет", "5 лет", "last 5 years", "5"].includes(t)) return 5;
+  return 0;
+}
+
+function parseBounded(text, min, max) {
+  const t = String(text || "").trim();
+  if (!/^\d{1,3}$/.test(t)) return null;
+  const n = Number(t);
+  if (n < min || n > max) return null;
+  return n;
+}
+
+function go(state, step) {
+  return { state: { ...state, step }, messages: [promptFor(step, { ...state, step })] };
+}
+
+function retry(state, text) {
+  return { state, messages: [withText(state.step, state, text)] };
+}
+
+function finish(state, patch) {
+  const merged = { ...state, ...patch };
+  return {
+    clear: true,
+    dispatch: {
+      fileId: merged.fileId,
+      options: normalizeLetterboxdOptions(merged),
+    },
+    messages: [],
+  };
+}
+
+/**
+ * One wizard step. Returns { state, messages, clear?, dispatch?, stale? }.
+ * Invalid input stays on the step and does not dispatch.
+ */
+export function advanceLetterboxdWizard(state, input, now = new Date()) {
+  const step = state.step || "zip";
+  const kind = input && input.kind;
+  if (kind === "callback" && input.step !== step) {
+    return { state, messages: [], stale: true };
+  }
+  if (step === "mode") {
+    const choice = kind === "callback" ? input.choice : parseModeText(input.text);
+    if (choice === "defaults") return finish(state, defaultLetterboxdOptions());
+    if (choice === "custom") return go(state, "top_n");
+    return retry(state, "Нужно «по умолчанию» или «настроить». Запуск не начат.");
+  }
+  if (step === "top_n") {
+    const value = kind === "callback" ? input.value : parseBounded(input.text, LETTERBOXD_TOP_N_MIN, LETTERBOXD_TOP_N_MAX);
+    if (value == null) return retry(state, "Нужно число от 5 до 30. Кнопки: 10, 20, 30. Запуск не начат.");
+    return go({ ...state, topN: value }, "min_rated");
+  }
+  if (step === "min_rated") {
+    const value = kind === "callback" ? input.value : parseBounded(input.text, LETTERBOXD_MIN_RATED_MIN, LETTERBOXD_MIN_RATED_MAX);
+    if (value == null) return retry(state, "Нужно число от 1 до 50. Кнопки: 3, 5, 10. Запуск не начат.");
+    return go({ ...state, minRated: value }, "usa");
+  }
+  if (step === "usa") {
+    const value = kind === "callback" ? input.value : parseYesNoText(input.text);
+    if (value == null) return retry(state, "Нужно «да» или «нет». Запуск не начат.");
+    return go({ ...state, includeUSA: value }, "english");
+  }
+  if (step === "english") {
+    const value = kind === "callback" ? input.value : parseYesNoText(input.text);
+    if (value == null) return retry(state, "Нужно «да» или «нет». Запуск не начат.");
+    return go({ ...state, includeEnglish: value }, "period");
+  }
+  if (step === "period") {
+    const choice = kind === "callback" ? input.choice : parsePeriodText(input.text);
+    if (choice === "full") {
+      return finish(state, { dateFrom: "", dateTo: "", includeUndated: false });
+    }
+    if (choice === "custom") return go(state, "range_start");
+    return retry(state, "Нужно «весь период» или «свой диапазон». Запуск не начат.");
+  }
+  if (step === "range_start") {
+    const preset = kind === "callback" ? input.preset : parsePresetYears(input.text);
+    if (preset === 1 || preset === 5) {
+      const range = presetWatchRange(preset, now);
+      return go({ ...state, dateFrom: range.dateFrom, dateTo: range.dateTo }, "undated");
+    }
+    if (kind === "callback") return retry(state, "Этот шаг уже не про кнопки периода. Запуск не начат.");
+    const interval = parseWatchInterval(input.text);
+    if (!interval) return retry(state, LETTERBOXD_DATE_RETRY);
+    if (interval.dateTo < interval.dateFrom) {
+      return retry(state, `Конец ${interval.dateTo} раньше начала ${interval.dateFrom}. Напишите период ещё раз.`);
+    }
+    return go({ ...state, dateFrom: interval.dateFrom, dateTo: interval.dateTo }, "undated");
+  }
+  if (step === "range_end") {
+    if (kind === "callback") return retry(state, LETTERBOXD_DATE_RETRY);
+    const interval = parseWatchInterval(input.text);
+    if (!interval) return retry(state, LETTERBOXD_DATE_RETRY);
+    if (interval.dateTo < interval.dateFrom) {
+      return retry(state, `Конец ${interval.dateTo} раньше начала ${interval.dateFrom}. Напишите период ещё раз.`);
+    }
+    return go({ ...state, dateFrom: interval.dateFrom, dateTo: interval.dateTo }, "undated");
+  }
+  if (step === "undated") {
+    const value = kind === "callback" ? input.value : parseYesNoText(input.text);
+    if (value == null) return retry(state, "Нужно «да» или «нет». Запуск не начат.");
+    return finish(state, { includeUndated: value });
+  }
+  return { state, messages: [] };
+}
+
+export function buildLetterboxdDispatch({ repo, workflow, ref, jobId, chatId, fileId, options }) {
   const id = String(jobId || "").trim();
   const chat = String(chatId ?? "").trim();
   const file = normalizeTelegramFileId(fileId);
   if (!id || id.length > 80) throw new Error("jobId");
   if (!chat || !/^-?[0-9]{1,16}$/.test(chat)) throw new Error("chatId");
   if (!file) throw new Error("fileId");
+  const opts = normalizeLetterboxdOptions(options);
   return {
     url: dispatchUrl(repo, workflow || LETTERBOXD_WORKFLOW),
     body: {
@@ -185,6 +653,13 @@ export function buildLetterboxdDispatch({ repo, workflow, ref, jobId, chatId, fi
         job_id: id,
         chat_id: chat,
         file_id: file,
+        top_n: String(opts.topN),
+        min_rated: String(opts.minRated),
+        include_usa: opts.includeUSA ? "true" : "false",
+        include_english: opts.includeEnglish ? "true" : "false",
+        date_from: opts.dateFrom,
+        date_to: opts.dateTo,
+        include_undated: opts.includeUndated ? "true" : "false",
       },
     },
   };
@@ -193,8 +668,8 @@ export function buildLetterboxdDispatch({ repo, workflow, ref, jobId, chatId, fi
 /** @deprecated use buildLetterboxdDispatch */
 export const buildGenresDispatch = buildLetterboxdDispatch;
 
-export async function dispatchLetterboxdWorkflow(fetchImpl, { token, repo, workflow, ref, jobId, chatId, fileId }) {
-  const built = buildLetterboxdDispatch({ repo, workflow, ref, jobId, chatId, fileId });
+export async function dispatchLetterboxdWorkflow(fetchImpl, { token, repo, workflow, ref, jobId, chatId, fileId, options }) {
+  const built = buildLetterboxdDispatch({ repo, workflow, ref, jobId, chatId, fileId, options });
   const res = await fetchImpl(built.url, {
     method: "POST",
     headers: githubHeaders(token),

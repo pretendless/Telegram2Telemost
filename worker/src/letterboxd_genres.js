@@ -7,11 +7,13 @@ import {
   dispatchLetterboxdWorkflow,
   encodeAwaitLetterboxd,
   findLetterboxdRunUrl,
+  advanceLetterboxdWizard,
   letterboxdAckText,
   letterboxdDispatchFailText,
   letterboxdDispatchedText,
   letterboxdInvalidZipText,
   letterboxdJobKey,
+  letterboxdModePrompt,
   letterboxdNeedZipText,
   letterboxdPromptText,
   letterboxdStartingText,
@@ -20,11 +22,12 @@ import {
   LETTERBOXD_WORKFLOW,
   newLetterboxdJobId,
   normalizeTelegramFileId,
+  parseLetterboxdCallback,
   parseLetterboxdCommand,
 } from "../../vm/letterboxd_genres.js";
 import { awaitCreateKey } from "./logic.js";
 
-export async function finishLetterboxdDispatch(env, { jobId, chatId, fileId, deps = {} }) {
+export async function finishLetterboxdDispatch(env, { jobId, chatId, fileId, options, deps = {} }) {
   const send = deps.send;
   const fetchImpl = deps.fetch || fetch;
   const repo = env.GH_REPO || DEFAULT_REPO;
@@ -41,6 +44,7 @@ export async function finishLetterboxdDispatch(env, { jobId, chatId, fileId, dep
       jobId,
       chatId,
       fileId,
+      options,
     });
   } catch (err) {
     console.error("letterboxd dispatch failed", err && err.message);
@@ -120,6 +124,22 @@ export async function handleLetterboxdDocument(env, message, deps = {}) {
     return true;
   }
 
+  await kv.put(
+    awaitLetterboxdKey(chatId),
+    encodeAwaitLetterboxd({
+      since: awaiting.since,
+      step: "mode",
+      fileId,
+    }),
+  );
+  const prompt = letterboxdModePrompt();
+  await send(env, chatId, prompt.text, { reply_markup: prompt.reply_markup });
+  return true;
+}
+
+async function beginLetterboxdJob(env, chatId, fileId, options, deps) {
+  const send = deps.send;
+  const kv = env.BOT_KV;
   const jobId = newLetterboxdJobId(deps.now);
   const createdAt = typeof deps.now === "function" ? deps.now().toISOString() : new Date().toISOString();
   await kv.put(
@@ -130,27 +150,81 @@ export async function handleLetterboxdDocument(env, message, deps = {}) {
       fileId,
       status: "pending",
       createdAt,
+      options,
     }),
   );
   await kv.delete(awaitLetterboxdKey(chatId));
-
-  await send(env, chatId, letterboxdAckText(jobId));
+  await send(env, chatId, letterboxdAckText(jobId, options));
   await send(env, chatId, letterboxdStartingText());
-
   const background = async () => {
     await finishLetterboxdDispatch(env, {
       jobId,
       chatId,
       fileId,
+      options,
       deps: { ...deps, send },
     });
   };
+  if (deps.waitUntil) deps.waitUntil(background());
+  else await background();
+}
 
-  if (deps.waitUntil) {
-    deps.waitUntil(background());
+async function applyLetterboxdWizard(env, chatId, outcome, deps) {
+  const kv = env.BOT_KV;
+  const send = deps.send;
+  if (outcome.state && !outcome.clear) {
+    await kv.put(awaitLetterboxdKey(chatId), encodeAwaitLetterboxd(outcome.state));
+  }
+  for (const msg of outcome.messages || []) {
+    await send(env, chatId, msg.text, msg.reply_markup ? { reply_markup: msg.reply_markup } : undefined);
+  }
+  if (outcome.dispatch) {
+    await beginLetterboxdJob(env, chatId, outcome.dispatch.fileId, outcome.dispatch.options, deps);
+  } else if (outcome.clear) {
+    await kv.delete(awaitLetterboxdKey(chatId));
+  }
+}
+
+export async function handleLetterboxdText(env, message, deps = {}) {
+  const send = deps.send;
+  if (!send) throw new Error("send");
+  const chatId = message.chat && message.chat.id;
+  const kv = env.BOT_KV;
+  if (!kv) return false;
+  const state = decodeAwaitLetterboxd(await kv.get(awaitLetterboxdKey(chatId)));
+  if (!state || state.step === "zip") return false;
+  const now = typeof deps.now === "function" ? deps.now() : new Date();
+  const outcome = advanceLetterboxdWizard(state, { kind: "text", text: message.text }, now);
+  await applyLetterboxdWizard(env, chatId, outcome, deps);
+  return true;
+}
+
+export async function handleLetterboxdCallback(env, callback, deps = {}) {
+  const answer = deps.answerCallback;
+  const parsed = parseLetterboxdCallback(callback && callback.data);
+  const message = callback && callback.message;
+  const chatId = message && message.chat && message.chat.id;
+  if (!parsed || chatId == null) {
+    if (answer) await answer(env, callback && callback.id, "");
+    return false;
+  }
+  const kv = env.BOT_KV;
+  const state = kv ? decodeAwaitLetterboxd(await kv.get(awaitLetterboxdKey(chatId))) : null;
+  if (!state) {
+    if (answer) await answer(env, callback.id, "Ожидание Letterboxd уже сброшено.");
     return true;
   }
-  await background();
+  if (parsed.step !== state.step) {
+    if (answer) await answer(env, callback.id, "Этот шаг уже пройден.");
+    return true;
+  }
+  if (answer) await answer(env, callback.id, "");
+  if (deps.clearKeyboard && message.message_id) {
+    await deps.clearKeyboard(env, chatId, message.message_id);
+  }
+  const now = typeof deps.now === "function" ? deps.now() : new Date();
+  const outcome = advanceLetterboxdWizard(state, { kind: "callback", ...parsed }, now);
+  await applyLetterboxdWizard(env, chatId, outcome, deps);
   return true;
 }
 
