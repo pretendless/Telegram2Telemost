@@ -178,6 +178,72 @@ def test_rating_vbar_skips_bad_avg(tmp_path: Path | None = None):
     assert path.is_file()
 
 
+def _hbar_texts(draw) -> list:
+    import letterboxd_top_charts as charts
+
+    captured: dict = {}
+    real_save = charts.save_dark_figure
+
+    def grab(fig, dest, **kwargs):
+        captured["texts"] = [t for ax in fig.axes for t in ax.texts]
+        real_save(fig, dest, **kwargs)
+
+    charts.save_dark_figure = grab
+    try:
+        draw()
+    finally:
+        charts.save_dark_figure = real_save
+    return captured.get("texts") or []
+
+
+def test_rating_annotation_colors_mean_keeps_n(tmp_path: Path | None = None):
+    """Rating tops style the mean. The count is regular light text in parentheses."""
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-rating-style")
+    out.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"name": "Low", "avg": 2.25, "rated": 26},
+        {"name": "Mid", "avg": 3.40, "rated": 8},
+        {"name": "High", "avg": 4.67, "rated": 3},
+    ]
+    texts = _hbar_texts(
+        lambda: chart_rating_hbar(rows, out / "mixed.png", title="Жанры — выше оценка", limit=20)
+    )
+    means = {t.get_text(): t for t in texts if t.get_text() in {"2.25", "3.40", "4.67"}}
+    counts = [t for t in texts if t.get_text().startswith("(")]
+    assert set(means) == {"2.25", "3.40", "4.67"}
+    assert {t.get_text() for t in counts} == {"(26)", "(8)", "(3)"}
+    assert all("n=" not in t.get_text() for t in texts)
+    for label, value in (("2.25", 2.25), ("3.40", 3.40), ("4.67", 4.67)):
+        text = means[label]
+        assert text.get_fontweight() == "bold"
+        assert _rgba(text.get_color()) == _rgba(rating_color(value))
+        assert text.get_path_effects()
+    for text in counts:
+        assert text.get_fontweight() == "normal"
+        assert _rgba(text.get_color()) == _rgba(FG)
+
+    low_rows = [{"year": 2000 + i, "avg": round(2.2 + i * 0.03, 2), "rated": 4 + i} for i in range(TOP_N_DEFAULT)]
+    low_texts = _hbar_texts(
+        lambda: chart_release_years_by_rating(
+            low_rows, out / "years-low.png", ascending=True, title="Годы выхода — ниже оценка"
+        )
+    )
+    assert any(t.get_text().startswith("(") and t.get_fontweight() == "normal" for t in low_texts)
+    assert any(t.get_fontweight() == "bold" and t.get_path_effects() for t in low_texts)
+    assert all("n=" not in t.get_text() for t in low_texts)
+
+    vbar = _hbar_texts(
+        lambda: chart_rating_vbar(
+            [{"name": "Good", "avg": 4.1, "rated": 6}],
+            out / "vbar.png",
+            title="Режиссёры — выше оценка",
+        )
+    )
+    assert any(t.get_text() == "4.10" and t.get_fontweight() == "bold" for t in vbar)
+    assert any(t.get_text() == "(6)" and t.get_fontweight() == "normal" for t in vbar)
+    assert all("n=" not in t.get_text() for t in vbar)
+
+
 def test_rating_hbar_with_in_bar_labels(tmp_path: Path | None = None):
     out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
     out.mkdir(parents=True, exist_ok=True)
@@ -595,6 +661,7 @@ if __name__ == "__main__":
     test_rating_color_fixed_scale_separates_high_band()
     test_release_year_charts()
     test_rating_vbar_skips_bad_avg()
+    test_rating_annotation_colors_mean_keeps_n()
     test_rating_hbar_with_in_bar_labels()
     test_rating_hbar_worst_ascending()
     test_rating_hbar_long_names_no_overlap()
