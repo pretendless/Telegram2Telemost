@@ -199,6 +199,7 @@ def chart_stacked_count_hbar(
         return False
     n = len(labels)
     # Compact rows — plot fills most of the canvas (not a tall sparse strip).
+    # Fixed row pitch and point size. A top of 100 is a tall figure, not smaller type.
     fig_h = max(4.0, n * 0.40)
     # Extra width when each bar also carries a mean (count stays at the tip).
     fig_w = 11.4 if avg_labels else 10.5
@@ -481,6 +482,7 @@ def chart_rating_hbar(
     rateds = [rated for _, (_, _, rated) in display]
     colors = rating_colors(avgs)
 
+    # Same point size at any N; the canvas grows about half an inch per row.
     fig, ax = plt.subplots(figsize=(11, max(4.5, len(labels) * 0.48)))
     y = np.arange(len(labels))
     bars = ax.barh(y, avgs, color=colors, height=0.72, edgecolor="none")

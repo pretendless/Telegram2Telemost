@@ -2938,3 +2938,109 @@ test("/letterboxd ZIP dispatches letterboxd.yml for any chat", async () => {
   // Regular user must not get github.com run link.
   assert.doesNotMatch(sent.map((row) => row.text).join("\n"), /github\.com/i);
 });
+
+function callbackRequest(chatId, data, id = "cb-1") {
+  return new Request("https://tg2tmbot.example/telegram", {
+    method: "POST",
+    headers: { "X-Telegram-Bot-Api-Secret-Token": "webhook-secret", "content-type": "application/json" },
+    body: JSON.stringify({
+      callback_query: {
+        id,
+        data,
+        message: { message_id: 42, chat: { id: chatId } },
+      },
+    }),
+  });
+}
+
+test("letterboxd inline button answers the callback and advances the wizard", async () => {
+  const env = envWith();
+  env.GH_DISPATCH_TOKEN = "dispatch-token";
+  const sent = [];
+  const order = [];
+  const github = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const method = String(url).split("/").pop();
+    const body = init.body ? JSON.parse(init.body) : {};
+    order.push(method);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: { message_id: 1 }, method, body }),
+    };
+  };
+  const sendMessage = async (_env, chatId, text) => {
+    order.push(`send:${text.slice(0, 24)}`);
+    sent.push({ chatId, text });
+    return { message_id: sent.length };
+  };
+  const fetch = async (url, init = {}) => {
+    const body = init.body ? JSON.parse(init.body) : null;
+    github.push({ url: String(url), body });
+    if (String(url).includes("/actions/runs")) {
+      return {
+        status: 200,
+        json: async () => ({ workflow_runs: [] }),
+      };
+    }
+    return new Response(null, { status: 204 });
+  };
+  try {
+    await handle(telegramRequest(111, "/letterboxd"), env, { sendMessage, fetch });
+    await handle(
+      documentRequest(111, {
+        file_name: "letterboxd-2026.zip",
+        mime_type: "application/zip",
+        file_id: "BQACAgIAAxkBAAI1234567890abcd",
+      }),
+      env,
+      { sendMessage, fetch },
+    );
+    order.length = 0;
+    sent.length = 0;
+    const res = await handle(callbackRequest(111, "lb:def", "cb-def"), env, { sendMessage, fetch });
+    assert.equal(res.status, 200);
+    assert.equal(order[0], "answerCallbackQuery");
+    assert.ok(order.indexOf("answerCallbackQuery") < order.findIndex((item) => item.startsWith("send:")));
+    const dispatch = github.find((call) => String(call.url).includes("letterboxd.yml/dispatches"));
+    assert.ok(dispatch);
+    assert.equal(dispatch.body.inputs.top_n, "20");
+    assert.equal(env.BOT_KV.store.get("await:letterboxd:111"), undefined);
+
+    await handle(telegramRequest(222, "/letterboxd"), env, { sendMessage, fetch });
+    await handle(
+      documentRequest(222, {
+        file_name: "letterboxd-2026.zip",
+        mime_type: "application/zip",
+        file_id: "BQACAgIAAxkBAAI1234567890abcd",
+      }),
+      env,
+      { sendMessage, fetch },
+    );
+    order.length = 0;
+    await handle(callbackRequest(222, "lb:cus", "cb-cus"), env, { sendMessage, fetch });
+    assert.equal(order[0], "answerCallbackQuery");
+    const stored = JSON.parse(env.BOT_KV.store.get("await:letterboxd:222"));
+    assert.equal(stored.step, "top_n");
+    assert.equal(github.find((call) => String(call.url).includes("letterboxd.yml/dispatches") && call.body.inputs.chat_id === "222"), undefined);
+    order.length = 0;
+    await handle(callbackRequest(222, "lb:n:50", "cb-n"), env, { sendMessage, fetch });
+    assert.equal(JSON.parse(env.BOT_KV.store.get("await:letterboxd:222")).step, "min_rated");
+    assert.equal(JSON.parse(env.BOT_KV.store.get("await:letterboxd:222")).topN, 50);
+    const stale = [];
+    const restore = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      const method = String(url).split("/").pop();
+      const body = init.body ? JSON.parse(init.body) : {};
+      if (method === "answerCallbackQuery") stale.push(body.text || "");
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    };
+    await handle(callbackRequest(222, "lb:n:10", "cb-stale"), env, { sendMessage, fetch });
+    globalThis.fetch = restore;
+    assert.equal(stale[0], "Этот шаг уже пройден.");
+    assert.equal(JSON.parse(env.BOT_KV.store.get("await:letterboxd:222")).step, "min_rated");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

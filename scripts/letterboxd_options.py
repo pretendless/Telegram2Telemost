@@ -1,12 +1,12 @@
 """Chart options for /letterboxd: top size, rating gate, USA/English, watch window.
 
 Wizard defaults (also the GitHub Actions defaults):
-  top_n=20 (allowed 5–30), min_rated=3 (allowed 1–50),
+  top_n=20 (allowed 1–100), min_rated=3 (allowed 1–50),
   include USA, include English, full diary span, undated films only on the full span.
 
-Stacked count bars past 30 rows get too thin for Telegram (0.40 in/row plus a
-watch-year legend). The worker rejects out-of-range numbers; this module clamps
-a manual workflow_dispatch into the same bounds.
+The wizard rejects anything outside 1–100 (a typo like 9999 never dispatches).
+This module clamps a manual workflow_dispatch into the same bounds. Chart
+height grows with the row count; point sizes stay put.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from dataclasses import dataclass
 
 from letterboxd_ratings import passes_rated_threshold
 
-TOP_N_MIN = 5
-TOP_N_MAX = 30
+TOP_N_MIN = 1
+TOP_N_MAX = 100
 TOP_N_DEFAULT = 20
 MIN_RATED_MIN = 1
 MIN_RATED_MAX = 50

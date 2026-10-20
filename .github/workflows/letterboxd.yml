@@ -18,7 +18,7 @@ on:
         required: true
         type: string
       top_n:
-        description: Positions in ranking charts (5–30; stacked hbars unreadable past 30)
+        description: Positions in ranking charts (1–100; default 20; figure grows taller with N)
         required: false
         default: "20"
         type: string

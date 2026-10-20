@@ -498,11 +498,13 @@ export function channelPack(pack, queue) {
   };
 }
 
-// HTML only for messages this bot built with anchors. Plain chat text stays plain.
+// HTML for messages this bot built with anchors or its own <b> markup.
+// Plain chat text stays plain.
 export function telegramParseMode(text) {
   const value = String(text ?? "");
   if (/<a href="https?:\/\/t\.me\/addstickers\//.test(value)) return "HTML";
   if (/<a href="https?:\/\/[^"]+">Открыть в Телемосте<\/a>/.test(value)) return "HTML";
+  if (/<b>[\s\S]*<\/b>/.test(value)) return "HTML";
   return undefined;
 }
 

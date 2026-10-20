@@ -16,6 +16,9 @@ from letterboxd_palette import (
     rating_colormap,
     watch_year_palette,
 )
+from PIL import Image
+
+from letterboxd_options import TOP_N_MAX, TOP_N_MIN, clamp_top_n
 from letterboxd_top_charts import (
     TOP_N_DEFAULT,
     chart_rating_hbar,
@@ -35,6 +38,41 @@ def test_display_lang():
 
 def test_top_n_default_about_20():
     assert TOP_N_DEFAULT == 20
+    assert TOP_N_MIN == 1
+    assert TOP_N_MAX == 100
+    assert clamp_top_n("100") == 100
+    assert clamp_top_n("9999") == 100
+    assert clamp_top_n("0") == 1
+
+
+def test_ranked_hbar_grows_taller_with_n(tmp_path: Path | None = None) -> None:
+    """100 rows keep the same pitch as 20: the PNG gets taller, type is not crammed."""
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
+    out.mkdir(parents=True, exist_ok=True)
+    palette = {2020: "#4C78A8"}
+
+    def stacked(n: int, path: Path) -> None:
+        labels = [f"Film {i}" for i in range(n)]
+        matrix = np.ones((1, n))
+        assert chart_stacked_count_hbar(labels, [2020], matrix, palette, path, title="Топ") is True
+
+    p20 = out / "count-20.png"
+    p100 = out / "count-100.png"
+    stacked(20, p20)
+    stacked(100, p100)
+    h20 = Image.open(p20).height
+    h100 = Image.open(p100).height
+    assert h100 > h20 * 3.5
+
+    def rated(n: int, path: Path) -> None:
+        rows = [{"name": f"Name {i}", "avg": 3.5, "rated": 4} for i in range(n)]
+        assert chart_rating_hbar(rows, path, title="Средние", limit=n) is True
+
+    r20 = out / "rating-20.png"
+    r100 = out / "rating-100.png"
+    rated(20, r20)
+    rated(100, r100)
+    assert Image.open(r100).height > Image.open(r20).height * 3.5
 
 
 def test_rating_colormap_is_blue_green_red():
@@ -421,6 +459,7 @@ def test_rating_hbar_worst_skips_short_slate(tmp_path: Path | None = None):
 if __name__ == "__main__":
     test_display_lang()
     test_top_n_default_about_20()
+    test_ranked_hbar_grows_taller_with_n()
     test_rating_colormap_is_blue_green_red()
     test_rating_color_fixed_scale_separates_high_band()
     test_release_year_charts()

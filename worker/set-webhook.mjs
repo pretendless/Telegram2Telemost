@@ -22,7 +22,9 @@ if (!token || !secret || !url) {
 const body = new URLSearchParams({
   url,
   secret_token: secret,
-  allowed_updates: JSON.stringify(["message"]),
+  // callback_query is required for the Letterboxd inline wizard. An explicit
+  // list that omits it makes button taps flash and never reach the worker.
+  allowed_updates: JSON.stringify(["message", "callback_query"]),
 });
 const res = await telegramFetch(`https://api.telegram.org/bot${token}/setWebhook`, { method: "POST", body });
 const json = await res.json();

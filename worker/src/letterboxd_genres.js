@@ -199,26 +199,37 @@ export async function handleLetterboxdText(env, message, deps = {}) {
   return true;
 }
 
+async function replyCallback(answer, env, id, text) {
+  if (!answer) return;
+  try {
+    await answer(env, id, text || "");
+  } catch (err) {
+    console.error("answerCallbackQuery", err && err.message);
+  }
+}
+
 export async function handleLetterboxdCallback(env, callback, deps = {}) {
   const answer = deps.answerCallback;
+  const callbackId = callback && callback.id;
   const parsed = parseLetterboxdCallback(callback && callback.data);
   const message = callback && callback.message;
   const chatId = message && message.chat && message.chat.id;
   if (!parsed || chatId == null) {
-    if (answer) await answer(env, callback && callback.id, "");
+    await replyCallback(answer, env, callbackId, "");
     return false;
   }
   const kv = env.BOT_KV;
   const state = kv ? decodeAwaitLetterboxd(await kv.get(awaitLetterboxdKey(chatId))) : null;
   if (!state) {
-    if (answer) await answer(env, callback.id, "Ожидание Letterboxd уже сброшено.");
+    await replyCallback(answer, env, callbackId, "Ожидание Letterboxd уже сброшено.");
     return true;
   }
   if (parsed.step !== state.step) {
-    if (answer) await answer(env, callback.id, "Этот шаг уже пройден.");
+    await replyCallback(answer, env, callbackId, "Этот шаг уже пройден.");
     return true;
   }
-  if (answer) await answer(env, callback.id, "");
+  // Stop the button spinner before the next question or the GitHub dispatch.
+  await replyCallback(answer, env, callbackId, "");
   if (deps.clearKeyboard && message.message_id) {
     await deps.clearKeyboard(env, chatId, message.message_id);
   }
