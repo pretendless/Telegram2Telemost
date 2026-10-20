@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 
 from letterboxd_palette import (
+    FG,
     RATING_VMAX,
     RATING_VMIN,
     rating_color,
@@ -22,6 +23,7 @@ from letterboxd_top_charts import (
     chart_release_years_by_count,
     chart_release_years_by_rating,
     chart_stacked_count_hbar,
+    count_avg_text_style,
     display_lang,
 )
 
@@ -225,6 +227,136 @@ def test_watches_by_genre_stacked_count(tmp_path: Path | None = None):
     assert path.is_file() and path.stat().st_size > 0
 
 
+def _rgba(color):
+    import matplotlib.colors as mcolors
+
+    return mcolors.to_rgba(color)
+
+
+def test_count_avg_text_style_colors_mean_only():
+    low = count_avg_text_style("1.94")
+    high = count_avg_text_style("4.80")
+    dash = count_avg_text_style("—")
+    assert low["fontweight"] == "bold"
+    assert high["fontweight"] == "bold"
+    assert dash["fontweight"] == "normal"
+    assert _rgba(low["color"]) == _rgba(rating_color(1.94))
+    assert _rgba(high["color"]) == _rgba(rating_color(4.80))
+    assert _rgba(dash["color"]) == _rgba(FG)
+    assert low["path_effects"] and high["path_effects"]
+    assert dash["path_effects"] is None
+    # Same ends as the rating charts: low is bluer, high is redder.
+    assert low["color"][2] > low["color"][0]
+    assert high["color"][0] > high["color"][2]
+    assert high["color"][0] > low["color"][0]
+
+
+def test_count_bars_drop_n_and_style_mean(tmp_path: Path | None = None):
+    """Count stays regular white; mean is bold and rating-colored; no n=."""
+    import letterboxd_top_charts as charts
+
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-count-avg-label")
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "watches_by_release_year.png"
+    labels = ["1978", "1994", "2005", "2019"]
+    years = [2022, 2023, 2024]
+    palette = watch_year_palette(years)
+    # Column totals: 3, 21, 9, 8
+    matrix = np.array(
+        [
+            [1, 8, 3, 2],
+            [1, 7, 4, 3],
+            [1, 6, 2, 3],
+        ],
+        dtype=float,
+    )
+    avg_labels = ["—", "1.94", "3.40", "4.80"]
+    captured: dict = {}
+    real_save = charts.save_dark_figure
+
+    def grab(fig, dest, **kwargs):
+        captured["texts"] = [t for ax in fig.axes for t in ax.texts]
+        real_save(fig, dest, **kwargs)
+
+    charts.save_dark_figure = grab
+    try:
+        assert (
+            chart_stacked_count_hbar(
+                labels,
+                years,
+                matrix,
+                palette,
+                path,
+                title="Годы выхода — больше просмотров (цвет = год просмотра)",
+                avg_labels=avg_labels,
+            )
+            is True
+        )
+    finally:
+        charts.save_dark_figure = real_save
+    assert path.is_file() and path.stat().st_size > 0
+    grouped: dict[str, list] = {}
+    for text in captured["texts"]:
+        grouped.setdefault(text.get_text(), []).append(text)
+    assert all("n=" not in key for key in grouped)
+    assert set(grouped) >= {"3", "21", "9", "8", "—", "1.94", "3.40", "4.80"}
+    for count in ("3", "21", "9", "8"):
+        for text in grouped[count]:
+            assert text.get_fontweight() == "normal"
+            assert _rgba(text.get_color()) == _rgba(FG)
+    for mean, value in (("1.94", 1.94), ("3.40", 3.40), ("4.80", 4.80)):
+        text = grouped[mean][0]
+        assert text.get_fontweight() == "bold"
+        assert _rgba(text.get_color()) == _rgba(rating_color(value))
+        assert text.get_path_effects()
+    dash = grouped["—"][0]
+    assert dash.get_fontweight() == "normal"
+    assert _rgba(dash.get_color()) == _rgba(FG)
+    assert not dash.get_path_effects()
+
+
+def test_release_year_count_label_omits_n(tmp_path: Path | None = None):
+    import letterboxd_top_charts as charts
+
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-count-avg-label")
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "release_years_avg.png"
+    diary = pd.DataFrame(
+        {
+            "Name": ["A", "B", "C", "D", "E"],
+            "Year": [1994, 1994, 1994, 2010, 2010],
+            "Watched Date": pd.to_datetime(
+                ["2022-01-01", "2023-01-01", "2024-06-01", "2023-03-01", "2024-03-01"]
+            ),
+        }
+    )
+    captured: dict = {}
+    real_save = charts.save_dark_figure
+
+    def grab(fig, dest, **kwargs):
+        captured["texts"] = [t.get_text() for ax in fig.axes for t in ax.texts]
+        real_save(fig, dest, **kwargs)
+
+    charts.save_dark_figure = grab
+    try:
+        assert (
+            chart_release_years_by_count(
+                diary,
+                path,
+                top_n=5,
+                avg_by_name={"1994": (1.94, 17), "2010": (4.1, 2)},
+                min_rated=3,
+            )
+            is True
+        )
+    finally:
+        charts.save_dark_figure = real_save
+    joined = " ".join(captured["texts"])
+    assert "n=" not in joined
+    assert "1.94" in captured["texts"]
+    assert "—" in captured["texts"]
+
+
 def test_stacked_count_hbar_long_names(tmp_path: Path | None = None):
     """Count tops: long y-labels still render on a roomier canvas."""
     out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
@@ -298,5 +430,8 @@ if __name__ == "__main__":
     test_rating_hbar_long_names_no_overlap()
     test_rating_hbar_worst_skips_short_slate()
     test_watches_by_genre_stacked_count()
+    test_count_avg_text_style_colors_mean_only()
+    test_count_bars_drop_n_and_style_mean()
+    test_release_year_count_label_omits_n()
     test_stacked_count_hbar_long_names()
     print("ok")

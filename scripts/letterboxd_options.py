@@ -86,10 +86,11 @@ def is_english_language(code) -> bool:
 
 
 def format_count_avg_label(avg, rated, min_rated: int) -> str:
-    """Avg annotation for a quantitative bar.
+    """Avg annotation for a quantitative bar: the mean only.
 
     Same gate as avg charts (unique rated films ≥ min_rated). Below the gate,
-    or when there is no mean, show an em dash so the count label stays put.
+    or when there is no mean, show an em dash. The rated-film count is not
+    printed — viewers were reading ``n=`` as the watch count.
     """
     try:
         rated_n = int(rated) if rated is not None else 0
@@ -103,7 +104,7 @@ def format_count_avg_label(avg, rated, min_rated: int) -> str:
         return "—"
     if not (avg_f > 0):
         return "—"
-    return f"{avg_f:.2f}  n={rated_n}"
+    return f"{avg_f:.2f}"
 
 
 def rated_gate_phrase(min_rated: int) -> str:

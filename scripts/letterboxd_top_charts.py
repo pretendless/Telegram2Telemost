@@ -148,6 +148,36 @@ def add_watch_year_legend(fig, years: list[int], colors: dict, title: str = "Г�
         leg.get_title().set_color(FG)
 
 
+def _count_avg_stroke():
+    """Thin black halo so a colored mean stays readable on the dark background."""
+    import matplotlib.patheffects as path_effects
+
+    return [
+        path_effects.Stroke(linewidth=2.0, foreground="#000000"),
+        path_effects.Normal(),
+    ]
+
+
+def count_avg_text_style(label: str) -> dict:
+    """Style for the mean beside a count bar.
+
+    A numeric mean is bold and colored with the rating colormap
+    (blue → green → red on the fixed 0.5–5 scale). «—» stays regular white.
+    """
+    text = str(label or "").strip()
+    try:
+        avg = float(text)
+    except (TypeError, ValueError):
+        avg = None
+    if avg is None or not (avg > 0):
+        return {"color": FG, "fontweight": "normal", "path_effects": None}
+    return {
+        "color": rating_color(avg),
+        "fontweight": "bold",
+        "path_effects": _count_avg_stroke(),
+    }
+
+
 def chart_stacked_count_hbar(
     labels: list[str],
     years: list[int],
@@ -171,7 +201,7 @@ def chart_stacked_count_hbar(
     # Compact rows — plot fills most of the canvas (not a tall sparse strip).
     fig_h = max(4.0, n * 0.40)
     # Extra width when each bar also carries a mean (count stays at the tip).
-    fig_w = 12.2 if avg_labels else 10.5
+    fig_w = 11.4 if avg_labels else 10.5
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     y = np.arange(n)
     left_stack = np.zeros(n)
@@ -194,8 +224,8 @@ def chart_stacked_count_hbar(
     ax.xaxis.label.set_fontsize(10)
     ax.set_title(title, fontsize=12, pad=6, color=FG)
     xmax = float(left_stack.max()) if len(left_stack) else 1.0
-    # Room past the bar for the count and, when present, «4.25  n=k» / «—».
-    ax.set_xlim(0, xmax * (1.55 if avg_labels else 1.12))
+    # Room past the bar for the white count and, when present, «4.25» / «—».
+    ax.set_xlim(0, xmax * (1.36 if avg_labels else 1.12))
     count_artists = []
     for yi, total in enumerate(left_stack):
         artist = ax.text(
@@ -205,6 +235,7 @@ def chart_stacked_count_hbar(
             va="center",
             fontsize=8,
             color=FG,
+            fontweight="normal",
             clip_on=False,
         )
         count_artists.append(artist)
@@ -244,6 +275,7 @@ def chart_stacked_count_hbar(
                 continue
             bbox = artist.get_window_extent(renderer=renderer)
             x_data, _y = ax.transData.inverted().transform((bbox.x1 + 10, bbox.y1))
+            style = count_avg_text_style(label)
             ax.text(
                 x_data,
                 artist.get_position()[1],
@@ -251,7 +283,9 @@ def chart_stacked_count_hbar(
                 va="center",
                 ha="left",
                 fontsize=8,
-                color=FG,
+                color=style["color"],
+                fontweight=style["fontweight"],
+                path_effects=style["path_effects"],
                 clip_on=False,
             )
     save_dark_figure(fig, path, dpi=160, pad_inches=0.05)

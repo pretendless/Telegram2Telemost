@@ -303,7 +303,9 @@ def test_watch_time_grain_cutoffs() -> None:
 
 
 def test_count_avg_label_and_usa_english_filter() -> None:
-    assert format_count_avg_label(4.25, 3, 3) == "4.25  n=3"
+    assert format_count_avg_label(4.25, 3, 3) == "4.25"
+    assert "n=" not in format_count_avg_label(4.25, 17, 3)
+    assert format_count_avg_label(1.94, 17, 3) == "1.94"
     assert format_count_avg_label(4.25, 2, 3) == "—"
     assert format_count_avg_label(None, 5, 3) == "—"
     assert is_usa_country("U.S.A.")
