@@ -55,6 +55,7 @@ from letterboxd_top_charts import (  # noqa: E402
     chart_release_years_by_count,
     chart_release_years_by_rating,
     color_bars_by_rating,
+    count_avg_text_style,
 )
 from letterboxd_ratings import (  # noqa: E402
     MIN_RATED_FOR_TOP,
@@ -439,6 +440,15 @@ def _watch_count_series(dates: pd.Series, grain: str, start, end) -> pd.Series:
     return years.value_counts().sort_index()
 
 
+def _dense_label_layout(n: int) -> tuple[float, int]:
+    """Font size and rotation so every bar/point keeps its value label."""
+    if n <= 24:
+        return 8, 0
+    if n <= 32:
+        return 7, 0
+    return 6.5, 90
+
+
 def chart_views_by_year(
     df: pd.DataFrame,
     path: Path,
@@ -486,18 +496,19 @@ def chart_views_by_year(
     ax.set_axisbelow(True)
     style_axes(ax)
     ymax = max(values) if len(values) else 1
-    ax.set_ylim(0, ymax * 1.12)
-    if n <= 18:
-        for bar, value in zip(bars, values):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + ymax * 0.015,
-                str(int(value)),
-                ha="center",
-                va="bottom",
-                fontsize=8,
-                color=FG,
-            )
+    fontsize, rotation = _dense_label_layout(n)
+    ax.set_ylim(0, ymax * (1.12 if rotation == 0 else 1.2))
+    for bar, value in zip(bars, values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + ymax * 0.015,
+            str(int(value)),
+            ha="center",
+            va="bottom",
+            fontsize=fontsize,
+            rotation=rotation,
+            color=FG,
+        )
     fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
@@ -637,17 +648,24 @@ def _chart_average_rating_line(
     ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
-    if len(labels) <= 18:
-        for xi, value, count in zip(x, values, counts):
-            ax.text(
-                xi,
-                value + 0.12,
-                f"{value:.2f}\n(n={count})",
-                ha="center",
-                va="bottom",
-                fontsize=7,
-                color=FG,
-            )
+    fontsize, rotation = _dense_label_layout(len(labels))
+    if rotation:
+        ax.set_ylim(0, 5.6)
+    for xi, value in zip(x, values):
+        text = f"{value:.2f}"
+        style = count_avg_text_style(text)
+        ax.text(
+            xi,
+            value + 0.12,
+            text,
+            ha="center",
+            va="bottom",
+            fontsize=fontsize,
+            rotation=rotation,
+            color=style["color"],
+            fontweight=style["fontweight"],
+            path_effects=style["path_effects"],
+        )
     add_rating_colorbar(fig, ax)
     fig.tight_layout()
     save_dark_figure(fig, path, dpi=160)

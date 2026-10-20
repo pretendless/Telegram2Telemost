@@ -395,6 +395,62 @@ def test_release_year_count_label_omits_n(tmp_path: Path | None = None):
     assert "—" in captured["texts"]
 
 
+def _texts_on_save(fn):
+    import letterboxd_calendar_charts as cal
+
+    captured: dict = {}
+    real_save = cal.save_dark_figure
+
+    def grab(fig, dest, **kwargs):
+        captured["texts"] = [t for ax in fig.axes for t in ax.texts]
+        real_save(fig, dest, **kwargs)
+
+    cal.save_dark_figure = grab
+    try:
+        fn(cal)
+    finally:
+        cal.save_dark_figure = real_save
+    return captured.get("texts") or []
+
+
+def test_watch_time_charts_label_every_position(tmp_path: Path | None = None):
+    """22 watch years: every bar has its count, every point its bold colored mean."""
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-watch-time-labels")
+    out.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for i, year in enumerate(range(2005, 2027)):
+        for k in range(i + 1):
+            rows.append(
+                {
+                    "Name": f"F{year}-{k}",
+                    "Year": 2000,
+                    "Rating": 0.5 + ((i + k) % 10) * 0.5,
+                    "Watched Date": f"{year}-03-{(k % 27) + 1:02d}",
+                }
+            )
+    diary = pd.DataFrame(rows)
+    diary["Watched Date"] = pd.to_datetime(diary["Watched Date"])
+
+    counts = _texts_on_save(
+        lambda cal: cal.chart_views_by_year(diary, out / "views_by_year.png")
+    )
+    assert [t.get_text() for t in counts] == [str(i + 1) for i in range(22)]
+    for text in counts:
+        assert _rgba(text.get_color()) == _rgba(FG)
+        assert text.get_fontweight() == "normal"
+
+    means = _texts_on_save(
+        lambda cal: cal.chart_average_rating_by_year(diary, out / "average_rating_by_year.png")
+    )
+    assert len(means) == 22
+    for text in means:
+        value = float(text.get_text())
+        assert "n=" not in text.get_text()
+        assert text.get_fontweight() == "bold"
+        assert _rgba(text.get_color()) == _rgba(rating_color(value))
+        assert text.get_path_effects()
+
+
 def test_stacked_count_hbar_long_names(tmp_path: Path | None = None):
     """Count tops: long y-labels still render on a roomier canvas."""
     out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-top-charts-test")
@@ -472,5 +528,6 @@ if __name__ == "__main__":
     test_count_avg_text_style_colors_mean_only()
     test_count_bars_drop_n_and_style_mean()
     test_release_year_count_label_omits_n()
+    test_watch_time_charts_label_every_position()
     test_stacked_count_hbar_long_names()
     print("ok")
