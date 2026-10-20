@@ -12,6 +12,8 @@ from letterboxd_palette import (
     FG,
     RATING_VMAX,
     RATING_VMIN,
+    categorical_colors,
+    categorical_positions,
     rating_color,
     rating_colormap,
     watch_year_palette,
@@ -73,6 +75,29 @@ def test_ranked_hbar_grows_taller_with_n(tmp_path: Path | None = None) -> None:
     rated(20, r20)
     rated(100, r100)
     assert Image.open(r100).height > Image.open(r20).height * 3.5
+
+
+def test_categorical_palette_samples_bin_midpoints():
+    """Discrete years use bin centers, not the turbo endpoints."""
+    import matplotlib.pyplot as plt
+
+    assert categorical_positions(1) == [0.5]
+    assert categorical_positions(2) == [0.25, 0.75]
+    assert np.allclose(categorical_positions(3), [(i + 0.5) / 3 for i in range(3)])
+    cmap = plt.cm.turbo
+    cases = {1: [2024], 2: [2023, 2024], 3: [2022, 2023, 2024]}
+    for n, years in cases.items():
+        palette = watch_year_palette(years)
+        colors = categorical_colors(n)
+        for i, year in enumerate(years):
+            assert np.allclose(palette[year], cmap((i + 0.5) / n))
+            assert np.allclose(colors[i], palette[year])
+    two = watch_year_palette([2023, 2024])
+    assert not np.allclose(two[2023], cmap(0.0))
+    assert not np.allclose(two[2024], cmap(1.0))
+    # Rating colors stay a continuous map of the numeric value.
+    assert np.allclose(rating_color(RATING_VMIN), rating_colormap()(0.0))
+    assert np.allclose(rating_color(RATING_VMAX), rating_colormap()(1.0))
 
 
 def test_rating_colormap_is_blue_green_red():
@@ -431,13 +456,22 @@ def test_watch_time_charts_label_every_position(tmp_path: Path | None = None):
     diary = pd.DataFrame(rows)
     diary["Watched Date"] = pd.to_datetime(diary["Watched Date"])
 
-    counts = _texts_on_save(
+    labels = _texts_on_save(
         lambda cal: cal.chart_views_by_year(diary, out / "views_by_year.png")
     )
+    counts = [t for t in labels if t.get_text().isdigit()]
+    avgs = [t for t in labels if not t.get_text().isdigit()]
     assert [t.get_text() for t in counts] == [str(i + 1) for i in range(22)]
     for text in counts:
         assert _rgba(text.get_color()) == _rgba(FG)
         assert text.get_fontweight() == "normal"
+    assert len(avgs) == 22
+    for text in avgs:
+        assert "n=" not in text.get_text()
+        value = float(text.get_text())
+        assert text.get_fontweight() == "bold"
+        assert _rgba(text.get_color()) == _rgba(rating_color(value))
+        assert text.get_path_effects()
 
     means = _texts_on_save(
         lambda cal: cal.chart_average_rating_by_year(diary, out / "average_rating_by_year.png")
@@ -449,6 +483,46 @@ def test_watch_time_charts_label_every_position(tmp_path: Path | None = None):
         assert text.get_fontweight() == "bold"
         assert _rgba(text.get_color()) == _rgba(rating_color(value))
         assert text.get_path_effects()
+
+
+def test_views_count_bars_show_avg_or_dash(tmp_path: Path | None = None):
+    """Year and day count bars: white count, bold colored mean, dash if unrated."""
+    out = Path(tmp_path) if tmp_path is not None else Path("/tmp/lb-views-avg")
+    out.mkdir(parents=True, exist_ok=True)
+    diary = pd.DataFrame(
+        [
+            {"Name": "A", "Year": 2000, "Rating": 4.0, "Watched Date": "2020-01-02"},
+            {"Name": "B", "Year": 2001, "Rating": 2.0, "Watched Date": "2020-06-01"},
+            {"Name": "C", "Year": 2002, "Rating": None, "Watched Date": "2021-03-01"},
+            {"Name": "D", "Year": 2003, "Rating": None, "Watched Date": "2021-03-02"},
+            {"Name": "E", "Year": 2004, "Rating": 5.0, "Watched Date": "2021-04-01"},
+            {"Name": "F", "Year": 2005, "Rating": None, "Watched Date": "2022-01-01"},
+        ]
+    )
+    diary["Watched Date"] = pd.to_datetime(diary["Watched Date"])
+    texts = _texts_on_save(lambda cal: cal.chart_views_by_year(diary, out / "years.png"))
+    by_text = {t.get_text(): t for t in texts}
+    assert set(by_text) >= {"1", "2", "3", "3.00", "5.00", "—"}
+    assert "n=" not in "".join(by_text)
+    assert by_text["2"].get_fontweight() == "normal"
+    assert _rgba(by_text["3.00"].get_color()) == _rgba(rating_color(3.0))
+    assert by_text["3.00"].get_fontweight() == "bold"
+    assert by_text["—"].get_fontweight() == "normal"
+    assert _rgba(by_text["—"].get_color()) == _rgba(FG)
+
+    day = _texts_on_save(
+        lambda cal: cal.chart_views_by_year(
+            diary,
+            out / "days.png",
+            grain="day",
+            span_start="2021-03-01",
+            span_end="2021-04-01",
+        )
+    )
+    day_text = {t.get_text() for t in day}
+    assert "5.00" in day_text
+    assert "—" in day_text
+    assert all("n=" not in t for t in day_text)
 
 
 def test_stacked_count_hbar_long_names(tmp_path: Path | None = None):
@@ -516,6 +590,7 @@ if __name__ == "__main__":
     test_display_lang()
     test_top_n_default_about_20()
     test_ranked_hbar_grows_taller_with_n()
+    test_categorical_palette_samples_bin_midpoints()
     test_rating_colormap_is_blue_green_red()
     test_rating_color_fixed_scale_separates_high_band()
     test_release_year_charts()
@@ -529,5 +604,6 @@ if __name__ == "__main__":
     test_count_bars_drop_n_and_style_mean()
     test_release_year_count_label_omits_n()
     test_watch_time_charts_label_every_position()
+    test_views_count_bars_show_avg_or_dash()
     test_stacked_count_hbar_long_names()
     print("ok")

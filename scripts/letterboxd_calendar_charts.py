@@ -449,6 +449,83 @@ def _dense_label_layout(n: int) -> tuple[float, int]:
     return 6.5, 90
 
 
+def _watch_bucket_key(value, grain: str):
+    if grain == "year":
+        return int(value)
+    if grain == "month":
+        return value if isinstance(value, pd.Period) else pd.Period(value, freq="M")
+    return pd.Timestamp(value).normalize()
+
+
+def _avg_labels_for_watch_counts(df: pd.DataFrame, index, grain: str) -> list[str]:
+    """Mean beside each watch-count bar. «—» when the bucket has no rating.
+
+    Same diary-row mean as the paired average chart (not unique-film, no n=).
+    """
+    means = diary_rating_means_by_watch_year(df, grain=grain)
+    lookup: dict = {}
+    if not means.empty:
+        for key, row in means.iterrows():
+            lookup[_watch_bucket_key(key, grain)] = float(row["mean"])
+    labels = []
+    for key in index:
+        avg = lookup.get(_watch_bucket_key(key, grain))
+        labels.append("—" if avg is None else f"{avg:.2f}")
+    return labels
+
+
+def _place_count_avg_above_bars(fig, ax, bars, values, avg_labels, *, y_pad, fontsize, rotation) -> None:
+    """Count in regular white, mean beside it, pair centered on the bar."""
+    specs = []
+    for bar, value, label in zip(bars, values, avg_labels):
+        y = float(bar.get_height()) + y_pad
+        x = float(bar.get_x() + bar.get_width() / 2)
+        count = ax.text(
+            x,
+            y,
+            str(int(value)),
+            ha="left",
+            va="bottom",
+            fontsize=fontsize,
+            rotation=rotation,
+            color=FG,
+            fontweight="normal",
+            clip_on=False,
+        )
+        style = count_avg_text_style(label)
+        avg = ax.text(
+            x,
+            y,
+            label,
+            ha="left",
+            va="bottom",
+            fontsize=fontsize,
+            rotation=rotation,
+            color=style["color"],
+            fontweight=style["fontweight"],
+            path_effects=style["path_effects"],
+            clip_on=False,
+        )
+        specs.append((count, avg, y))
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    gap = 4.0
+    for count, avg, y in specs:
+        cb = count.get_window_extent(renderer=renderer)
+        ab = avg.get_window_extent(renderer=renderer)
+        total = cb.width + gap + ab.width
+        anchor = ax.transData.transform(count.get_position())
+        start = anchor[0] - total / 2
+
+        def shift(artist, bbox, target_x0, y_data=y):
+            origin = ax.transData.transform(artist.get_position())
+            moved = ax.transData.inverted().transform((origin[0] + (target_x0 - bbox.x0), origin[1]))
+            artist.set_position((moved[0], y_data))
+
+        shift(count, cb, start)
+        shift(avg, ab, start + cb.width + gap)
+
+
 def chart_views_by_year(
     df: pd.DataFrame,
     path: Path,
@@ -479,7 +556,8 @@ def chart_views_by_year(
     phrase = GRAIN_PHRASE.get(grain, "по годам")
 
     n = len(labels)
-    fig_w = 12 if grain == "year" else max(10.0, min(16.0, n * 0.28))
+    # Wider than the count-only chart: each bar carries a count and a mean.
+    fig_w = max(12.0, min(18.0, n * 0.72)) if grain == "year" else max(10.0, min(18.0, n * 0.42))
     fig, ax = plt.subplots(figsize=(fig_w, 6))
     x = np.arange(n)
     bars = ax.bar(x, values, color=bar_colors, width=0.8)
@@ -495,21 +573,23 @@ def chart_views_by_year(
     ax.yaxis.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     style_axes(ax)
-    ymax = max(values) if len(values) else 1
+    ymax = max(int(v) for v in values) if len(values) else 1
     fontsize, rotation = _dense_label_layout(n)
-    ax.set_ylim(0, ymax * (1.12 if rotation == 0 else 1.2))
-    for bar, value in zip(bars, values):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + ymax * 0.015,
-            str(int(value)),
-            ha="center",
-            va="bottom",
-            fontsize=fontsize,
-            rotation=rotation,
-            color=FG,
-        )
+    # The mean sits beside the count, so the pair needs a smaller face than a lone number.
+    if rotation == 0 and n > 12:
+        fontsize = min(fontsize, 7)
+    ax.set_ylim(0, ymax * (1.18 if rotation == 0 else 1.28))
     fig.tight_layout()
+    _place_count_avg_above_bars(
+        fig,
+        ax,
+        bars,
+        values,
+        _avg_labels_for_watch_counts(df, counts.index, grain),
+        y_pad=ymax * 0.015,
+        fontsize=fontsize,
+        rotation=rotation,
+    )
     save_dark_figure(fig, path, dpi=160)
     plt.close(fig)
 
