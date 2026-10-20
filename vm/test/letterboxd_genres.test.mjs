@@ -163,6 +163,12 @@ test("wizard prompts are html, with a default line and examples", () => {
   assert.equal(top.state.topN, 20);
   assert.equal(top.state.step, "min_rated");
   assert.equal(top.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "✅ По умолчанию (3)");
+  const minText = top.messages[0].text;
+  assert.match(minText, /<b>Минимум оценённых фильмов<\/b>/);
+  assert.match(minText, /При 3 режиссёр с двумя оценёнными фильмами в топ не попадёт/);
+  assert.match(minText, /Графики по числу просмотров этот порог не используют/);
+  assert.match(minText, /Например: 3, 5, 10/);
+  assert.match(minText, /По умолчанию: 3/);
   const year = advanceLetterboxdWizard(
     range.state,
     { kind: "callback", step: "range_start", year: 2024 },
