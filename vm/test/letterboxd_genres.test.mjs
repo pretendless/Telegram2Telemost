@@ -26,9 +26,12 @@ import {
   calendarCaptions,
   calendarReadyText,
   escapeHtml,
+  batchSendNotice,
   formatTelegramError,
   mapScriptError,
+  sendFailureSummary,
   telegramFetch,
+  telegramStepLabel,
   unmatchedFromWorkdir,
 } from "../../scripts/letterboxd_genres_run.mjs";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -303,6 +306,42 @@ test("formatTelegramError expands cause chain", () => {
   assert.match(text, /fetch failed/);
   assert.match(text, /ECONNRESET/);
   assert.match(text, /cause:/);
+});
+
+test("sendFailureSummary names the failed step once", () => {
+  const wrapped = new Error(
+    "genre HTML part 1/1 (HTML): fetch failed name=TypeError | cause: write ECONNRESET code=ECONNRESET errno=-104 syscall=write",
+  );
+  const line = sendFailureSummary("genre HTML part 1/1", wrapped);
+  assert.equal(line, wrapped.message);
+  assert.equal(line.split("genre HTML part").length - 1, 1);
+  assert.doesNotMatch(line, /part 1\/1\/HTML/);
+
+  const photo = new Error(
+    "sendPhoto watches_by_genre.png: fetch failed name=TypeError | cause: write ECONNRESET code=ECONNRESET",
+  );
+  assert.equal(sendFailureSummary("watches_by_genre.png", photo), photo.message);
+
+  assert.equal(
+    sendFailureSummary("genre HTML part 1/1", new Error("socket hang up")),
+    "genre HTML part 1/1: socket hang up",
+  );
+});
+
+test("batchSendNotice says the rest of the batch went out", () => {
+  const failures = [
+    "genre HTML part 1/1 (HTML): fetch failed name=TypeError | cause: write ECONNRESET code=ECONNRESET errno=-104 syscall=write",
+  ];
+  const notice = batchSendNotice(failures, 18);
+  assert.match(notice, /genre HTML part 1\/1 \(HTML\)/);
+  assert.match(notice, /Остальные сообщения этой партии отправлены/);
+  assert.equal(notice.split("genre HTML part").length - 1, 1);
+  assert.equal(batchSendNotice(failures, 0), failures[0]);
+});
+
+test("telegramStepLabel keeps parse mode out of the path", () => {
+  assert.equal(telegramStepLabel("genre HTML part 1/1", "HTML"), "genre HTML part 1/1 (HTML)");
+  assert.equal(telegramStepLabel("sendMessage", ""), "sendMessage");
 });
 
 test("telegramFetch is one-shot and labels failures", async () => {

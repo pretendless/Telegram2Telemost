@@ -129,6 +129,37 @@ export function formatTelegramError(err) {
   return parts.join(" | cause: ");
 }
 
+/**
+ * One line for a failed send. telegramFetch already puts its step in Error.message;
+ * do not prefix that step again (run 39382092894 doubled "genre HTML part 1/1").
+ */
+export function sendFailureSummary(label, err) {
+  const message = err && err.message ? String(err.message).trim() : String(err ?? "unknown error");
+  if (!label) return message;
+  const named =
+    message === label ||
+    message.startsWith(`${label}:`) ||
+    message.startsWith(`${label}/`) ||
+    message.startsWith(`${label} `) ||
+    message.startsWith(`sendPhoto ${label}:`) ||
+    message.startsWith(`sendDocument ${label}:`);
+  return named ? message : `${label}: ${message}`;
+}
+
+/** Chat text for the post-TMDB batch: each failed step once, plus whether the rest went out. */
+export function batchSendNotice(failures, sentCount) {
+  const summary = (failures || []).filter(Boolean).join(" | ");
+  if (Number(sentCount) > 0) {
+    return `${summary}. Остальные сообщения этой партии отправлены.`;
+  }
+  return summary;
+}
+
+/** Step label for Actions logs. Parse mode stays in parentheses, not a fake path segment. */
+export function telegramStepLabel(label, parseMode = "") {
+  return parseMode ? `${label} (${parseMode})` : label;
+}
+
 /** One-shot Bot API fetch; wraps failures with step label (no retries). */
 export async function telegramFetch(url, options, meta = {}) {
   const label = meta.label || "telegram";
@@ -357,7 +388,7 @@ async function sendTelegramText(token, chatId, text, parseMode = "", label = "se
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     },
-    { label: `${label}${parseMode ? `/${parseMode}` : ""}` },
+    { label: telegramStepLabel(label, parseMode) },
   );
   if (!res.ok) {
     console.error(`[letterboxd] ${label} HTTP ${res.status}${parseMode ? ` (${parseMode})` : ""}`);
@@ -410,8 +441,9 @@ async function sendTelegramDocument(token, chatId, filePath, filename, caption =
 }
 
 /**
- * Send charts one-by-one. On failure: log + notify that file, then continue
- * the rest of the batch (no retries — one ECONNRESET must not drop everything after).
+ * Send charts one-by-one. On failure: log that file and continue the rest
+ * (no retries — one ECONNRESET must not drop everything after).
+ * One chat notice is sent by the caller after the batch, not per file.
  */
 async function sendCaptionedPhotos(token, chatId, workdir, names, captions) {
   let sent = 0;
@@ -423,35 +455,13 @@ async function sendCaptionedPhotos(token, chatId, workdir, names, captions) {
       if (!ok) {
         failed.push(`${name} (HTTP reject)`);
         console.error(`[letterboxd] sendCaptionedPhotos CONTINUE after fail: ${name} HTTP reject`);
-        try {
-          await sendTelegramText(
-            token,
-            chatId,
-            `Не удалось отправить ${name}.`,
-            "",
-            `notify fail ${name}`,
-          );
-        } catch (_) {
-          /* ignore secondary notify failure */
-        }
       } else {
         sent += 1;
       }
     } catch (err) {
-      const detail = err && err.message ? err.message : String(err);
-      failed.push(`${name}: ${detail}`);
-      console.error(`[letterboxd] sendCaptionedPhotos CONTINUE after fail: ${name}: ${detail}`);
-      try {
-        await sendTelegramText(
-          token,
-          chatId,
-          `Не удалось отправить ${name}: ${detail}`,
-          "",
-          `notify fail ${name}`,
-        );
-      } catch (_) {
-        /* ignore secondary notify failure */
-      }
+      const line = sendFailureSummary(name, err);
+      failed.push(line);
+      console.error(`[letterboxd] sendCaptionedPhotos CONTINUE after fail: ${line}`);
     }
   }
   return { sent, failed, total: names.length };
@@ -593,6 +603,7 @@ export async function main() {
 
   // TMDB work is done — send once each; mid-batch failures continue (no retries).
   const batchFailures = [];
+  let htmlSent = 0;
   for (let i = 0; i < tmdbMessages.length; i++) {
     const label = `genre HTML part ${i + 1}/${tmdbMessages.length}`;
     try {
@@ -600,11 +611,13 @@ export async function main() {
       if (!ok) {
         batchFailures.push(`${label} rejected by Telegram`);
         console.error(`[letterboxd] CONTINUE after fail: ${label} HTTP reject`);
+      } else {
+        htmlSent += 1;
       }
     } catch (err) {
-      const detail = err && err.message ? err.message : String(err);
-      batchFailures.push(`${label}: ${detail}`);
-      console.error(`[letterboxd] CONTINUE after fail: ${label}: ${detail}`);
+      const line = sendFailureSummary(label, err);
+      batchFailures.push(line);
+      console.error(`[letterboxd] CONTINUE after fail: ${line}`);
     }
   }
   const photoResult = await sendCaptionedPhotos(
@@ -622,7 +635,8 @@ export async function main() {
   }
   if (batchFailures.length) {
     const summary = batchFailures.join(" | ");
-    await notifySendFailure(token, chatId, "TMDB HTML/PNG", new Error(summary));
+    const notice = batchSendNotice(batchFailures, htmlSent + photoResult.sent);
+    await notifySendFailure(token, chatId, "TMDB HTML/PNG", new Error(notice));
     throw new Error(`TMDB send incomplete: ${summary}`);
   }
 
