@@ -290,7 +290,7 @@ function yearOk(year) {
 }
 
 export const LETTERBOXD_DATE_RETRY =
-  "Дата не разобрана. Год: 2012. Месяц: 06-2012. День: 15-06-2012 или 15.06.2012. Два края через пробел: 2018 2020. Запуск не начат.";
+  "Дата не разобрана. Год: 2012. Месяц: 06-2012. День: 15-06-2012 или 15.06.2012. Два края: 2018 2020 или 2021-06.2022. Запуск не начат.";
 
 /**
  * One typed bound → inclusive YYYY-MM-DD edge.
@@ -327,26 +327,34 @@ export function parseWatchBound(text, edge = "start") {
   return "";
 }
 
-/** One value is the whole interval. Two bounds are an explicit start–end. */
+function pairWatchBounds(left, right) {
+  const dateFrom = parseWatchBound(left, "start");
+  const dateTo = parseWatchBound(right, "end");
+  if (!dateFrom || !dateTo) return null;
+  return { dateFrom, dateTo };
+}
+
+/**
+ * One value is the whole interval. Two bounds are an explicit start–end.
+ * A hyphen, dash, or space splits the bounds. A dot or hyphen inside one
+ * bound stays part of that date (06.2022, 15-06-2022). The first split
+ * where both sides are valid month-before-year bounds wins.
+ * Year-before-month (2021-06, 2021.06) is not a bound.
+ */
 export function parseWatchInterval(text) {
   const raw = String(text || "").trim().replace(/\s+/g, " ");
   if (!raw) return null;
-  const single = parseWatchBound(raw, "start");
-  if (single) {
-    return { dateFrom: single, dateTo: parseWatchBound(raw, "end") };
+  if (parseWatchBound(raw, "start")) {
+    return { dateFrom: parseWatchBound(raw, "start"), dateTo: parseWatchBound(raw, "end") };
   }
-  const pair = (left, right) => {
-    const dateFrom = parseWatchBound(left, "start");
-    const dateTo = parseWatchBound(right, "end");
-    if (!dateFrom || !dateTo) return null;
-    return { dateFrom, dateTo };
-  };
-  let match = raw.match(/^(\d{2}[-.]\d{2}[-.]\d{4})\s*[-–—]\s*(\d{2}[-.]\d{2}[-.]\d{4})$/);
-  if (match) return pair(match[1], match[2]);
-  match = raw.match(/^(\d{4})\s*[-–—]\s*(\d{4})$/);
-  if (match) return pair(match[1], match[2]);
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (ch !== "-" && ch !== "–" && ch !== "—") continue;
+    const found = pairWatchBounds(raw.slice(0, i), raw.slice(i + 1));
+    if (found) return found;
+  }
   const bits = raw.split(" ");
-  if (bits.length === 2) return pair(bits[0], bits[1]);
+  if (bits.length === 2) return pairWatchBounds(bits[0], bits[1]);
   return null;
 }
 
@@ -462,14 +470,19 @@ function wizardPrompt(heading, body, example, fallback) {
   return [`<b>${heading}</b>`, "", body, "", `Например: ${example}`, "", `По умолчанию: ${fallback}`].join("\n");
 }
 
+function choicePrompt(heading, body) {
+  return [`<b>${heading}</b>`, "", body].join("\n");
+}
+
 export function letterboxdModePrompt() {
   return {
-    text: wizardPrompt(
-      "Настроить вывод или по умолчанию?",
-      "ZIP принят. «По умолчанию» сразу строит обычные графики. «Настроить» — размер топа, страны, язык и даты. Кнопки ниже или ответ текстом. Отмена — /stop.",
-      "по умолчанию, настроить",
-      "по умолчанию",
-    ),
+    text: [
+      "<b>Как строим графики?</b>",
+      "",
+      "ZIP принят. «По умолчанию» сразу собирает обычный набор. «Настроить» — размер топа, страны, язык и даты.",
+      "",
+      "Кнопки ниже или ответ текстом. Отмена — /stop.",
+    ].join("\n"),
     reply_markup: letterboxdModeKeyboard(),
   };
 }
@@ -500,33 +513,27 @@ function promptFor(step, state, now = new Date()) {
   }
   if (step === "usa") {
     return {
-      text: wizardPrompt(
+      text: choicePrompt(
         "Показывать USA в топе стран?",
         "США часто занимают первую строку. «Нет» уберёт их из топа стран.",
-        "да, нет",
-        "да",
       ),
       reply_markup: letterboxdYesNoKeyboard("lb:usa"),
     };
   }
   if (step === "english") {
     return {
-      text: wizardPrompt(
+      text: choicePrompt(
         "Показывать английский в топе языков?",
         "Английский часто на первом месте. «Нет» уберёт его из топа языков.",
-        "да, нет",
-        "да",
       ),
       reply_markup: letterboxdYesNoKeyboard("lb:en"),
     };
   }
   if (step === "period") {
     return {
-      text: wizardPrompt(
+      text: choicePrompt(
         "Весь период или свой диапазон?",
         "Весь период — от первого просмотра до последнего. Свой диапазон — только выбранные даты, включительно.",
-        "весь период, свой диапазон",
-        "весь период",
       ),
       reply_markup: letterboxdPeriodKeyboard(),
     };
@@ -536,7 +543,7 @@ function promptFor(step, state, now = new Date()) {
       text: wizardPrompt(
         "Какой период взять?",
         "Одна строка, даты включительно. Одно значение — весь этот кусок. Два края — начало и конец. Месяц пишется перед годом. Кнопки ниже — готовые отрезки.",
-        "2012, 06-2012, 15-06-2012, 15.06.2012 - 20.08.2013",
+        "2012, 06-2012, 15-06-2012, 2021-06.2022, 15.06.2021 - 20.08.2022",
         "весь период",
       ),
       reply_markup: letterboxdRangeKeyboard(now),
@@ -557,11 +564,9 @@ function promptFor(step, state, now = new Date()) {
   }
   if (step === "undated") {
     return {
-      text: wizardPrompt(
+      text: choicePrompt(
         "Добавить фильмы без даты в дневнике?",
         "Нет — только записи с датой внутри периода. Да — ещё фильмы из watched и ratings, у которых в дневнике даты нет. В календарные графики они не попадут.",
-        "нет, да",
-        "нет",
       ),
       reply_markup: letterboxdUndatedKeyboard(),
     };

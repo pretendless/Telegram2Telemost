@@ -2924,7 +2924,7 @@ test("/letterboxd ZIP dispatches letterboxd.yml for any chat", async () => {
     env,
     { sendMessage, fetch },
   );
-  assert.match(sent.map((row) => row.text).join("\n"), /Настроить вывод или по умолчанию/);
+  assert.match(sent.map((row) => row.text).join("\n"), /Как строим графики/);
   assert.ok(env.BOT_KV.store.get("await:letterboxd:111"));
   assert.equal(calls.find((call) => String(call.url).includes("letterboxd.yml/dispatches")), undefined);
 

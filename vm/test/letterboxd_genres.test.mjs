@@ -81,6 +81,13 @@ test("watch bounds are month-before-year; one value is the whole interval", () =
   assert.deepEqual(parseWatchInterval("март 2012"), { dateFrom: "2012-03-01", dateTo: "2012-03-31" });
   assert.equal(parseWatchInterval("2012-06"), null);
   assert.equal(parseWatchInterval("2012-06-15"), null);
+  assert.equal(parseWatchInterval("2021.06"), null);
+  assert.deepEqual(parseWatchInterval("2021-06.2022"), { dateFrom: "2021-01-01", dateTo: "2022-06-30" });
+  assert.deepEqual(parseWatchInterval("06.2021-2022"), { dateFrom: "2021-06-01", dateTo: "2022-12-31" });
+  assert.deepEqual(parseWatchInterval("15.06.2021 - 20.08.2022"), {
+    dateFrom: "2021-06-15",
+    dateTo: "2022-08-20",
+  });
 });
 
 test("one typed period skips the second bound and asks about undated films", () => {
@@ -120,9 +127,13 @@ test("top size is any integer from 1 to 100", () => {
 
 test("wizard prompts are html, with a default line and examples", () => {
   const mode = letterboxdModePrompt();
-  assert.match(mode.text, /<b>Настроить вывод или по умолчанию\?<\/b>/);
-  assert.match(mode.text, /По умолчанию: по умолчанию/);
-  assert.match(mode.text, /Например: по умолчанию, настроить/);
+  assert.match(mode.text, /<b>Как строим графики\?<\/b>/);
+  assert.match(mode.text, /«По умолчанию» сразу собирает обычный набор/);
+  assert.match(mode.text, /Кнопки ниже или ответ текстом/);
+  assert.doesNotMatch(mode.text, /Например:/);
+  assert.doesNotMatch(mode.text, /По умолчанию: по умолчанию/);
+  assert.equal(mode.reply_markup.inline_keyboard[0][0].callback_data, "lb:def");
+  assert.equal(mode.reply_markup.inline_keyboard[0][1].callback_data, "lb:cus");
   const now = new Date("2026-10-20T00:00:00Z");
   const range = advanceLetterboxdWizard(
     { step: "period", fileId: "BQACAgIAAxkBAAI1234567890" },
@@ -130,7 +141,8 @@ test("wizard prompts are html, with a default line and examples", () => {
     now,
   );
   assert.match(range.messages[0].text, /<b>Какой период взять\?<\/b>/);
-  assert.match(range.messages[0].text, /15\.06\.2012 - 20\.08\.2013/);
+  assert.match(range.messages[0].text, /2021-06\.2022/);
+  assert.match(range.messages[0].text, /15\.06\.2021 - 20\.08\.2022/);
   assert.match(range.messages[0].text, /По умолчанию: весь период/);
   const labels = range.messages[0].reply_markup.inline_keyboard.flat().map((button) => button.text);
   assert.deepEqual(labels, [
@@ -174,6 +186,33 @@ test("wizard prompts are html, with a default line and examples", () => {
   );
   assert.equal(full.dispatch.options.dateFrom, "");
   assert.equal(full.dispatch.options.dateTo, "");
+});
+
+test("binary steps keep the default button and drop the repeated lines", () => {
+  const fileId = "BQACAgIAAxkBAAI1234567890";
+  const usa = advanceLetterboxdWizard(
+    { step: "min_rated", fileId },
+    { kind: "callback", step: "min_rated", value: 3 },
+  );
+  const english = advanceLetterboxdWizard(usa.state, { kind: "callback", step: "usa", value: true });
+  const period = advanceLetterboxdWizard(english.state, { kind: "callback", step: "english", value: true });
+  const undated = advanceLetterboxdWizard(
+    { step: "range_start", fileId, dateFrom: "2024-01-01", dateTo: "2024-12-31" },
+    { kind: "callback", step: "range_start", year: 2024 },
+  );
+  for (const message of [usa, english, period, undated]) {
+    assert.doesNotMatch(message.messages[0].text, /Например:/);
+    assert.doesNotMatch(message.messages[0].text, /По умолчанию:/);
+  }
+  assert.match(usa.messages[0].text, /<b>Показывать USA в топе стран\?<\/b>/);
+  assert.match(english.messages[0].text, /<b>Показывать английский в топе языков\?<\/b>/);
+  assert.match(period.messages[0].text, /<b>Весь период или свой диапазон\?<\/b>/);
+  assert.match(undated.messages[0].text, /<b>Добавить фильмы без даты в дневнике\?<\/b>/);
+  assert.equal(usa.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "По умолчанию: да");
+  assert.equal(english.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "По умолчанию: да");
+  assert.equal(period.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "По умолчанию: весь период");
+  assert.equal(undated.messages[0].reply_markup.inline_keyboard.at(-1)[0].text, "По умолчанию: нет");
+  assert.match(period.messages[0].text, /Весь период — от первого просмотра/);
 });
 
 test("every wizard keyboard has a one-tap default button", () => {
