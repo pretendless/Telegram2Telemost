@@ -120,9 +120,13 @@ test("top size is any integer from 1 to 100", () => {
 
 test("wizard prompts are html, with a default line and examples", () => {
   const mode = letterboxdModePrompt();
-  assert.match(mode.text, /<b>Настроить вывод или по умолчанию\?<\/b>/);
-  assert.match(mode.text, /По умолчанию: по умолчанию/);
-  assert.match(mode.text, /Например: по умолчанию, настроить/);
+  assert.match(mode.text, /<b>Как строим графики\?<\/b>/);
+  assert.match(mode.text, /«По умолчанию» сразу собирает обычный набор/);
+  assert.match(mode.text, /Кнопки ниже или ответ текстом/);
+  assert.doesNotMatch(mode.text, /Например:/);
+  assert.doesNotMatch(mode.text, /По умолчанию: по умолчанию/);
+  assert.equal(mode.reply_markup.inline_keyboard[0][0].callback_data, "lb:def");
+  assert.equal(mode.reply_markup.inline_keyboard[0][1].callback_data, "lb:cus");
   const now = new Date("2026-10-20T00:00:00Z");
   const range = advanceLetterboxdWizard(
     { step: "period", fileId: "BQACAgIAAxkBAAI1234567890" },
