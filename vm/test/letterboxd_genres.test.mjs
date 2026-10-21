@@ -44,7 +44,7 @@ test("letterboxdMovedReply is a card for @lebxdbot", () => {
   assert.equal(card.text, "Отчёты Letterboxd теперь в отдельном боте.");
   assert.equal(card.parse_mode, "HTML");
   assert.deepEqual(card.reply_markup, {
-    inline_keyboard: [[{ text: "Открыть @lebxdbot", url: "https://t.me/lebxdbot?start=letterboxd" }]],
+    inline_keyboard: [[{ text: "Открыть @lebxdbot", url: "https://t.me/lebxdbot" }]],
   });
 });
 

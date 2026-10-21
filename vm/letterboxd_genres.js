@@ -162,7 +162,7 @@ export function normalizeTelegramFileId(raw) {
 
 export const LETTERBOXD_MOVED_TEXT = "Отчёты Letterboxd теперь в отдельном боте.";
 export const LETTERBOXD_MOVED_BUTTON = "Открыть @lebxdbot";
-export const LETTERBOXD_MOVED_URL = "https://t.me/lebxdbot?start=letterboxd";
+export const LETTERBOXD_MOVED_URL = "https://t.me/lebxdbot";
 
 /** Visiting card for /letterboxd. The local wizard is no longer started from this command. */
 export function letterboxdMovedReply() {
