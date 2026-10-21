@@ -2877,7 +2877,7 @@ test("/letterboxd replies with a card for @lebxdbot and does not start the wizar
   assert.equal(sent[0].text, "Отчёты Letterboxd теперь в отдельном боте.");
   assert.equal(sent[0].extra.parse_mode, "HTML");
   assert.deepEqual(sent[0].extra.reply_markup, {
-    inline_keyboard: [[{ text: "Открыть @lebxdbot", url: "https://t.me/lebxdbot?start=letterboxd" }]],
+    inline_keyboard: [[{ text: "Открыть @lebxdbot", url: "https://t.me/lebxdbot" }]],
   });
   assert.equal(env.BOT_KV.store.get("await:letterboxd:7"), undefined);
   assert.ok(env.BOT_KV.store.get("await:7"));

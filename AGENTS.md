@@ -30,4 +30,4 @@ Workflows: Deploy worker (`.github/workflows/deploy-worker.yml`), Set webhook (`
 
 ## /letterboxd
 
-`/letterboxd` does not run the report. It sends a card to `https://t.me/lebxdbot?start=letterboxd`. Chart code stays in this repo until a later removal.
+`/letterboxd` does not run the report. It sends a card to `https://t.me/lebxdbot` (plain bot link, no `?start=`). Chart code stays in this repo until a later removal.
